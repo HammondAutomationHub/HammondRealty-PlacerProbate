@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Placer probate monitor</title>
+  <style>
+    :root {
+      --ink: #1c1915;
+      --muted: #6b645b;
+      --line: #ddd6cc;
+      --paper: #f7f3ec;
+      --card: #fffdf8;
+      --navy: #1b2a4a;
+      --gold: #b0893e;
+      --alert: #8b2e2e;
+      --ok: #2d6a4f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    header {
+      background: var(--navy);
+      color: #f7f3ec;
+      padding: 20px 24px 18px;
+    }
+    header p { margin: 4px 0 0; color: #c9c3b8; font-size: 13px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    h2 { margin: 0 0 12px; font-size: 15px; letter-spacing: .04em; text-transform: uppercase; color: var(--navy); }
+    main { padding: 20px; display: grid; gap: 16px; }
+    @media (min-width: 980px) {
+      main { grid-template-columns: 1.4fr .9fr; align-items: start; }
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+    .kpi b { display: block; font-size: 14px; }
+    .kpi span { color: var(--muted); font-size: 12px; }
+    label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      background: #fff;
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font: inherit;
+      cursor: pointer;
+      background: var(--navy);
+      color: #fff;
+    }
+    button.secondary { background: #ece7de; color: var(--ink); }
+    button.danger { background: var(--alert); }
+    .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .banner { padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; display: none; }
+    .banner.show { display: block; }
+    .banner.ok { background: #e7f4ec; color: var(--ok); }
+    .banner.err { background: #f8e8e8; color: var(--alert); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+    a { color: #1a4f8b; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ece7de; font-size: 12px; }
+    .pill.run { background: #f3e3c3; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Placer probate monitor</h1>
+    <p>Home Assistant add-on · Hammond IT Consulting</p>
+  </header>
+  <main>
+    <section class="kpis" style="grid-column: 1 / -1;">
+      <div class="kpi"><span>Status</span><b id="kpi-state">…</b></div>
+      <div class="kpi"><span>Next run</span><b id="kpi-next">…</b></div>
+      <div class="kpi"><span>Last result</span><b id="kpi-last">…</b></div>
+    </section>
+
+    <section class="card">
+      <h2>Delivery &amp; schedule</h2>
+      <div id="flash" class="banner"></div>
+      <label>Email recipients (one address per line)</label>
+      <textarea id="recipients" placeholder="you@gmail.com"></textarea>
+      <div class="row">
+        <div>
+          <label>Frequency</label>
+          <select id="frequency">
+            <option value="hourly">Hourly</option>
+            <option value="daily">Daily</option>
+            <option value="weekdays">Weekdays</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+        <div>
+          <label>Run time (HH:MM)</label>
+          <input id="run_time" placeholder="08:30" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Weekly day</label>
+          <select id="weekly_day">
+            <option>monday</option><option>tuesday</option><option>wednesday</option>
+            <option>thursday</option><option>friday</option><option>saturday</option><option>sunday</option>
+          </select>
+        </div>
+        <div>
+          <label>Monthly day (1–28)</label>
+          <input id="monthly_day" type="number" min="1" max="28" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Timezone</label>
+          <input id="timezone" />
+        </div>
+        <div>
+          <label>Send email after each run</label>
+          <select id="send_email"><option value="true">Yes</option><option value="false">No (files only)</option></select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>SMTP host</label>
+          <input id="smtp_host" />
+        </div>
+        <div>
+          <label>SMTP port</label>
+          <input id="smtp_port" type="number" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>SMTP user</label>
+          <input id="smtp_user" />
+        </div>
+        <div>
+          <label>SMTP password</label>
+          <input id="smtp_password" type="password" placeholder="unchanged if blank" />
+        </div>
+      </div>
+      <label>From address (blank = SMTP user)</label>
+      <input id="mail_from" />
+      <h2 style="margin-top:18px;">Search window</h2>
+      <div class="row">
+        <div>
+          <label>Lookback days</label>
+          <input id="lookback_days" type="number" min="1" max="120" />
+        </div>
+        <div>
+          <label>Lookahead days</label>
+          <input id="lookahead_days" type="number" min="0" max="120" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>County</label>
+          <input id="county" />
+        </div>
+        <div>
+          <label>Run when add-on starts</label>
+          <select id="run_on_start"><option value="false">No</option><option value="true">Yes</option></select>
+        </div>
+      </div>
+      <label>CNPA keywords</label>
+      <input id="keywords" />
+      <div class="row">
+        <div>
+          <label>Skip eCourt lookups</label>
+          <select id="skip_portal"><option value="false">No</option><option value="true">Yes</option></select>
+        </div>
+        <div>
+          <label>Generate PDF</label>
+          <select id="generate_pdf"><option value="true">Yes</option><option value="false">No</option></select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>eCourt pause (seconds)</label>
+          <input id="ecourt_pause_seconds" type="number" step="0.1" min="0.5" max="10" />
+        </div>
+        <div>
+          <label>Max CNPA pages</label>
+          <input id="max_search_pages" type="number" min="1" max="20" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="save">Save settings</button>
+        <button class="secondary" id="test">Send test email</button>
+        <button class="danger" id="run">Run now</button>
+      </div>
+      <p class="note">Gmail needs an App Password. Court Case Summary links still 404 unless you search first; the PDF roster opens the newspaper notice.</p>
+    </section>
+
+    <section class="card">
+      <h2>Recent files</h2>
+      <p class="note" id="err-line"></p>
+      <table>
+        <thead><tr><th>File</th><th>When</th></tr></thead>
+        <tbody id="files"></tbody>
+      </table>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fields = [
+      "frequency","run_time","weekly_day","monthly_day","timezone","send_email",
+      "smtp_host","smtp_port","smtp_user","smtp_password","mail_from",
+      "lookback_days","lookahead_days","county","keywords","run_on_start",
+      "skip_portal","generate_pdf","ecourt_pause_seconds","max_search_pages"
+    ];
+    function flash(msg, ok) {
+      const el = $("flash");
+      el.textContent = msg;
+      el.className = "banner show " + (ok ? "ok" : "err");
+    }
+    function val(id) {
+      const el = $(id);
+      if (el.tagName === "SELECT" && (el.value === "true" || el.value === "false")) return el.value === "true";
+      if (el.type === "number") return Number(el.value);
+      return el.value;
+    }
+    async function load() {
+      const cfg = await (await fetch("api/config")).json();
+      $("recipients").value = (cfg.recipients || []).join("\n");
+      fields.forEach((k) => {
+        if (k === "smtp_password") return;
+        if ($(k)) $(k).value = cfg[k] ?? "";
+      });
+      $("send_email").value = String(!!cfg.send_email);
+      $("run_on_start").value = String(!!cfg.run_on_start);
+      $("skip_portal").value = String(!!cfg.skip_portal);
+      $("generate_pdf").value = String(!!cfg.generate_pdf);
+      refreshStatus();
+      refreshFiles();
+    }
+    async function refreshStatus() {
+      const s = await (await fetch("api/status")).json();
+      $("kpi-state").textContent = s.running ? "Running" : (s.state || "idle");
+      $("kpi-next").textContent = s.next_run ? s.next_run.replace("T", " ") : "—";
+      $("kpi-last").textContent = s.last_result || "none yet";
+      $("err-line").textContent = s.last_error ? ("Last error: " + s.last_error) : "";
+    }
+    async function refreshFiles() {
+      const rows = await (await fetch("api/reports")).json();
+      $("files").innerHTML = rows.map((f) =>
+        `<tr><td><a href="api/reports/${encodeURIComponent(f.name)}">${f.name}</a></td><td>${f.mtime.replace("T"," ")}</td></tr>`
+      ).join("") || "<tr><td colspan=2>No reports yet</td></tr>";
+    }
+    function payload() {
+      const body = {};
+      fields.forEach((k) => { if (k !== "smtp_password") body[k] = val(k); });
+      const pw = $("smtp_password").value;
+      if (pw) body.smtp_password = pw;
+      body.recipients = $("recipients").value.split(/\n|,/).map((x) => x.trim()).filter(Boolean);
+      return body;
+    }
+    $("save").onclick = async () => {
+      const res = await fetch("api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) });
+      const data = await res.json();
+      flash(res.ok ? "Settings saved. Next run " + (data.next_run || "") : (data.error || "Save failed"), res.ok);
+      refreshStatus();
+    };
+    $("test").onclick = async () => {
+      await fetch("api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) });
+      const res = await fetch("api/test-email", { method: "POST" });
+      const data = await res.json();
+      flash(data.ok ? "Test email sent." : (data.error || "Test failed"), data.ok);
+    };
+    $("run").onclick = async () => {
+      flash("Run started…", true);
+      const res = await fetch("api/run", { method: "POST" });
+      const data = await res.json();
+      flash(data.ok ? "Run finished." : (data.error || data.log_tail || "Run failed"), data.ok);
+      refreshStatus();
+      refreshFiles();
+    };
+    load();
+    setInterval(refreshStatus, 8000);
+  </script>
+</body>
+</html>

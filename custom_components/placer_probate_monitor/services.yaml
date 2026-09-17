@@ -1,0 +1,6 @@
+run_now:
+  name: Run now
+  description: Scrape CNPA/eCourt and send the digest using the configured schedule settings.
+test_email:
+  name: Send test email
+  description: Send a test message with the configured SMTP settings and recipients.

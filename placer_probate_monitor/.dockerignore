@@ -1,0 +1,9 @@
+.git
+.venv
+data
+__pycache__
+*.pyc
+.env
+*.pdf
+agent-tools
+canvases

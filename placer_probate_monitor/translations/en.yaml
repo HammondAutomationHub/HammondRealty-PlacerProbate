@@ -1,0 +1,64 @@
+configuration:
+  recipients:
+    name: Email recipients
+    description: One address per line in the add-on UI. Digests are sent here when Send email is on.
+  smtp_host:
+    name: SMTP host
+    description: Mail server hostname (Gmail is smtp.gmail.com).
+  smtp_port:
+    name: SMTP port
+    description: Usually 587 with STARTTLS.
+  smtp_user:
+    name: SMTP username
+    description: Login for the mail server.
+  smtp_password:
+    name: SMTP password
+    description: App password, not your normal Gmail password.
+  mail_from:
+    name: From address
+    description: Leave blank to use the SMTP username.
+  send_email:
+    name: Send email
+    description: Attach the PDF and send after each scheduled run.
+  frequency:
+    name: Schedule
+    description: How often the monitor runs.
+  run_time:
+    name: Run time
+    description: Local clock time as HH:MM (24-hour).
+  weekly_day:
+    name: Weekly day
+    description: Used when schedule is weekly.
+  monthly_day:
+    name: Monthly day
+    description: Day of month 1–28 when schedule is monthly.
+  timezone:
+    name: Timezone
+    description: IANA zone, for example America/Los_Angeles.
+  run_on_start:
+    name: Run when add-on starts
+    description: Kick off one job as soon as the add-on comes up.
+  lookback_days:
+    name: Lookback days
+    description: How far back to search CNPA publication dates.
+  lookahead_days:
+    name: Lookahead days
+    description: How far forward to include in the CNPA window.
+  county:
+    name: County
+    description: CNPA county filter (Placer).
+  keywords:
+    name: Search keywords
+    description: CNPA keyword query, including quotes if you want an exact phrase.
+  skip_portal:
+    name: Skip eCourt
+    description: CNPA notices only; do not look up dockets.
+  generate_pdf:
+    name: Generate PDF
+    description: Write the dossier PDF on each run.
+  ecourt_pause_seconds:
+    name: eCourt pause
+    description: Seconds to wait between court lookups.
+  max_search_pages:
+    name: Max CNPA pages
+    description: Stop paginating after this many result pages.

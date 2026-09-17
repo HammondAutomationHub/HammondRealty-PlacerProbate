@@ -1,0 +1,114 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Delivery and schedule",
+        "description": "Who gets the digest and how often the monitor runs. Gmail needs an App Password.",
+        "data": {
+          "recipients": "Email recipients (one per line)",
+          "frequency": "Frequency",
+          "run_time": "Run time",
+          "weekly_day": "Weekly day",
+          "monthly_day": "Monthly day",
+          "timezone": "Timezone",
+          "send_email": "Send email after each run",
+          "smtp_host": "SMTP host",
+          "smtp_port": "SMTP port",
+          "smtp_user": "SMTP username",
+          "smtp_password": "SMTP password",
+          "mail_from": "From address",
+          "run_on_start": "Run when Home Assistant starts"
+        }
+      },
+      "search": {
+        "title": "Search window",
+        "description": "CNPA and eCourt lookup options.",
+        "data": {
+          "lookback_days": "Lookback days",
+          "lookahead_days": "Lookahead days",
+          "county": "County",
+          "keywords": "CNPA keywords",
+          "skip_portal": "Skip eCourt lookups",
+          "generate_pdf": "Generate PDF",
+          "ecourt_pause_seconds": "eCourt pause (seconds)",
+          "max_search_pages": "Max CNPA pages"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Placer Probate Monitor is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Delivery and schedule",
+        "data": {
+          "recipients": "Email recipients (one per line)",
+          "frequency": "Frequency",
+          "run_time": "Run time",
+          "weekly_day": "Weekly day",
+          "monthly_day": "Monthly day",
+          "timezone": "Timezone",
+          "send_email": "Send email after each run",
+          "smtp_host": "SMTP host",
+          "smtp_port": "SMTP port",
+          "smtp_user": "SMTP username",
+          "smtp_password": "SMTP password",
+          "mail_from": "From address",
+          "run_on_start": "Run when Home Assistant starts"
+        }
+      },
+      "search": {
+        "title": "Search window",
+        "data": {
+          "lookback_days": "Lookback days",
+          "lookahead_days": "Lookahead days",
+          "county": "County",
+          "keywords": "CNPA keywords",
+          "skip_portal": "Skip eCourt lookups",
+          "generate_pdf": "Generate PDF",
+          "ecourt_pause_seconds": "eCourt pause (seconds)",
+          "max_search_pages": "Max CNPA pages"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "Status"
+      },
+      "last_run": {
+        "name": "Last run"
+      },
+      "new_cases": {
+        "name": "New cases"
+      },
+      "last_pdf": {
+        "name": "Last PDF"
+      }
+    }
+  },
+  "selector": {
+    "frequency": {
+      "options": {
+        "hourly": "Hourly",
+        "daily": "Daily",
+        "weekdays": "Weekdays",
+        "weekly": "Weekly",
+        "monthly": "Monthly"
+      }
+    }
+  },
+  "services": {
+    "run_now": {
+      "name": "Run now",
+      "description": "Scrape notices and send the digest."
+    },
+    "test_email": {
+      "name": "Send test email",
+      "description": "Send a test message using the configured SMTP settings."
+    }
+  }
+}

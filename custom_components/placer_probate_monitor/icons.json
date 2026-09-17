@@ -1,0 +1,22 @@
+{
+  "entity": {
+    "sensor": {
+      "status": {
+        "default": "mdi:gavel"
+      },
+      "last_run": {
+        "default": "mdi:clock-outline"
+      },
+      "new_cases": {
+        "default": "mdi:file-document-plus-outline"
+      },
+      "last_pdf": {
+        "default": "mdi:file-pdf-box"
+      }
+    }
+  },
+  "services": {
+    "run_now": "mdi:play",
+    "test_email": "mdi:email-fast-outline"
+  }
+}

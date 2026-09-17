@@ -1,0 +1,69 @@
+name: Placer Probate Monitor
+version: "1.0.1"
+slug: placer_probate_monitor
+description: >
+  Pulls Placer County NOTICE OF PETITION TO ADMINISTER ESTATE listings,
+  merges eCourt public dockets, and emails a dossier PDF on a schedule.
+url: https://github.com/HammondAutomationHub/HammondRealty-PlacerProbate
+arch:
+  - amd64
+  - aarch64
+  - armv7
+init: false
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8099
+ingress_entry: /
+panel_icon: mdi:gavel
+panel_title: Probate Monitor
+hassio_api: true
+ports:
+  8099/tcp: null
+ports_description:
+  8099/tcp: Web UI used by ingress
+options:
+  recipients: []
+  smtp_host: smtp.gmail.com
+  smtp_port: 587
+  smtp_user: ""
+  smtp_password: ""
+  mail_from: ""
+  send_email: true
+  frequency: daily
+  run_time: "08:30"
+  weekly_day: monday
+  monthly_day: 1
+  timezone: America/Los_Angeles
+  run_on_start: false
+  lookback_days: 21
+  lookahead_days: 21
+  county: Placer
+  keywords: '"NOTICE OF PETITION TO ADMINISTER ESTATE"'
+  skip_portal: false
+  generate_pdf: true
+  ecourt_pause_seconds: 1.2
+  max_search_pages: 10
+schema:
+  recipients:
+    - email
+  smtp_host: str
+  smtp_port: int
+  smtp_user: str
+  smtp_password: password
+  mail_from: str
+  send_email: bool
+  frequency: list(hourly|daily|weekdays|weekly|monthly)
+  run_time: str
+  weekly_day: list(monday|tuesday|wednesday|thursday|friday|saturday|sunday)
+  monthly_day: int(1,28)
+  timezone: str
+  run_on_start: bool
+  lookback_days: int(1,120)
+  lookahead_days: int(0,120)
+  county: str
+  keywords: str
+  skip_portal: bool
+  generate_pdf: bool
+  ecourt_pause_seconds: float(0.5,10)
+  max_search_pages: int(1,20)
