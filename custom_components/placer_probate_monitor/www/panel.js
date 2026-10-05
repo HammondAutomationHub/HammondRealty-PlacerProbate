@@ -107,16 +107,24 @@ function ppmFubFieldSelect(key, selected, fubFields, builtins) {
 }
 
 function ppmMappingRows(fields, custom, fubFields, person, builtins, defaults) {
+  const titles = { petitioner: "Petitioner", decedent: "Decedent", other: "Case and other fields" };
+  let lastGroup = "";
   return (fields || []).map((field) => {
-    if (!field.custom && field.unavailable) {
-      return `<tr><td><b>${ppmEsc(field.label)}</b></td><td>${ppmEsc(field.source)}</td><td colspan="2"><span class="ppm-pill off">Not extracted</span></td></tr>`;
+    let header = "";
+    const group = field.group || "";
+    if (group && group !== lastGroup) {
+      lastGroup = group;
+      header = `<tr><td colspan="4"><b>${ppmEsc(titles[group] || group)}</b></td></tr>`;
     }
-    if (!field.custom) return "";
+    if (!field.custom && field.unavailable) {
+      return `${header}<tr><td><b>${ppmEsc(field.label)}</b></td><td>${ppmEsc(field.source)}</td><td colspan="2"><span class="ppm-pill off">Not extracted</span></td></tr>`;
+    }
+    if (!field.custom) return header;
     const value = (custom && custom[field.key]) || (defaults && defaults[field.key]) || "";
     const status = field.unavailable
       ? '<span class="ppm-pill wait">Extract later</span>'
       : '<span class="ppm-pill live">Available</span>';
-    return `<tr>
+    return `${header}<tr>
       <td><b>${ppmEsc(field.label)}</b><div class="ppm-note">${ppmEsc(field.key)}</div></td>
       <td>${ppmEsc(field.source)} ${status}</td>
       <td>${ppmFubFieldSelect(field.key, value, fubFields, builtins)}</td>

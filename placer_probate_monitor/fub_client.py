@@ -234,6 +234,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "petitioner_first",
         "label": "Petitioner first name",
+        "group": "petitioner",
         "source": "eCourt petitioner, all tokens except last",
         "notes": "This is the source field for FUB firstName.",
         "person": "firstName",
@@ -242,6 +243,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "petitioner_last",
         "label": "Petitioner last name",
+        "group": "petitioner",
         "source": "eCourt petitioner, last token (plus Jr/Sr/II/III)",
         "notes": "This is the source field for FUB lastName.",
         "person": "lastName",
@@ -250,6 +252,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "petitioner",
         "label": "Petitioner full name",
+        "group": "petitioner",
         "source": "eCourt parties, else CNPA notice",
         "notes": "Raw extracted name. Map first/last above, not this row.",
         "person": None,
@@ -257,8 +260,36 @@ PROBATE_SOURCE_FIELDS = [
         "block": ["firstName", "lastName", "phones", "emails"],
     },
     {
+        "key": "mailing_address",
+        "label": "Petitioner address",
+        "group": "petitioner",
+        "source": "DE-111 item 1 petitioner address",
+        "notes": "FUB Address 1. Line 2 is left empty.",
+        "person": "addresses",
+        "custom": True,
+    },
+    {
+        "key": "petitioner_email",
+        "label": "Petitioner email",
+        "group": "petitioner",
+        "source": "DE-111 item 1",
+        "notes": "Maps to FUB emails. Never use attorney email.",
+        "person": "emails",
+        "custom": True,
+    },
+    {
+        "key": "petitioner_phone",
+        "label": "Petitioner phone",
+        "group": "petitioner",
+        "source": "DE-111 item 1",
+        "notes": "Maps to FUB phones. Never use attorney_phone.",
+        "person": "phones",
+        "custom": True,
+    },
+    {
         "key": "decedent",
         "label": "Decedent name",
+        "group": "decedent",
         "source": "CNPA notice / eCourt decedent party",
         "notes": "Never Person first/last name. Custom field only.",
         "person": None,
@@ -268,6 +299,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "decedent_first",
         "label": "Decedent first name",
+        "group": "decedent",
         "source": "Split from decedent name",
         "notes": "Custom field only. Do not map onto Person firstName.",
         "person": None,
@@ -277,6 +309,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "decedent_last",
         "label": "Decedent last name",
+        "group": "decedent",
         "source": "Split from decedent name",
         "notes": "Custom field only. Do not map onto Person lastName.",
         "person": None,
@@ -284,17 +317,9 @@ PROBATE_SOURCE_FIELDS = [
         "block": ["firstName", "lastName", "phones", "emails"],
     },
     {
-        "key": "case_number",
-        "label": "Case number",
-        "notes_label": "Casenumber",
-        "source": "CNPA notice / eCourt search",
-        "notes": "S-PR number used as the lead key.",
-        "person": None,
-        "custom": True,
-    },
-    {
         "key": "decedent_residence",
         "label": "Last residence (DE-111)",
+        "group": "decedent",
         "source": "Petition PDF",
         "notes": "FUB Address 2 (decedent). Line 2 is left empty. Not a verified APN.",
         "person": "addresses",
@@ -303,6 +328,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "decedent_city",
         "label": "Residence city",
+        "group": "decedent",
         "source": "Petition PDF",
         "notes": "",
         "person": None,
@@ -311,6 +337,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "decedent_zip",
         "label": "Residence ZIP",
+        "group": "decedent",
         "source": "Petition PDF",
         "notes": "",
         "person": None,
@@ -319,6 +346,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "decedent_died",
         "label": "Date of death",
+        "group": "decedent",
         "source": "Petition PDF",
         "notes": "",
         "person": None,
@@ -327,14 +355,26 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "death_place",
         "label": "Place of death",
+        "group": "decedent",
         "source": "Petition PDF",
         "notes": "",
         "person": None,
         "custom": True,
     },
     {
+        "key": "case_number",
+        "label": "Case number",
+        "group": "other",
+        "notes_label": "Casenumber",
+        "source": "CNPA notice / eCourt search",
+        "notes": "S-PR number used as the lead key.",
+        "person": None,
+        "custom": True,
+    },
+    {
         "key": "estate_real",
         "label": "Real property GMV",
+        "group": "other",
         "source": "Petition PDF",
         "notes": "Gross fair market value from DE-111. $0 is still a value.",
         "person": None,
@@ -343,6 +383,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "estate_personal",
         "label": "Personal property",
+        "group": "other",
         "source": "Petition PDF",
         "notes": "",
         "person": None,
@@ -351,6 +392,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "hearing",
         "label": "Hearing",
+        "group": "other",
         "source": "eCourt next event, else notice text",
         "notes": "",
         "person": None,
@@ -359,6 +401,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "court_search",
         "label": "Court search URL + paste hint",
+        "group": "other",
         "source": "Derived",
         "notes": "Case Summary deep links 404 unless you search first.",
         "person": None,
@@ -367,6 +410,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "notice_url",
         "label": "Newspaper notice URL",
+        "group": "other",
         "source": "CNPA",
         "notes": "",
         "person": None,
@@ -375,6 +419,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "petition_pdf",
         "label": "Petition PDF filename",
+        "group": "other",
         "source": "Downloaded DE-111",
         "notes": "Basename only; not uploaded to FUB.",
         "person": None,
@@ -383,6 +428,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "filed",
         "label": "Filed date",
+        "group": "other",
         "source": "eCourt search / docket",
         "notes": "",
         "person": None,
@@ -391,6 +437,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "caption",
         "label": "Case caption",
+        "group": "other",
         "source": "eCourt",
         "notes": "",
         "person": None,
@@ -399,6 +446,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "attorney",
         "label": "Attorney (notice)",
+        "group": "other",
         "source": "CNPA notice",
         "notes": "Counsel is not the Person. Custom field only.",
         "person": None,
@@ -408,6 +456,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "attorney_phone",
         "label": "Attorney phone",
+        "group": "other",
         "source": "CNPA notice",
         "notes": "Never map onto person.phones.",
         "person": None,
@@ -417,6 +466,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "newspaper",
         "label": "Newspaper",
+        "group": "other",
         "source": "CNPA",
         "notes": "",
         "person": None,
@@ -425,6 +475,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "will_offered",
         "label": "Will offered",
+        "group": "other",
         "source": "CNPA notice",
         "notes": "Yes/No.",
         "person": None,
@@ -433,6 +484,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "iaea_requested",
         "label": "IAEA requested",
+        "group": "other",
         "source": "CNPA notice",
         "notes": "Yes/No.",
         "person": None,
@@ -441,37 +493,13 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "parties",
         "label": "Parties",
+        "group": "other",
         "source": "eCourt summary",
         "notes": "Petitioner, decedent, objector, administrator.",
         "person": None,
         "custom": True,
     },
-    {
-        "key": "petitioner_email",
-        "label": "Petitioner email",
-        "source": "DE-111 item 1",
-        "notes": "Maps to FUB emails. Never use attorney email.",
-        "person": "emails",
-        "custom": True,
-    },
-    {
-        "key": "petitioner_phone",
-        "label": "Petitioner phone",
-        "source": "DE-111 item 1",
-        "notes": "Maps to FUB phones. Never use attorney_phone.",
-        "person": "phones",
-        "custom": True,
-    },
-    {
-        "key": "mailing_address",
-        "label": "Petitioner address",
-        "source": "DE-111 item 1 petitioner address",
-        "notes": "FUB Address 1. Line 2 is left empty.",
-        "person": "addresses",
-        "custom": True,
-    },
 ]
-
 FUB_DESTINATIONS = [
     {
         "id": "person.firstName",
