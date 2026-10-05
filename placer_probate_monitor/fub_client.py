@@ -988,20 +988,59 @@ def combined_notes(row: dict, mapping: dict) -> str:
         for item in PROBATE_SOURCE_FIELDS
     }
     fields = mapping.get("custom_fields") or {}
+    note_keys = {
+        str(key)
+        for key, api in fields.items()
+        if _is_notes_target(str(api))
+    }
     parts: list[str] = []
     seen: set[str] = set()
+
+    def mapped(*keys: str) -> bool:
+        return any(key in note_keys for key in keys)
+
+    def name_line(label: str, first: str, last: str, full: str) -> str:
+        first = str(first or "").strip()
+        last = str(last or "").strip()
+        if not first and not last and full:
+            first, last = split_person_name(str(full))
+        if first and last:
+            return f"{label}: {first}, {last}"
+        if first or last:
+            return f"{label}: {first or last}"
+        return ""
+
+    if mapped("decedent", "decedent_first", "decedent_last"):
+        line = name_line(
+            "Decedent",
+            values.get("decedent_first") or "",
+            values.get("decedent_last") or "",
+            values.get("decedent") or "",
+        )
+        if line:
+            parts.append(line)
+        seen.update({"decedent", "decedent_first", "decedent_last"})
+    if mapped("petitioner", "petitioner_first", "petitioner_last"):
+        line = name_line(
+            "Petitioner",
+            values.get("petitioner_first") or "",
+            values.get("petitioner_last") or "",
+            values.get("petitioner") or "",
+        )
+        if line:
+            parts.append(line)
+        seen.update({"petitioner", "petitioner_first", "petitioner_last"})
     for item in PROBATE_SOURCE_FIELDS:
         key = str(item.get("key") or "")
-        api = fields.get(key)
-        if not key or not api or not _is_notes_target(str(api)):
+        if not key or key in seen or key not in note_keys:
             continue
         value = values.get(key)
         if value in (None, ""):
             continue
         parts.append(f"{labels.get(key, key)}: {value}")
         seen.add(key)
-    for key, api in fields.items():
-        if key in seen or not _is_notes_target(str(api)):
+    for key in note_keys:
+        if key in seen:
             continue
         value = values.get(key)
         if value in (None, ""):
