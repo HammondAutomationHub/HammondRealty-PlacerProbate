@@ -308,6 +308,7 @@ function ppmRenderPreview(el, st) {
   }
   const viewOnly = !!rec.view_only;
   const posted = !!rec.posted && !viewOnly;
+  const updated = !!rec.updated && posted;
   const fubError = rec.fub_error || (st && st.fub_error) || "";
   let extract = rec.source_extract || [];
   if (!extract.length) {
@@ -350,16 +351,18 @@ function ppmRenderPreview(el, st) {
   `;
   const heading = viewOnly
     ? "Last live extract (view only)"
-    : (posted ? "Last verify record (posted)" : "Last verify record");
+    : (posted ? (updated ? "Last verify record (updated)" : "Last verify record (posted)") : "Last verify record");
   const blurb = viewOnly
     ? "This is one live go-case from Placer. Follow Up Boss was not updated."
     : (posted
-      ? "This go-case was posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only."
+      ? (updated
+        ? "This existing Follow Up Boss person was updated with the current mapping. Confirm Address 1/2, notes, and name in FUB."
+        : "This go-case was posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only.")
       : "This is the go-case Verify tried to upload. Follow Up Boss did not accept it.");
   const pill = viewOnly
     ? '<span class="ppm-pill wait">VIEW ONLY</span>'
     : (posted
-      ? '<span class="ppm-pill live">GO · POSTED</span>'
+      ? (updated ? '<span class="ppm-pill live">GO · UPDATED</span>' : '<span class="ppm-pill live">GO · POSTED</span>')
       : '<span class="ppm-pill off">GO · NOT POSTED</span>');
   el.innerHTML = `
     <h2>${heading}</h2>
@@ -779,13 +782,13 @@ class PlacerProbateFubPanel extends HTMLElement {
             <label>Event type</label>
             <select id="fub_event_type"></select>
             <label class="ppm-toggle"><input id="fub_strict_property" type="checkbox" /><span>Require decedent residence before upload</span></label>
-            <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: import one new go-case per run</span></label>
+            <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: create or update one go-case per run</span></label>
             <div class="ppm-actions">
               <button id="save-fub" type="button">Save FUB connection</button>
               <button class="secondary" id="preview-one" type="button">Preview one record</button>
               <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
             </div>
-            <p class="ppm-note">Preview one record pulls a live go-case so you can check extracted values and the mapped Follow Up Boss look. It does not post. Verify one FUB import posts one never-sent go-case.</p>
+            <p class="ppm-note">Preview one record pulls a live go-case so you can check extracted values and the mapped Follow Up Boss look. It does not post. Verify one FUB import creates one new person, or updates one existing person if every go-case was already sent.</p>
           </section>
           <section class="ppm-card" id="verify-record">
             <h2>Last verify record</h2>

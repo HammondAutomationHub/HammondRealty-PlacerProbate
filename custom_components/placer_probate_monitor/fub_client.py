@@ -1943,25 +1943,41 @@ def export_new_leads(
         record = cases.get(key) or {}
         try:
             if existing_id is not None:
-                if verify:
+                if verify and (summary["posted"] >= 1 or summary["updated"] >= 1):
                     summary["skipped"] += 1
-                    summary["skips"].append({"case": key, "reason": "verify_skip_update"})
-                    print(f"FUB skip {key}: verify_skip_update person_id={existing_id}")
+                    summary["skips"].append({"case": key, "reason": "verify_only_limit"})
+                    print(f"FUB skip {key}: verify_only_limit")
                     continue
-                if record.get("fub_fingerprint") == fingerprint:
+                if not verify and record.get("fub_fingerprint") == fingerprint:
                     summary["skipped"] += 1
                     summary["skips"].append({"case": key, "reason": "unchanged"})
                     print(f"FUB skip {key}: unchanged person_id={existing_id}")
                     continue
+                record_view = verify_record_payload(
+                    row, person, existing_id, settings, mapping
+                )
+                record_view["view_only"] = False
+                record_view["posted"] = False
+                record_view["updated"] = False
+                summary["verify_record"] = record_view
                 body = put_person(
                     settings["api_url"], api_key, existing_id, person, system
                 )
                 pid = person_id_from_response(body) or existing_id
                 _remember_person(cases, key, pid, fingerprint)
                 summary["updated"] += 1
+                posted_case = key
+                posted_pid = pid
+                record_view["posted"] = True
+                record_view["updated"] = True
+                record_view["fub_person_id"] = int(pid)
+                record_view["fub_error"] = None
+                summary["verify_record"] = record_view
                 print(f"FUB updated {key} person_id={pid}")
+                if verify:
+                    break
                 continue
-            if verify and summary["posted"] >= 1:
+            if verify and (summary["posted"] >= 1 or summary["updated"] >= 1):
                 summary["skipped"] += 1
                 summary["skips"].append({"case": key, "reason": "verify_only_limit"})
                 print(f"FUB skip {key}: verify_only_limit")
@@ -2014,8 +2030,9 @@ def export_new_leads(
     summary["verify_person_id"] = posted_pid
     if verify:
         if posted_case:
+            action = "updated" if summary.get("updated") else "posted"
             print(
-                f"FUB verify: posted {posted_case} person_id={posted_pid}",
+                f"FUB verify: {action} {posted_case} person_id={posted_pid}",
                 flush=True,
             )
         else:
