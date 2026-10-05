@@ -429,6 +429,44 @@ FUB_DESTINATIONS = [
     },
 ]
 
+FUB_BUILTIN_FIELDS = [
+    {"name": "firstName", "label": "First name", "group": "Person", "type": "person"},
+    {"name": "lastName", "label": "Last name", "group": "Person", "type": "person"},
+    {"name": "assignedTo", "label": "Assigned to", "group": "Person", "type": "person"},
+    {"name": "addresses", "label": "Addresses", "group": "Person", "type": "person"},
+    {"name": "stage", "label": "Stage", "group": "Person", "type": "person"},
+    {"name": "source", "label": "Lead source", "group": "Person", "type": "person"},
+    {"name": "tags", "label": "Tags", "group": "Person", "type": "person"},
+    {"name": "background", "label": "Background", "group": "Person", "type": "person"},
+    {
+        "name": "emails",
+        "label": "Emails (not extracted yet)",
+        "group": "Person",
+        "type": "person",
+        "disabled": True,
+    },
+    {
+        "name": "phones",
+        "label": "Phones (not extracted yet)",
+        "group": "Person",
+        "type": "person",
+        "disabled": True,
+    },
+]
+
+PERSON_BUILTIN_TARGETS = {
+    "firstName",
+    "lastName",
+    "assignedTo",
+    "addresses",
+    "stage",
+    "source",
+    "tags",
+    "background",
+    "emails",
+    "phones",
+}
+
 SEND_TOGGLES = [
     {"key": "firstName", "label": "Send petitioner firstName", "editable": True},
     {"key": "lastName", "label": "Send petitioner lastName", "editable": True},
@@ -591,11 +629,8 @@ def mapping_errors(mapping: dict, *, source_id: str = "placer") -> list[str]:
             errors.append(f"{local_key} cannot map onto Person first/last name.")
         if live and meta.get("unavailable"):
             errors.append(f"{local_key} is not extracted yet.")
-        if api in {"phones", "emails", "firstName", "lastName", "addresses"}:
-            errors.append(
-                f"{local_key} custom-field target {api} collides with a built-in Person field; "
-                "use a custom field created in Follow Up Boss."
-            )
+        if api in {"phones", "emails", "person.phones", "person.emails"}:
+            errors.append(f"{local_key} cannot map onto person emails/phones yet.")
     return errors
 
 
@@ -1048,6 +1083,7 @@ def mapping_payload(path: Path | None = None, *, fetch_fub: bool = True, source_
         "source_fields": source_fields,
         "source_custom_fields": custom_fields_for_source(mapping, source_id),
         "fub_custom_fields": live.get("fields") or [],
+        "fub_builtin_fields": FUB_BUILTIN_FIELDS,
         "fub_custom_error": live.get("error"),
     }
 
@@ -1230,8 +1266,26 @@ def build_person(
         values = probate_export_values(row, mapping)
         for local_key, api_name in fields.items():
             value = values.get(local_key)
-            if api_name and value not in (None, ""):
-                person[str(api_name)] = str(value)
+            if not api_name or value in (None, ""):
+                continue
+            target = str(api_name).strip()
+            if target.startswith("person."):
+                target = target.split(".", 1)[1]
+            if target in {"emails", "phones"}:
+                continue
+            if target == "addresses":
+                addr = split_address(str(value))
+                if addr:
+                    addr["type"] = mapping.get("subject_address_type") or "subject property"
+                    person["addresses"] = [addr]
+                continue
+            if target == "tags":
+                person["tags"] = [str(value)]
+                continue
+            if target in PERSON_BUILTIN_TARGETS:
+                person[target] = str(value)
+                continue
+            person[str(api_name)] = str(value)
     return person
 
 

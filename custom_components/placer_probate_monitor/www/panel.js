@@ -80,23 +80,33 @@ function ppmEsc(value) {
     .replace(/"/g, "&quot;");
 }
 
-function ppmFubFieldSelect(key, selected, fubFields) {
-  const names = new Set((fubFields || []).map((item) => item.name));
-  const extra = (selected && !names.has(selected))
+function ppmFubFieldSelect(key, selected, fubFields, builtins) {
+  const known = new Set([
+    ...((builtins || []).map((item) => item.name)),
+    ...((fubFields || []).map((item) => item.name)),
+  ]);
+  const extra = (selected && !known.has(selected))
     ? `<option value="${ppmEsc(selected)}" selected>${ppmEsc(selected)} (saved)</option>`
     : "";
-  const opts = (fubFields || []).map((item) => {
+  const builtinOpts = (builtins || []).map((item) => {
+    const sel = item.name === selected ? "selected" : "";
+    const disabled = item.disabled ? "disabled" : "";
+    return `<option value="${ppmEsc(item.name)}" ${sel} ${disabled}>${ppmEsc(item.label)} — ${ppmEsc(item.name)}</option>`;
+  }).join("");
+  const customOpts = (fubFields || []).map((item) => {
     const sel = item.name === selected ? "selected" : "";
     const type = item.type ? ` · ${item.type}` : "";
     return `<option value="${ppmEsc(item.name)}" ${sel}>${ppmEsc(item.label)} — ${ppmEsc(item.name)}${ppmEsc(type)}</option>`;
   }).join("");
   return `<select data-custom="${ppmEsc(key)}">
     <option value="">Do not map</option>
-    ${extra}${opts}
+    ${extra}
+    <optgroup label="Built-in Follow Up Boss fields">${builtinOpts || "<option disabled>None</option>"}</optgroup>
+    <optgroup label="Custom fields">${customOpts || "<option disabled>None loaded</option>"}</optgroup>
   </select>`;
 }
 
-function ppmMappingRows(fields, custom, fubFields, person) {
+function ppmMappingRows(fields, custom, fubFields, person, builtins) {
   return (fields || []).map((field) => {
     if (!field.custom && field.unavailable) {
       return `<tr><td><b>${ppmEsc(field.label)}</b></td><td>${ppmEsc(field.source)}</td><td colspan="2"><span class="ppm-pill off">Not extracted</span></td></tr>`;
@@ -109,7 +119,7 @@ function ppmMappingRows(fields, custom, fubFields, person) {
     return `<tr>
       <td><b>${ppmEsc(field.label)}</b><div class="ppm-note">${ppmEsc(field.key)}</div></td>
       <td>${ppmEsc(field.source)} ${status}</td>
-      <td>${ppmFubFieldSelect(field.key, value, fubFields)}</td>
+      <td>${ppmFubFieldSelect(field.key, value, fubFields, builtins)}</td>
       <td data-fub-example>${ppmFubExampleCell(person, value)}</td>
     </tr>`;
   }).join("");
@@ -483,7 +493,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
             : (this._mapData.fub_custom_error || "Save a Follow Up Boss API key, then reload to load custom fields.")}</p>
           ${ppmExamplePersonBar(this._fubPerson && this._fubPerson.query)}
           <table><thead><tr><th>Source field</th><th>From</th><th>FUB custom field</th><th>Example person</th></tr></thead>
-          <tbody>${ppmMappingRows(fields, custom, fubFields, this._fubPerson)}</tbody></table>
+          <tbody>${ppmMappingRows(fields, custom, fubFields, this._fubPerson, this._mapData.fub_builtin_fields || [])}</tbody></table>
           <div class="ppm-actions"><button id="save-source-map" type="button">Save ${ppmEsc(src.name)} mapping</button></div>
         </section>`;
       const saveBtn = this._qs("#save-source-map");
@@ -551,6 +561,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
                 || {}),
               this._mapData.fub_custom_fields || [],
               this._fubPerson,
+              this._mapData.fub_builtin_fields || [],
             )}
           </tbody>
         </table>
@@ -703,6 +714,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._hass = null;
     this._catalog = { probate_fields: [], send_toggles: [], go_no_go: [], default_custom_fields: {} };
     this._fubFields = [];
+    this._fubBuiltins = [];
     this._ready = false;
     this._tab = "connection";
     this._mapSource = "placer";
@@ -872,6 +884,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._mapData = data || {};
     this._catalog = data.catalog || this._catalog;
     this._fubFields = data.fub_custom_fields || [];
+    this._fubBuiltins = data.fub_builtin_fields || [];
     this._mapSource = data.source_id || this._mapSource || "placer";
     const mapping = data.mapping || {};
     const send = mapping.send || {};
@@ -914,7 +927,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._qs("#fub-fields-note").textContent = data.fub_custom_error
       ? data.fub_custom_error
       : (this._fubFields.length
-        ? `Loaded ${this._fubFields.length} Follow Up Boss custom fields as dropdown options.`
+        ? `Loaded ${this._fubFields.length} custom fields plus built-in person fields as dropdown options.`
         : "No custom fields came back from Follow Up Boss. Create them in FUB, then reload.");
     this._renderLiveClient();
   }
@@ -930,7 +943,13 @@ class PlacerProbateFubPanel extends HTMLElement {
       && mapping.source_mappings[this._mapSource].custom_fields)
       || (this._mapSource === "placer" ? mapping.custom_fields : {})
       || {});
-    this._qs("#matrix").innerHTML = ppmMappingRows(fields, custom, this._fubFields || [], this._fubPerson);
+    this._qs("#matrix").innerHTML = ppmMappingRows(
+      fields,
+      custom,
+      this._fubFields || [],
+      this._fubPerson,
+      this._fubBuiltins || [],
+    );
     ppmBindMappingExamples(this._qs("#matrix"), this._fubPerson);
     this.querySelectorAll("#matrix select[data-custom]").forEach((el) => {
       el.addEventListener("change", () => this._renderLiveClient());
