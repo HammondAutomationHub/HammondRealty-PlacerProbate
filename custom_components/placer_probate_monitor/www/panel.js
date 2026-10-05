@@ -365,7 +365,9 @@ function ppmRenderPreview(el, st) {
   `;
   const attach = rec.de111_attach || {};
   const attachLine = attach.ok
-    ? (attach.file ? `${attach.file} (${attach.reason || "attached"})` : (attach.reason || "attached"))
+    ? (attach.reason === "notes_link"
+      ? `${attach.file || "DE-111"} (Files API blocked; link posted in Notes)`
+      : (attach.file ? `${attach.file} (${attach.reason || "attached"})` : (attach.reason || "attached")))
     : (attach.reason || (posted ? "not attached" : ""));
   const heading = viewOnly
     ? "Last live extract (view only)"
@@ -794,6 +796,9 @@ class PlacerProbateFubPanel extends HTMLElement {
             <label>API key (leave blank to keep the saved key)</label>
             <input id="fub_api_key" type="password" placeholder="unchanged if blank" />
             <p class="ppm-note" id="key-note"></p>
+            <label>FUB system key (optional, for Files). Leave blank to keep the saved key</label>
+            <input id="fub_system_key" type="password" placeholder="unchanged if blank" />
+            <p class="ppm-note" id="system-key-note">Follow Up Boss Files requires a registered X-System-Key. Without it the DE-111 is posted as a Notes link instead.</p>
             <div class="ppm-row">
               <div><label>Lead source name</label><input id="fub_source" /></div>
               <div><label>Assign to</label><input id="fub_assigned_to" /></div>
@@ -887,9 +892,13 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._qs("#fub_enabled").checked = !!data.fub_enabled;
     this._qs("#fub_api_url").value = data.fub_api_url || "https://api.followupboss.com/v1";
     this._qs("#fub_api_key").value = "";
+    this._qs("#fub_system_key").value = "";
     this._qs("#key-note").textContent = data.fub_api_key_set
       ? "An API key is already saved."
       : "No API key saved yet.";
+    this._qs("#system-key-note").textContent = data.fub_system_key_set
+      ? "A FUB system key is already saved. Files uploads will use it."
+      : "No FUB system key saved. Files API will 403; DE-111 goes to Notes as a download link.";
     this._qs("#fub_source").value = data.fub_source || "probate";
     this._qs("#fub_assigned_to").value = data.fub_assigned_to || "";
     const types = data.event_types || ["Seller Inquiry"];
@@ -1075,6 +1084,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       fub_enabled: this._qs("#fub_enabled").checked,
       fub_api_url: this._qs("#fub_api_url").value.trim(),
       fub_api_key: this._qs("#fub_api_key").value,
+      fub_system_key: this._qs("#fub_system_key").value,
       fub_source: this._qs("#fub_source").value.trim(),
       fub_assigned_to: this._qs("#fub_assigned_to").value.trim(),
       fub_event_type: this._qs("#fub_event_type").value,

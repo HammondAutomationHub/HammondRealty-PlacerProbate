@@ -15,6 +15,7 @@ from .const import (
     ATTR_FUB_VERIFY,
     CONF_ECOURT_PAUSE,
     CONF_FUB_API_KEY,
+    CONF_FUB_SYSTEM_KEY,
     CONF_FUB_API_URL,
     CONF_FUB_ASSIGNED_TO,
     CONF_FUB_ENABLED,
@@ -44,7 +45,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.22"
+PANEL_JS_VERSION = "1.3.23"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -65,6 +66,7 @@ FUB_KEYS = {
     CONF_FUB_ENABLED,
     CONF_FUB_API_URL,
     CONF_FUB_API_KEY,
+    CONF_FUB_SYSTEM_KEY,
     CONF_FUB_SOURCE,
     CONF_FUB_ASSIGNED_TO,
     CONF_FUB_EVENT_TYPE,
@@ -126,6 +128,7 @@ def _apply_key(hass: HomeAssistant) -> None:
         settings.get(CONF_FUB_API_URL) or "https://api.followupboss.com/v1"
     )
     os.environ["FUB_API_KEY"] = str(settings.get(CONF_FUB_API_KEY) or "")
+    os.environ["FUB_SYSTEM_KEY"] = str(settings.get(CONF_FUB_SYSTEM_KEY) or "")
     os.environ["FUB_MAPPING_PATH"] = str(mapping_file(hass))
 
 
@@ -149,6 +152,8 @@ def _public_fub(settings: dict) -> dict:
         or "https://api.followupboss.com/v1",
         CONF_FUB_API_KEY: "",
         "fub_api_key_set": bool(key),
+        CONF_FUB_SYSTEM_KEY: "",
+        "fub_system_key_set": bool(str(settings.get(CONF_FUB_SYSTEM_KEY) or "")),
         CONF_FUB_SOURCE: settings.get(CONF_FUB_SOURCE) or "probate",
         CONF_FUB_ASSIGNED_TO: settings.get(CONF_FUB_ASSIGNED_TO) or "Blake Hammond",
         CONF_FUB_EVENT_TYPE: settings.get(CONF_FUB_EVENT_TYPE) or "Seller Inquiry",
@@ -297,7 +302,7 @@ class FubSettingsView(HomeAssistantView):
         for key in FUB_KEYS:
             if key not in body:
                 continue
-            if key == CONF_FUB_API_KEY:
+            if key in {CONF_FUB_API_KEY, CONF_FUB_SYSTEM_KEY}:
                 value = str(body[key] or "").strip()
                 if not value or value in {"••••••••", "********"}:
                     continue

@@ -2018,11 +2018,15 @@ def _api_root(api_url: str) -> str:
 
 
 def _fub_headers(system: str) -> dict:
-    return {
+    headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
         "X-System": system,
     }
+    key = str(os.environ.get("FUB_SYSTEM_KEY") or "").strip()
+    if key:
+        headers["X-System-Key"] = key
+    return headers
 
 
 def post_event(api_url: str, api_key: str, payload: dict, system: str) -> dict:
@@ -2060,7 +2064,15 @@ def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system
         return {}
 
 
-def post_note(api_url: str, api_key: str, person_id: int, body: str, system: str) -> dict:
+def post_note(
+    api_url: str,
+    api_key: str,
+    person_id: int,
+    body: str,
+    system: str,
+    *,
+    subject: str = "Placer probate",
+) -> dict:
     text = (body or "").strip()
     if not text:
         return {}
@@ -2068,7 +2080,7 @@ def post_note(api_url: str, api_key: str, person_id: int, body: str, system: str
         f"{_api_root(api_url)}/notes",
         json={
             "personId": int(person_id),
-            "subject": "Placer probate",
+            "subject": subject or "Placer probate",
             "body": text,
             "isHtml": False,
         },
@@ -2171,18 +2183,46 @@ def attach_de111_file(
     case = case_key(row)
     file_name = f"{petition_safe_case(case)}_DE-111.pdf"
     uri = petition_public_uri(case)
-    body = post_person_attachment(
-        api_url,
-        api_key,
-        person_id,
-        path,
-        uri=uri,
-        file_name=file_name,
-        system=system,
-    )
-    attachment_id = body.get("id")
     if key not in cases:
         cases[key] = {}
+    try:
+        body = post_person_attachment(
+            api_url,
+            api_key,
+            person_id,
+            path,
+            uri=uri,
+            file_name=file_name,
+            system=system,
+        )
+    except RuntimeError as exc:
+        note = f"DE-111 petition: {file_name}"
+        if uri:
+            note += f"\n{uri}"
+        else:
+            note += f"\nSaved on Home Assistant: {path}"
+        post_note(
+            api_url,
+            api_key,
+            person_id,
+            note,
+            system,
+            subject="DE-111 petition",
+        )
+        cases[key]["fub_de111_note"] = True
+        print(
+            f"FUB Files API denied for {key} (registered systems only). "
+            f"Posted DE-111 link in Notes instead.",
+            flush=True,
+        )
+        return {
+            "ok": True,
+            "reason": "notes_link",
+            "file": file_name,
+            "uri": uri,
+            "error": str(exc)[:200],
+        }
+    attachment_id = body.get("id")
     if attachment_id:
         cases[key]["fub_attachment_id"] = attachment_id
     print(

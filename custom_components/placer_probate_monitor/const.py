@@ -26,6 +26,7 @@ CONF_MAX_PAGES = "max_search_pages"
 CONF_FUB_ENABLED = "fub_enabled"
 CONF_FUB_API_URL = "fub_api_url"
 CONF_FUB_API_KEY = "fub_api_key"
+CONF_FUB_SYSTEM_KEY = "fub_system_key"
 CONF_FUB_SOURCE = "fub_source"
 CONF_FUB_ASSIGNED_TO = "fub_assigned_to"
 CONF_FUB_EVENT_TYPE = "fub_event_type"
@@ -78,6 +79,7 @@ DEFAULTS = {
     CONF_FUB_ENABLED: False,
     CONF_FUB_API_URL: "https://api.followupboss.com/v1",
     CONF_FUB_API_KEY: "",
+    CONF_FUB_SYSTEM_KEY: "",
     CONF_FUB_SOURCE: "probate",
     CONF_FUB_ASSIGNED_TO: "Blake Hammond",
     CONF_FUB_EVENT_TYPE: "Seller Inquiry",

@@ -35,6 +35,7 @@ from .const import (
     CONF_ECOURT_PAUSE,
     CONF_FREQUENCY,
     CONF_FUB_API_KEY,
+    CONF_FUB_SYSTEM_KEY,
     CONF_FUB_API_URL,
     CONF_FUB_ASSIGNED_TO,
     CONF_FUB_ENABLED,
@@ -128,6 +129,7 @@ def apply_env(
         settings.get(CONF_FUB_API_URL) or "https://api.followupboss.com/v1"
     )
     os.environ["FUB_API_KEY"] = str(settings.get(CONF_FUB_API_KEY) or "")
+    os.environ["FUB_SYSTEM_KEY"] = str(settings.get(CONF_FUB_SYSTEM_KEY) or "")
     os.environ["FUB_SOURCE"] = str(settings.get(CONF_FUB_SOURCE) or "probate")
     os.environ["FUB_ASSIGNED_TO"] = str(
         settings.get(CONF_FUB_ASSIGNED_TO) or "Blake Hammond"
