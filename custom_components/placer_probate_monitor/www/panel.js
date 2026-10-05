@@ -36,6 +36,10 @@ const PPM_CSS = `
   .ppm-sourcelist button { display: block; width: 100%; text-align: left; margin: 0 0 8px; background: #ece7de; color: #1c1915; }
   .ppm-sourcelist button.active { background: #1b2a4a; color: #fff; }
   .ppm-hide { display: none !important; }
+  .ppm-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+  @media (max-width: 900px) { .ppm-compare { grid-template-columns: 1fr; } }
+  .ppm-wrap td a { color: #1b2a4a; word-break: break-all; }
+  .ppm-pre { white-space: pre-wrap; font: 12px/1.4 ui-monospace, Consolas, monospace; margin: 0; }
 `;
 
 function ppmSleep(ms) {
@@ -68,6 +72,91 @@ function ppmEsc(value) {
     .replace(/"/g, "&quot;");
 }
 
+function ppmCell(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "—";
+  if (/^https?:\/\//i.test(text)) {
+    return `<a href="${ppmEsc(text)}" target="_blank" rel="noopener">${ppmEsc(text)}</a>`;
+  }
+  return ppmEsc(text);
+}
+
+function ppmSkipTable(skips) {
+  if (!skips || !skips.length) return "";
+  const rows = skips.slice(0, 12).map((item) =>
+    `<tr><td>${ppmEsc(item.case || "?")}</td><td>${ppmEsc(item.reason || "")}</td></tr>`
+  ).join("");
+  return `<h2 style="margin-top:16px;">Other cases in this window</h2>
+    <p class="ppm-note">Quality gates still apply. Local seen/FUB status is ignored on preview.</p>
+    <table><thead><tr><th>Case</th><th>Why not shown</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function ppmRenderPreview(el, st) {
+  if (!el) return;
+  const rec = st && st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
+  const note = (st && (st.fub_verify_note || (st.fub_verify && st.fub_verify.note))) || "";
+  const skips = (st && st.fub_skips) || (rec && rec.skips) || [];
+  if (!rec) {
+    el.innerHTML = `<h2>Last live extract</h2>
+      <p class="ppm-note">${ppmEsc(note || "Run Preview one extract to pull one live go-case and review the values here.")}</p>
+      ${ppmSkipTable(skips)}`;
+    return;
+  }
+  const viewOnly = !!rec.view_only;
+  const extract = rec.source_extract || [];
+  const mapped = rec.mapped || {};
+  const pulledRows = extract.map((item) => {
+    const status = item.unavailable
+      ? '<span class="ppm-pill off">Not extracted</span>'
+      : (item.empty ? '<span class="ppm-pill wait">Empty</span>' : '<span class="ppm-pill live">Pulled</span>');
+    return `<tr>
+      <td><b>${ppmEsc(item.label)}</b><div class="ppm-note">${ppmEsc(item.source || item.key || "")}</div></td>
+      <td>${item.unavailable ? "—" : ppmCell(item.value)}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join("");
+  const personRows = (mapped.person || []).map((item) =>
+    `<tr><th>${ppmEsc(item.label)}</th><td>${ppmCell(item.value)}</td></tr>`
+  ).join("");
+  const custom = (rec.custom_fields || []).map((item) =>
+    `<tr><td>${ppmEsc(item.probate_field)}</td><td>${ppmEsc(item.fub_field)}</td><td>${ppmCell(item.value)}</td></tr>`
+  ).join("");
+  el.innerHTML = `
+    <h2>${viewOnly ? "Last live extract (view only)" : "Last posted verify record"}</h2>
+    <p class="ppm-note">${viewOnly
+      ? "This is one live go-case from Placer. Follow Up Boss was not updated."
+      : "This go-case was posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only."}</p>
+    <span class="ppm-pill ${viewOnly ? "wait" : "live"}">${viewOnly ? "VIEW ONLY" : "GO · POSTED"}</span>
+    <span class="ppm-pill">${ppmEsc(rec.case_number || "")}</span>
+    <div class="ppm-compare">
+      <div>
+        <h2>1. Pulled from Placer</h2>
+        <p class="ppm-note">Check these against the notice, eCourt, and petition PDF.</p>
+        <table>
+          <thead><tr><th>Field</th><th>Value</th><th></th></tr></thead>
+          <tbody>${pulledRows}</tbody>
+        </table>
+      </div>
+      <div>
+        <h2>2. How it looks for Follow Up Boss</h2>
+        <p class="ppm-note">Person name is the petitioner. Decedent and counsel stay on custom fields.</p>
+        <table>
+          <tbody>
+            ${personRows}
+            <tr><th>event type</th><td>${ppmCell(mapped.event_type || rec.event_type)}</td></tr>
+            <tr><th>lead source</th><td>${ppmCell(mapped.lead_source || rec.lead_source)}</td></tr>
+            <tr><th>system</th><td>${ppmCell(mapped.system)}</td></tr>
+          </tbody>
+        </table>
+        ${mapped.message ? `<label>Event message</label><p class="ppm-pre">${ppmCell(mapped.message)}</p>` : ""}
+        ${mapped.description ? `<label>Event description</label><p class="ppm-pre">${ppmCell(mapped.description)}</p>` : ""}
+        ${custom ? `<h2 style="margin-top:16px;">Custom fields</h2><table><thead><tr><th>Probate</th><th>FUB</th><th>Value</th></tr></thead><tbody>${custom}</tbody></table>` : ""}
+      </div>
+    </div>
+    ${ppmSkipTable(skips)}
+  `;
+}
+
 class PlacerProbateSourcesPanel extends HTMLElement {
   constructor() {
     super();
@@ -75,6 +164,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
     this._ready = false;
     this._source = "placer";
     this._data = { sources: [], placer: {}, fields: [] };
+    this._jobSt = {};
   }
 
   set hass(hass) {
@@ -181,9 +271,14 @@ class PlacerProbateSourcesPanel extends HTMLElement {
         <input id="max_search_pages" type="number" min="1" max="20" value="${ppmEsc(p.max_search_pages ?? 10)}" />
         <div class="ppm-actions">
           <button id="save-source" type="button">Save Placer import</button>
+          <button class="secondary" id="preview-source" type="button">Preview one extract</button>
           <button class="secondary" id="run-source" type="button">Run Placer job</button>
         </div>
-        <p class="ppm-note">Run imports this source only. Follow Up Boss create/verify is on the Follow Up Boss sidebar, not here.</p>
+        <p class="ppm-note">Preview one extract pulls a live go-case for review only. It does not post to Follow Up Boss or mark cases seen. Use Run Placer job for a full import.</p>
+      </section>
+      <section class="ppm-card" id="source-preview">
+        <h2>Last live extract</h2>
+        <p class="ppm-note">Run Preview one extract to see pulled values and the Follow Up Boss mapping for one case.</p>
       </section>
       <section class="ppm-card">
         <h2>Extracted fields</h2>
@@ -204,12 +299,19 @@ class PlacerProbateSourcesPanel extends HTMLElement {
     this._qs("#skip_portal").value = String(!!p.skip_portal);
     this._qs("#generate_pdf").value = String(p.generate_pdf !== false);
     this._qs("#save-source").addEventListener("click", () => this._save());
+    this._qs("#preview-source").addEventListener("click", () => this._preview());
     this._qs("#run-source").addEventListener("click", () => this._run());
+    ppmRenderPreview(this._qs("#source-preview"), this._jobSt);
   }
 
   async _load() {
     try {
-      this._data = await this._hass.callApi("GET", "placer_probate_monitor/sources");
+      const [data, job] = await Promise.all([
+        this._hass.callApi("GET", "placer_probate_monitor/sources"),
+        this._hass.callApi("GET", "placer_probate_monitor/job").catch(() => ({})),
+      ]);
+      this._data = data;
+      this._jobSt = job || {};
       this._renderList();
       this._renderBody();
     } catch (err) {
@@ -247,6 +349,27 @@ class PlacerProbateSourcesPanel extends HTMLElement {
         ok
           ? `Placer job finished (${st.last_result || "ok"})${extra}`
           : (st.last_error || "Placer job failed. Check last_run.log."),
+        ok,
+      );
+    } catch (err) {
+      this._flash(String(err), false);
+    }
+  }
+
+  async _preview() {
+    this._flash("Preview started… pulling one live Placer go-case (view only).", true);
+    try {
+      const st = await ppmRunJob(this._hass, "preview");
+      this._jobSt = st;
+      ppmRenderPreview(this._qs("#source-preview"), st);
+      const ok = st.last_result !== "failed" && st.last_result !== "running";
+      const rec = st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
+      this._flash(
+        ok
+          ? (rec
+            ? `Preview loaded ${rec.case_number}. Review pulled values below.`
+            : (st.fub_verify_note || "Preview finished. No go-case in this window."))
+          : (st.last_error || "Preview failed."),
         ok,
       );
     } catch (err) {
@@ -296,7 +419,7 @@ class PlacerProbateFubPanel extends HTMLElement {
           <h1>Follow Up Boss</h1>
           <p>CRM connection, one-case verification, and field mapping. County import screens are under Probate sources.</p>
           <div class="ppm-tabs">
-            <button class="ghost active" type="button" data-tab="connection">Connection &amp; verify</button>
+            <button class="ghost active" type="button" data-tab="connection">Connection &amp; preview</button>
             <button class="ghost" type="button" data-tab="mapping">Field mapping</button>
           </div>
         </header>
@@ -323,7 +446,7 @@ class PlacerProbateFubPanel extends HTMLElement {
               <button class="secondary" id="preview-one" type="button">Preview one record</button>
               <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
             </div>
-            <p class="ppm-note">Preview one record retrieves a live go-case for display only. It ignores local seen/FUB status and does not post to Follow Up Boss. The record appears below.</p>
+            <p class="ppm-note">Preview one record pulls a live go-case so you can check extracted values and the mapped Follow Up Boss look. It does not post. Verify one FUB import posts one never-sent go-case.</p>
           </section>
           <section class="ppm-card" id="verify-record">
             <h2>Last verify record</h2>
@@ -401,50 +524,7 @@ class PlacerProbateFubPanel extends HTMLElement {
   }
 
   _renderVerify(st) {
-    const el = this._qs("#verify-record");
-    if (!el) return;
-    const rec = st && st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
-    const note = (st && (st.fub_verify_note || (st.fub_verify && st.fub_verify.note))) || "";
-    if (!rec) {
-      el.innerHTML = `<h2>Last preview / verify record</h2><p class="ppm-note">${ppmEsc(note || "Run Preview one record (view only) or Verify one FUB import.")}</p>`;
-      return;
-    }
-    const addr = rec.address || {};
-    const addrLine = [addr.street, addr.city, addr.state, addr.code].filter(Boolean).join(", ");
-    const rows = [
-      ["Gate", rec.gate || "go"],
-      ["Data source", rec.data_source_name || rec.data_source || "Placer County"],
-      ["Case number", rec.case_number],
-      ["FUB person id", rec.fub_person_id],
-      ["Petitioner", rec.petitioner],
-      ["FUB firstName", rec.firstName],
-      ["FUB lastName", rec.lastName],
-      ["Assigned to", rec.assignedTo],
-      ["Lead source", rec.lead_source],
-      ["Event type", rec.event_type],
-      ["Decedent", rec.decedent],
-      ["Last residence", rec.decedent_residence],
-      ["Address sent", addrLine],
-      ["Hearing", rec.hearing],
-      ["Notice URL", rec.notice_url],
-      ["Court search", rec.court_search],
-    ];
-    const custom = (rec.custom_fields || []).map((item) =>
-      `<tr><td>${ppmEsc(item.probate_field)}</td><td>${ppmEsc(item.fub_field)}</td><td>${ppmEsc(item.value)}</td></tr>`
-    ).join("");
-    el.innerHTML = `
-      <h2>${rec.view_only ? "Last preview record" : "Last verify record"}</h2>
-      <p class="ppm-note">${rec.view_only
-        ? "View only. This case was not posted to Follow Up Boss and local seen status was not changed."
-        : "This is the single go-case posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only."}</p>
-      <span class="ppm-pill ${rec.view_only ? "wait" : "live"}">${rec.view_only ? "VIEW ONLY" : "GO · POSTED"}</span>
-      <table>
-        <tbody>
-          ${rows.map((item) => `<tr><th>${ppmEsc(item[0])}</th><td>${item[1] ? ppmEsc(item[1]) : "—"}</td></tr>`).join("")}
-        </tbody>
-      </table>
-      ${custom ? `<h2 style="margin-top:16px;">Custom fields sent</h2><table><thead><tr><th>Probate</th><th>FUB</th><th>Value</th></tr></thead><tbody>${custom}</tbody></table>` : ""}
-    `;
+    ppmRenderPreview(this._qs("#verify-record"), st);
   }
 
   _applyMapping(data) {

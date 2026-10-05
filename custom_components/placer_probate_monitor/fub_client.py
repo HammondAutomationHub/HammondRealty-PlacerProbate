@@ -626,6 +626,100 @@ def _stringify_field(value) -> str:
     return str(value).strip()
 
 
+def source_extract_rows(row: dict, mapping: dict) -> list[dict]:
+    values = probate_export_values(row, mapping)
+    seen: set[str] = set()
+    out: list[dict] = []
+    for field in PROBATE_SOURCE_FIELDS:
+        key = str(field.get("key") or "")
+        if not key:
+            continue
+        seen.add(key)
+        if field.get("unavailable"):
+            out.append(
+                {
+                    "key": key,
+                    "label": field.get("label") or key,
+                    "source": field.get("source") or "",
+                    "value": "",
+                    "empty": True,
+                    "unavailable": True,
+                    "notes": field.get("notes") or "",
+                }
+            )
+            continue
+        value = values.get(key) or ""
+        out.append(
+            {
+                "key": key,
+                "label": field.get("label") or key,
+                "source": field.get("source") or "",
+                "value": value,
+                "empty": value in (None, ""),
+                "unavailable": False,
+                "notes": field.get("notes") or "",
+            }
+        )
+    extra_labels = {
+        "county_resident": "County resident",
+        "case_type": "Case type",
+        "court_status": "Court status",
+    }
+    for key, label in extra_labels.items():
+        if key in seen:
+            continue
+        value = values.get(key) or ""
+        if value in (None, ""):
+            continue
+        out.append(
+            {
+                "key": key,
+                "label": label,
+                "source": "eCourt",
+                "value": value,
+                "empty": False,
+                "unavailable": False,
+                "notes": "",
+            }
+        )
+    return out
+
+
+def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) -> dict:
+    event = build_event(row, mapping, settings)
+    addr = {}
+    if person.get("addresses"):
+        first = person["addresses"][0]
+        if isinstance(first, dict):
+            addr = first
+    person_rows = [
+        {"label": "firstName", "value": person.get("firstName") or ""},
+        {"label": "lastName", "value": person.get("lastName") or ""},
+        {"label": "assignedTo", "value": person.get("assignedTo") or ""},
+        {
+            "label": "addresses",
+            "value": ", ".join(
+                str(addr.get(k) or "")
+                for k in ("street", "city", "state", "code", "type")
+                if addr.get(k)
+            ),
+        },
+    ]
+    skip = {"id", "firstName", "lastName", "assignedTo", "addresses"}
+    for key, value in person.items():
+        if key in skip or value in (None, "", []):
+            continue
+        person_rows.append({"label": str(key), "value": str(value)})
+    return {
+        "person": person_rows,
+        "event_type": event.get("type") or settings.get("event_type") or "",
+        "lead_source": event.get("source") or settings.get("source") or "",
+        "system": event.get("system") or "",
+        "message": event.get("message") or "",
+        "description": event.get("description") or "",
+    }
+
+
 def probate_export_values(row: dict, mapping: dict) -> dict:
     petitioner = portal_petitioner(row)
     decedent = str(row.get("decedent") or "").strip()
@@ -846,6 +940,7 @@ def preview_one_record(
         record["view_only"] = True
         record["posted"] = False
         record["gate"] = "go"
+        record["skips"] = skips
         print(f"FUB preview: {key} (view only, not posted)", flush=True)
         return {
             "ok": True,
@@ -955,6 +1050,8 @@ def verify_record_payload(
         "notice_url": values.get("notice_url"),
         "court_search": values.get("court_search"),
         "custom_fields": custom,
+        "source_extract": source_extract_rows(row, mapping),
+        "mapped": mapped_look_payload(row, person, settings, mapping),
     }
 
 
