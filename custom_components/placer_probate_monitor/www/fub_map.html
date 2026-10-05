@@ -207,8 +207,6 @@
       document.querySelectorAll("[data-send]").forEach((el) => {
         send[el.dataset.send] = !!el.checked;
       });
-      send.emails = false;
-      send.phones = false;
       const custom_fields = {};
       document.querySelectorAll("[data-custom]").forEach((el) => {
         const value = el.value.trim();

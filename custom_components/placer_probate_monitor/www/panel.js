@@ -173,8 +173,10 @@ function ppmFieldAssociations(mapping, sourceId, catalogFields) {
   Object.keys(custom || {}).forEach((key) => add(custom[key], key));
   add("firstName", "petitioner_first");
   add("lastName", "petitioner_last");
-  add("addresses", "decedent_residence");
-  add("address2", "mailing_address");
+  add("addresses", "mailing_address");
+  add("address2", "decedent_residence");
+  add("emails", "petitioner_email");
+  add("phones", "petitioner_phone");
   add("assignedTo", "assignedTo");
   add("source", "lead_source");
   return byFub;
@@ -320,7 +322,9 @@ function ppmRenderPreview(el, st) {
       { label: "Petitioner full name", source: "eCourt parties", value: rec.petitioner, empty: !rec.petitioner },
       { label: "Decedent", source: "CNPA / eCourt", value: rec.decedent, empty: !rec.decedent },
       { label: "Last residence", source: "Petition PDF", value: rec.decedent_residence, empty: !rec.decedent_residence },
-      { label: "Petitioner mailing address", source: "DE-111 item 1", value: rec.mailing_address, empty: !rec.mailing_address },
+      { label: "Petitioner address", source: "DE-111 item 1", value: rec.mailing_address, empty: !rec.mailing_address },
+      { label: "Petitioner email", source: "DE-111 item 1", value: rec.petitioner_email, empty: !rec.petitioner_email },
+      { label: "Petitioner phone", source: "DE-111 item 1", value: rec.petitioner_phone, empty: !rec.petitioner_phone },
       { label: "Hearing", source: "eCourt", value: rec.hearing, empty: !rec.hearing },
       { label: "Notice URL", source: "CNPA", value: rec.notice_url, empty: !rec.notice_url },
       { label: "Court search", source: "Derived", value: rec.court_search, empty: !rec.court_search },
@@ -991,8 +995,6 @@ class PlacerProbateFubPanel extends HTMLElement {
     this.querySelectorAll("[data-send]").forEach((el) => {
       send[el.dataset.send] = !!el.checked;
     });
-    send.emails = false;
-    send.phones = false;
     const custom_fields = {};
     this.querySelectorAll("[data-custom]").forEach((el) => {
       const value = el.value.trim();

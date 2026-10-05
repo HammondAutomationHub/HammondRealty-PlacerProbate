@@ -20,8 +20,8 @@ ADDR_FLEX_RE = re.compile(
     r"^(?P<street>.+?),\s*(?P<city>[A-Za-z .'-]+?)(?:\s*,\s*|\s+)(?P<state>[A-Z]{2})\s*(?P<zip>\d{5}(?:-\d{4})?)?\s*$",
     re.I,
 )
-ADDRESS1_TYPE = "subject property"
-ADDRESS2_TYPE = "mailing"
+ADDRESS1_TYPE = "home"
+ADDRESS2_TYPE = "subject property"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -122,8 +122,18 @@ def _split_person_source_keys(fields: dict) -> dict:
         out["petitioner_first"] = "firstName"
     if not out.get("petitioner_last"):
         out["petitioner_last"] = "lastName"
-    if not out.get("mailing_address"):
-        out["mailing_address"] = "address2"
+    if not out.get("mailing_address") or str(out.get("mailing_address")).lower() in {
+        "address2",
+        "mailing",
+        "mailingaddress",
+    }:
+        out["mailing_address"] = "addresses"
+    if not out.get("petitioner_email"):
+        out["petitioner_email"] = "emails"
+    if not out.get("petitioner_phone"):
+        out["petitioner_phone"] = "phones"
+    if not out.get("decedent_residence"):
+        out["decedent_residence"] = "address2"
     return out
 
 
@@ -439,27 +449,25 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "petitioner_email",
         "label": "Petitioner email",
-        "source": "Not extracted",
-        "notes": "No petitioner email yet. Do not enable person.emails.",
-        "person": None,
-        "custom": False,
-        "unavailable": True,
+        "source": "DE-111 item 1",
+        "notes": "Maps to FUB emails. Never use attorney email.",
+        "person": "emails",
+        "custom": True,
     },
     {
         "key": "petitioner_phone",
         "label": "Petitioner phone",
-        "source": "Not extracted",
-        "notes": "No petitioner phone yet. Do not enable person.phones.",
-        "person": None,
-        "custom": False,
-        "unavailable": True,
+        "source": "DE-111 item 1",
+        "notes": "Maps to FUB phones. Never use attorney_phone.",
+        "person": "phones",
+        "custom": True,
     },
     {
         "key": "mailing_address",
-        "label": "Petitioner mailing address",
+        "label": "Petitioner address",
         "source": "DE-111 item 1 petitioner address",
-        "notes": "FUB Address 2 (mailing). Line 2 is left empty.",
-        "person": "address2",
+        "notes": "FUB Address 1. Line 2 is left empty.",
+        "person": "addresses",
         "custom": True,
     },
 ]
@@ -481,21 +489,19 @@ FUB_DESTINATIONS = [
         "id": "person.addresses",
         "label": "Person addresses (subject property)",
         "group": "person",
-        "locked_to": "decedent_residence",
+        "locked_to": "mailing_address",
     },
     {
         "id": "person.emails",
         "label": "Person emails",
         "group": "person",
-        "available": False,
-        "reason": "No petitioner email is extracted yet.",
+        "locked_to": "petitioner_email",
     },
     {
         "id": "person.phones",
         "label": "Person phones",
         "group": "person",
-        "available": False,
-        "reason": "No petitioner phone is extracted yet. Never use attorney_phone here.",
+        "locked_to": "petitioner_phone",
     },
     {
         "id": "person.assignedTo",
@@ -530,27 +536,15 @@ FUB_BUILTIN_FIELDS = [
     {"name": "firstName", "label": "First name", "group": "Person", "type": "person"},
     {"name": "lastName", "label": "Last name", "group": "Person", "type": "person"},
     {"name": "assignedTo", "label": "Assigned to", "group": "Person", "type": "person"},
-    {"name": "addresses", "label": "Address 1 (subject property)", "group": "Person", "type": "person"},
-    {"name": "address2", "label": "Address 2 (mailing)", "group": "Person", "type": "person"},
+    {"name": "addresses", "label": "Address 1 (petitioner)", "group": "Person", "type": "person"},
+    {"name": "address2", "label": "Address 2 (subject property)", "group": "Person", "type": "person"},
     {"name": "stage", "label": "Stage", "group": "Person", "type": "person"},
     {"name": "source", "label": "Lead source", "group": "Person", "type": "person"},
     {"name": "tags", "label": "Tags", "group": "Person", "type": "person"},
     {"name": "background", "label": "Background", "group": "Person", "type": "person"},
     {"name": "notes", "label": "Notes", "group": "Person", "type": "person"},
-    {
-        "name": "emails",
-        "label": "Emails (not extracted yet)",
-        "group": "Person",
-        "type": "person",
-        "disabled": True,
-    },
-    {
-        "name": "phones",
-        "label": "Phones (not extracted yet)",
-        "group": "Person",
-        "type": "person",
-        "disabled": True,
-    },
+    {"name": "emails", "label": "Email", "group": "Person", "type": "person"},
+    {"name": "phones", "label": "Phone", "group": "Person", "type": "person"},
 ]
 
 PERSON_BUILTIN_TARGETS = {
@@ -579,28 +573,16 @@ NOTES_TARGETS = {"notes", "note", "background"}
 SEND_TOGGLES = [
     {"key": "firstName", "label": "Send petitioner firstName", "editable": True},
     {"key": "lastName", "label": "Send petitioner lastName", "editable": True},
-    {
-        "key": "emails",
-        "label": "Send person.emails",
-        "editable": False,
-        "forced": False,
-        "reason": "No petitioner email yet.",
-    },
-    {
-        "key": "phones",
-        "label": "Send person.phones",
-        "editable": False,
-        "forced": False,
-        "reason": "No petitioner phone yet.",
-    },
+    {"key": "emails", "label": "Send petitioner email", "editable": True},
+    {"key": "phones", "label": "Send petitioner phone", "editable": True},
     {
         "key": "subject_property_address",
-        "label": "Send last residence as subject-property address",
+        "label": "Send last residence as Address 2 (subject property)",
         "editable": True,
     },
     {
         "key": "mailing_address",
-        "label": "Send petitioner mailing as Address 2",
+        "label": "Send petitioner address as Address 1",
         "editable": True,
     },
     {"key": "assignedTo", "label": "Send assignedTo from config", "editable": True},
@@ -611,7 +593,7 @@ SEND_TOGGLES = [
 
 GO_NO_GO = [
     "Petitioner is the FUB Person. Decedent is never firstName/lastName.",
-    "No petitioner phone or email is extracted yet — leave person.phones and person.emails off.",
+    "Petitioner address, email, and phone come from DE-111 item 1.",
     "Never map attorney_phone onto person.phones. Attorney stays a custom field at most.",
     "Last residence is DE-111 text, not a verified APN. Case Summary URLs 404 unless you search first.",
     "Only NEW cases are created on a full run. Verify one FUB import may use an already-seen case that has never been sent to Follow Up Boss.",
@@ -704,7 +686,10 @@ def mapping_catalog() -> dict:
         "default_custom_fields": {
             "petitioner_first": "firstName",
             "petitioner_last": "lastName",
-            "mailing_address": "address2",
+            "mailing_address": "addresses",
+            "petitioner_email": "emails",
+            "petitioner_phone": "phones",
+            "decedent_residence": "address2",
         },
     }
 
@@ -712,10 +697,6 @@ def mapping_catalog() -> dict:
 def mapping_errors(mapping: dict, *, source_id: str = "placer") -> list[str]:
     errors: list[str] = []
     send = mapping.get("send") or {}
-    if send.get("phones"):
-        errors.append("Petitioner phone is not extracted; leave person.phones off.")
-    if send.get("emails"):
-        errors.append("Petitioner email is not extracted; leave person.emails off.")
     fields = mapping.get("custom_fields") or {}
     by_key = {item["key"]: item for item in source_field_catalog(source_id)}
     live = str(source_id or "placer") == "placer"
@@ -736,7 +717,8 @@ def mapping_errors(mapping: dict, *, source_id: str = "placer") -> list[str]:
         if live and meta.get("unavailable"):
             errors.append(f"{local_key} is not extracted yet.")
         if api in {"phones", "emails", "person.phones", "person.emails"}:
-            errors.append(f"{local_key} cannot map onto person emails/phones yet.")
+            if local_key not in {"petitioner_phone", "petitioner_email"}:
+                errors.append(f"{local_key} cannot map onto person emails/phones.")
     return errors
 
 
@@ -780,8 +762,6 @@ def save_mapping(mapping: dict, path: Path | None = None) -> Path:
         sources["placer"] = {"custom_fields": dict(existing.get("custom_fields") or {})}
     sources[source_id] = {"custom_fields": dict(incoming.get("custom_fields") or {})}
     send = dict(incoming.get("send") or existing.get("send") or {})
-    send["phones"] = False
-    send["emails"] = False
     incoming["send"] = send
     incoming["source_mappings"] = sources
     errors = mapping_errors(
@@ -903,8 +883,16 @@ def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) 
             "label": "Address 2",
             "value": _format_fub_address(addresses[1] if len(addresses) > 1 else None),
         },
+        {
+            "label": "emails",
+            "value": _fub_display_value(person.get("emails")),
+        },
+        {
+            "label": "phones",
+            "value": _fub_display_value(person.get("phones")),
+        },
     ]
-    skip = {"id", "firstName", "lastName", "assignedTo", "addresses", "background"}
+    skip = {"id", "firstName", "lastName", "assignedTo", "addresses", "background", "emails", "phones"}
     for key, value in person.items():
         if key in skip or value in (None, "", []):
             continue
@@ -947,6 +935,8 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
         "mailing_city": _stringify_field(row.get("mailing_city")),
         "mailing_state": _stringify_field(row.get("mailing_state")),
         "mailing_zip": _stringify_field(row.get("mailing_zip")),
+        "petitioner_email": _stringify_field(row.get("petitioner_email")),
+        "petitioner_phone": _stringify_field(row.get("petitioner_phone")),
         "decedent_died": _stringify_field(row.get("decedent_died")),
         "death_place": _stringify_field(row.get("death_place")),
         "estate_real": _stringify_field(row.get("estate_real")),
@@ -1678,10 +1668,10 @@ def build_person(
     if send.get("assignedTo", True) and settings.get("assigned_to"):
         person["assignedTo"] = settings["assigned_to"]
     values = probate_export_values(row, mapping)
-    if send.get("subject_property_address", True):
-        city, state, code = _address_parts_from_source("decedent_residence", values)
+    if send.get("mailing_address", True):
+        city, state, code = _address_parts_from_source("mailing_address", values)
         addr = _fub_address(
-            str(row.get("decedent_residence") or ""),
+            str(values.get("mailing_address") or row.get("mailing_address") or ""),
             ADDRESS1_TYPE,
             city=city,
             state=state,
@@ -1689,17 +1679,25 @@ def build_person(
         )
         if addr:
             person["addresses"] = [addr]
-    if send.get("mailing_address", True):
-        city, state, code = _address_parts_from_source("mailing_address", values)
+    if send.get("subject_property_address", True):
+        city, state, code = _address_parts_from_source("decedent_residence", values)
         _set_address_slot(
             person,
-            str(values.get("mailing_address") or row.get("mailing_address") or ""),
+            str(row.get("decedent_residence") or ""),
             1,
             ADDRESS2_TYPE,
             city=city,
             state=state,
             code=code,
         )
+    if send.get("emails", True):
+        email = str(values.get("petitioner_email") or "").strip()
+        if email:
+            person["emails"] = [{"value": email, "type": "home"}]
+    if send.get("phones", True):
+        phone = str(values.get("petitioner_phone") or "").strip()
+        if phone:
+            person["phones"] = [{"value": phone, "type": "home"}]
     if send.get("custom_fields", True):
         fields = mapping.get("custom_fields") or {}
         for local_key, api_name in fields.items():
@@ -1709,7 +1707,15 @@ def build_person(
             target = str(api_name).strip()
             if target.startswith("person."):
                 target = target.split(".", 1)[1]
-            if target in {"emails", "phones"}:
+            if target in {"emails", "person.emails"}:
+                if local_key == "attorney_phone":
+                    continue
+                person["emails"] = [{"value": str(value), "type": "home"}]
+                continue
+            if target in {"phones", "person.phones"}:
+                if local_key == "attorney_phone":
+                    continue
+                person["phones"] = [{"value": str(value), "type": "home"}]
                 continue
             if _is_notes_target(target):
                 continue

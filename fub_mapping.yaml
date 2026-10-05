@@ -14,14 +14,17 @@ skip_petitioner_contains:
 custom_fields:
   petitioner_first: firstName
   petitioner_last: lastName
-  mailing_address: address2
+  mailing_address: addresses
+  petitioner_email: emails
+  petitioner_phone: phones
+  decedent_residence: address2
 
 # Person fields we send vs skip.
 send:
   firstName: true
   lastName: true
-  emails: false
-  phones: false
+  emails: true
+  phones: true
   subject_property_address: true
   mailing_address: true
   assignedTo: true
