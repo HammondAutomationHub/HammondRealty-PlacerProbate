@@ -268,6 +268,7 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "case_number",
         "label": "Case number",
+        "notes_label": "Casenumber",
         "source": "CNPA notice / eCourt search",
         "notes": "S-PR number used as the lead key.",
         "person": None,
@@ -981,12 +982,26 @@ def _is_notes_target(api_name: str) -> bool:
     return _fub_target_name(api_name).lower() in NOTES_TARGETS
 
 
+def _notes_field_label(key: str) -> str:
+    special = {
+        "case_number": "Casenumber",
+        "decedent": "Decedent",
+        "decedent_first": "Decedent",
+        "decedent_last": "Decedent",
+        "petitioner": "Petitioner",
+        "petitioner_first": "Petitioner",
+        "petitioner_last": "Petitioner",
+    }
+    if key in special:
+        return special[key]
+    for item in PROBATE_SOURCE_FIELDS:
+        if item.get("key") == key:
+            return str(item.get("notes_label") or item.get("label") or key)
+    return key
+
+
 def combined_notes(row: dict, mapping: dict) -> str:
     values = probate_export_values(row, mapping)
-    labels = {
-        str(item.get("key") or ""): str(item.get("label") or item.get("key") or "")
-        for item in PROBATE_SOURCE_FIELDS
-    }
     fields = mapping.get("custom_fields") or {}
     note_keys = {
         str(key)
@@ -1037,7 +1052,7 @@ def combined_notes(row: dict, mapping: dict) -> str:
         value = values.get(key)
         if value in (None, ""):
             continue
-        parts.append(f"{labels.get(key, key)}: {value}")
+        parts.append(f"{_notes_field_label(key)}: {value}")
         seen.add(key)
     for key in note_keys:
         if key in seen:
@@ -1045,7 +1060,7 @@ def combined_notes(row: dict, mapping: dict) -> str:
         value = values.get(key)
         if value in (None, ""):
             continue
-        parts.append(f"{labels.get(key, key)}: {value}")
+        parts.append(f"{_notes_field_label(key)}: {value}")
     return "\n".join(parts)
 
 
