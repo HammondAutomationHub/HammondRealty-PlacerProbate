@@ -13,13 +13,22 @@ import requests
 COURT_SEARCH_DEFAULT = "https://webportal.placerco.org/eCourtPublic/?q=node/48"
 MAPPING_PATH = Path(__file__).resolve().parent / "fub_mapping.yaml"
 ADDR_RE = re.compile(
-    r"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*(?P<state>[A-Z]{2})\s*(?P<zip>\d{5}(?:-\d{4})?)?$",
+    r"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{5}(?:-\d{4})?)?$",
     re.I,
 )
 ADDR_FLEX_RE = re.compile(
-    r"^(?P<street>.+?),\s*(?P<city>[A-Za-z .'-]+?)(?:\s*,\s*|\s+)(?P<state>[A-Z]{2})\s*(?P<zip>\d{5}(?:-\d{4})?)?\s*$",
+    r"^(?P<street>.+?),\s*(?P<city>[A-Za-z .'-]+?)(?:\s*,\s*|\s+)(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{5}(?:-\d{4})?)?\s*$",
     re.I,
 )
+COUNTY_NOISE_RE = re.compile(r",?\s*Placer(?:\s+County)?\b,?", re.I)
+NOT_CITIES = {"placer", "placer county", "county", "california"}
+ADDRESS_COMPONENT_KEYS = {
+    "decedent_city",
+    "decedent_zip",
+    "mailing_city",
+    "mailing_state",
+    "mailing_zip",
+}
 ADDRESS1_TYPE = "home"
 ADDRESS2_TYPE = "decedent"
 
@@ -1445,8 +1454,21 @@ def portal_petitioner(row: dict) -> str:
     return str(row.get("petitioner") or "").strip()
 
 
+def _strip_county_noise(text: str) -> str:
+    text = COUNTY_NOISE_RE.sub(",", text)
+    text = re.sub(r"\s*,\s*,+", ",", text)
+    return re.sub(r"\s+", " ", text).strip(" ,")
+
+
+def _usable_city(city: str) -> str:
+    low = re.sub(r"\s+", " ", (city or "").strip().lower())
+    if not low or low in NOT_CITIES or low.endswith(" county"):
+        return ""
+    return (city or "").strip()
+
+
 def split_address(line: str) -> dict | None:
-    text = re.sub(r"\s+", " ", (line or "").strip())
+    text = _strip_county_noise(re.sub(r"\s+", " ", (line or "").strip()))
     if not text:
         return None
     match = ADDR_RE.match(text) or ADDR_FLEX_RE.match(text)
@@ -1454,7 +1476,7 @@ def split_address(line: str) -> dict | None:
         return {"street": text}
     return {
         "street": match.group("street").strip(" ,"),
-        "city": match.group("city").strip(" ,"),
+        "city": _usable_city(match.group("city")),
         "state": match.group("state").upper(),
         "code": (match.group("zip") or "").strip(),
     }
@@ -1472,7 +1494,7 @@ def _fub_address(
     if not parsed:
         return None
     street = str(parsed.get("street") or "").strip()
-    city = str(parsed.get("city") or city or "").strip()
+    city = _usable_city(parsed.get("city") or "") or _usable_city(city)
     state = str(parsed.get("state") or state or "").strip().upper()
     zip_code = str(parsed.get("code") or code or "").strip()
     if city and street.lower().endswith(city.lower()):
@@ -1513,7 +1535,7 @@ def _address_parts_from_source(local_key: str, values: dict) -> tuple[str, str, 
         "mailing_zip",
     }:
         return (
-            str(values.get("mailing_city") or "").strip(),
+            _usable_city(str(values.get("mailing_city") or "")),
             str(values.get("mailing_state") or "CA").strip() or "CA",
             str(values.get("mailing_zip") or "").strip(),
         )
@@ -1524,7 +1546,7 @@ def _address_parts_from_source(local_key: str, values: dict) -> tuple[str, str, 
         "decedent",
     }:
         return (
-            str(values.get("decedent_city") or "").strip(),
+            _usable_city(str(values.get("decedent_city") or "")),
             "CA",
             str(values.get("decedent_zip") or "").strip(),
         )
@@ -1746,6 +1768,10 @@ def build_person(
                 person["phones"] = [{"value": str(value), "type": "home"}]
                 continue
             if _is_notes_target(target):
+                continue
+            if local_key in ADDRESS_COMPONENT_KEYS and (
+                target.lower() in ADDRESS_SLOT_TARGETS or target == "addresses"
+            ):
                 continue
             city, state, code = _address_parts_from_source(local_key, values)
             if target.lower() in ADDRESS_SLOT_TARGETS:

@@ -39,7 +39,12 @@ ROAD = (
 ADDR_PATTERNS = [
     re.compile(
         rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD})"
-        rf"\s+(?P<city>[A-Za-z][A-Za-z .'-]+?),\s*"
+        rf"\s*,?\s*(?P<city>[A-Za-z][A-Za-z .'-]+?)\s*,\s*Placer County",
+        re.I,
+    ),
+    re.compile(
+        rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD})"
+        rf"\s+,?\s*(?P<city>[A-Za-z][A-Za-z .'-]+?),\s*"
         rf"(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
         re.I,
     ),
@@ -51,17 +56,29 @@ ADDR_PATTERNS = [
         re.I,
     ),
     re.compile(
-        rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD})"
-        rf"\s+(?P<city>[A-Za-z][A-Za-z .'-]+?)\s*,\s*Placer County",
-        re.I,
-    ),
-    re.compile(
         r"(?P<street>\d{1,6}\s+[^\n]+?)\s+"
         r"(?P<city>[A-Za-z][A-Za-z .'-]+),\s*"
         r"(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{5}(?:-\d{4})?)?",
         re.I,
     ),
 ]
+COUNTY_NOISE_RE = re.compile(r",?\s*Placer(?:\s+County)?\b,?", re.I)
+NOT_CITIES = {"placer", "placer county", "county", "california"}
+
+
+def _strip_county_noise(text: str) -> str:
+    text = COUNTY_NOISE_RE.sub(",", text)
+    text = re.sub(r"\s*,\s*,+", ",", text)
+    return re.sub(r"\s+", " ", text).strip(" ,")
+
+
+def _usable_city(city: str) -> str:
+    low = re.sub(r"\s+", " ", (city or "").strip().lower())
+    if not low or low in NOT_CITIES or low.endswith(" county"):
+        return ""
+    return (city or "").strip()
+
+
 PERSONAL_RE = re.compile(r"Personal property:\s*\$?\s*(?P<amt>[0-9,]+(?:\.\d{2})?)", re.I)
 REAL_RE = re.compile(
     r"Gross fair market value of real property:\s*\$?\s*(?P<amt>[0-9,]+(?:\.\d{2})?)",
@@ -93,13 +110,14 @@ def _parse_address(body: str, *, prefix: str = "decedent") -> dict:
         body,
         flags=re.I,
     )
+    body = _strip_county_noise(body)
     for pattern in ADDR_PATTERNS:
         addr = pattern.search(body)
         if not addr:
             continue
         street = re.sub(r"\s+", " ", addr.group("street")).strip(" ,.")
-        city = addr.group("city").strip(" ,.")
-        if city.lower() in {"road", "street", "lane", "drive", "way", "court"}:
+        city = _usable_city(addr.group("city"))
+        if not city or city.lower() in {"road", "street", "lane", "drive", "way", "court"}:
             continue
         state = (addr.groupdict().get("state") or "CA").upper()
         zipp = addr.groupdict().get("zip") or ""
