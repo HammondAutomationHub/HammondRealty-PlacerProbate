@@ -21,7 +21,7 @@ ADDR_FLEX_RE = re.compile(
     re.I,
 )
 ADDRESS1_TYPE = "home"
-ADDRESS2_TYPE = "subject property"
+ADDRESS2_TYPE = "decedent"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -296,7 +296,7 @@ PROBATE_SOURCE_FIELDS = [
         "key": "decedent_residence",
         "label": "Last residence (DE-111)",
         "source": "Petition PDF",
-        "notes": "Sent as person.addresses type “subject property”. Not a verified APN.",
+        "notes": "FUB Address 2 (decedent). Line 2 is left empty. Not a verified APN.",
         "person": "addresses",
         "custom": True,
     },
@@ -537,7 +537,7 @@ FUB_BUILTIN_FIELDS = [
     {"name": "lastName", "label": "Last name", "group": "Person", "type": "person"},
     {"name": "assignedTo", "label": "Assigned to", "group": "Person", "type": "person"},
     {"name": "addresses", "label": "Address 1 (petitioner)", "group": "Person", "type": "person"},
-    {"name": "address2", "label": "Address 2 (subject property)", "group": "Person", "type": "person"},
+    {"name": "address2", "label": "Address 2 (decedent)", "group": "Person", "type": "person"},
     {"name": "stage", "label": "Stage", "group": "Person", "type": "person"},
     {"name": "source", "label": "Lead source", "group": "Person", "type": "person"},
     {"name": "tags", "label": "Tags", "group": "Person", "type": "person"},
@@ -577,7 +577,7 @@ SEND_TOGGLES = [
     {"key": "phones", "label": "Send petitioner phone", "editable": True},
     {
         "key": "subject_property_address",
-        "label": "Send last residence as Address 2 (subject property)",
+        "label": "Send decedent last residence as Address 2",
         "editable": True,
     },
     {
