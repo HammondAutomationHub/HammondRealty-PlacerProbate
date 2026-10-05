@@ -640,7 +640,7 @@ GO_NO_GO = [
     "Never map attorney_phone onto person.phones. Attorney stays a custom field at most.",
     "Last residence is DE-111 text, not a verified APN. Case Summary URLs 404 unless you search first.",
     "DE-111 is downloaded from eCourt and attached to the person Files tab on Verify and on a full import. Preview does not upload.",
-    "Only NEW cases are created on a full run. Verify one FUB import updates the last test person when that case is still in the window; it creates only if none of the current go-cases already exist in Follow Up Boss.",
+    "Only NEW cases are created on a full run. Verify can update a person ID you enter, reuse the last test person, or create one if none exist.",
 ]
 
 
@@ -1680,6 +1680,16 @@ def _rows_for_export(rows: list[dict], state: dict, *, verify: bool) -> list[dic
     return preferred + existing + fresh
 
 
+def _forced_verify_person_id() -> int | None:
+    if not _env_bool("FUB_VERIFY_EXISTING"):
+        return None
+    raw = str(os.environ.get("FUB_VERIFY_PERSON_ID") or "").strip()
+    if not raw.isdigit():
+        return None
+    pid = int(raw)
+    return pid if pid > 0 else None
+
+
 def is_new_row(row: dict) -> bool:
     return bool(row.get("first_seen") or str(row.get("status") or "").lower() == "new")
 
@@ -2242,15 +2252,25 @@ def export_new_leads(
     }
     strict = _env_bool("FUB_STRICT_PROPERTY")
     verify = _env_bool("FUB_VERIFY_ONLY")
+    forced_id = _forced_verify_person_id() if verify else None
+    if verify and _env_bool("FUB_VERIFY_EXISTING") and forced_id is None:
+        summary["error"] = "Use existing is on but Follow Up Boss person ID is empty"
+        print(summary["error"], flush=True)
+        print("FUB: posted=0 updated=0 skipped=0", flush=True)
+        return summary
     system = str(mapping.get("system") or "PlacerProbateMonitor")
     allowed_custom = fub_custom_field_names()
     cases = state.setdefault("cases", {})
     posted_case = None
     posted_pid = None
-    work_rows = _rows_for_export(rows, state, verify=verify)
+    work_rows = list(rows) if forced_id else _rows_for_export(rows, state, verify=verify)
+    if forced_id:
+        print(f"FUB verify: updating existing person_id={forced_id}", flush=True)
     for row in work_rows:
         key = case_key(row)
         existing_id = stored_person_id(state, key) if key else None
+        if forced_id is not None:
+            existing_id = forced_id
         reason = gate_reason(
             row,
             state,

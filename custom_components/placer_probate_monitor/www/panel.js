@@ -54,10 +54,10 @@ function ppmSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function ppmRunJob(hass, action) {
+async function ppmRunJob(hass, action, extra) {
   const before = await hass.callApi("GET", "placer_probate_monitor/job");
   const beforeRun = before.last_run;
-  await hass.callApi("POST", "placer_probate_monitor/job", { action });
+  await hass.callApi("POST", "placer_probate_monitor/job", { action, ...(extra || {}) });
   for (let i = 0; i < 120; i += 1) {
     await ppmSleep(3000);
     const st = await hass.callApi("GET", "placer_probate_monitor/job");
@@ -801,13 +801,16 @@ class PlacerProbateFubPanel extends HTMLElement {
             <label>Event type</label>
             <select id="fub_event_type"></select>
             <label class="ppm-toggle"><input id="fub_strict_property" type="checkbox" /><span>Require decedent residence before upload</span></label>
-            <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: update the last test person, or create one if none exist</span></label>
+            <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: update one person per run</span></label>
+            <label class="ppm-toggle"><input id="fub_verify_existing" type="checkbox" /><span>Use existing Follow Up Boss person</span></label>
+            <label>Existing person ID</label>
+            <input id="fub_verify_person_id" inputmode="numeric" placeholder="e.g. 12345" />
             <div class="ppm-actions">
               <button id="save-fub" type="button">Save FUB connection</button>
               <button class="secondary" id="preview-one" type="button">Preview one record</button>
               <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
             </div>
-            <p class="ppm-note">Preview does not post. Verify one FUB import reuses the last test person when that case is still in the scrape window, updates name/addresses/notes/files, and creates a new person only if none of the current go-cases already exist in Follow Up Boss.</p>
+            <p class="ppm-note">Preview does not post. Check Use existing and enter a Follow Up Boss person ID to refresh that contact. Leave it unchecked to reuse the last test person, or create one if none exist.</p>
           </section>
           <section class="ppm-card" id="verify-record">
             <h2>Last verify record</h2>
@@ -896,6 +899,8 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._qs("#fub_event_type").value = data.fub_event_type || "Seller Inquiry";
     this._qs("#fub_strict_property").checked = !!data.fub_strict_property;
     this._qs("#fub_verify_only").checked = data.fub_verify_only !== false;
+    this._qs("#fub_verify_existing").checked = !!data.fub_verify_existing;
+    this._qs("#fub_verify_person_id").value = data.fub_verify_person_id || "";
   }
 
   _renderVerify(st) {
@@ -1075,6 +1080,8 @@ class PlacerProbateFubPanel extends HTMLElement {
       fub_event_type: this._qs("#fub_event_type").value,
       fub_strict_property: this._qs("#fub_strict_property").checked,
       fub_verify_only: this._qs("#fub_verify_only").checked,
+      fub_verify_existing: this._qs("#fub_verify_existing").checked,
+      fub_verify_person_id: this._qs("#fub_verify_person_id").value.trim(),
     };
     try {
       const data = await this._hass.callApi("POST", "placer_probate_monitor/fub_settings", body);
@@ -1100,9 +1107,23 @@ class PlacerProbateFubPanel extends HTMLElement {
   }
 
   async _verify() {
-    this._flash("Verify started… scraping Placer, then importing one go-case.", true);
+    const useExisting = this._qs("#fub_verify_existing").checked;
+    const personId = (this._qs("#fub_verify_person_id").value || "").trim();
+    if (useExisting && !/^\d+$/.test(personId)) {
+      this._flash("Enter the Follow Up Boss person ID to update.", false);
+      return;
+    }
+    this._flash(
+      useExisting
+        ? `Verify started… updating FUB person ${personId}.`
+        : "Verify started… scraping Placer, then importing one go-case.",
+      true,
+    );
     try {
-      const st = await ppmRunJob(this._hass, "verify");
+      const st = await ppmRunJob(this._hass, "verify", {
+        fub_verify_existing: useExisting,
+        fub_verify_person_id: personId,
+      });
       const ok = st.last_result !== "failed" && st.last_result !== "running";
       this._renderVerify(st);
       const rec = ppmPreviewRecord(st);

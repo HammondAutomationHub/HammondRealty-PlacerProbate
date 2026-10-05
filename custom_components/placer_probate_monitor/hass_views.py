@@ -22,6 +22,8 @@ from .const import (
     CONF_FUB_SOURCE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
+    CONF_FUB_VERIFY_EXISTING,
+    CONF_FUB_VERIFY_PERSON_ID,
     CONF_GENERATE_PDF,
     CONF_KEYWORDS,
     CONF_LOOKAHEAD_DAYS,
@@ -42,7 +44,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.21"
+PANEL_JS_VERSION = "1.3.22"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -68,6 +70,8 @@ FUB_KEYS = {
     CONF_FUB_EVENT_TYPE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
+    CONF_FUB_VERIFY_EXISTING,
+    CONF_FUB_VERIFY_PERSON_ID,
 }
 INT_KEYS = {CONF_LOOKBACK_DAYS, CONF_LOOKAHEAD_DAYS, CONF_MAX_PAGES}
 BOOL_KEYS = {
@@ -76,6 +80,7 @@ BOOL_KEYS = {
     CONF_FUB_ENABLED,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
+    CONF_FUB_VERIFY_EXISTING,
 }
 
 
@@ -149,6 +154,10 @@ def _public_fub(settings: dict) -> dict:
         CONF_FUB_EVENT_TYPE: settings.get(CONF_FUB_EVENT_TYPE) or "Seller Inquiry",
         CONF_FUB_STRICT_PROPERTY: bool(settings.get(CONF_FUB_STRICT_PROPERTY)),
         CONF_FUB_VERIFY_ONLY: bool(settings.get(CONF_FUB_VERIFY_ONLY, True)),
+        CONF_FUB_VERIFY_EXISTING: bool(settings.get(CONF_FUB_VERIFY_EXISTING, False)),
+        CONF_FUB_VERIFY_PERSON_ID: str(
+            settings.get(CONF_FUB_VERIFY_PERSON_ID) or ""
+        ).strip(),
         "event_types": FUB_EVENT_TYPES,
     }
 
@@ -294,6 +303,9 @@ class FubSettingsView(HomeAssistantView):
                     continue
                 merged[key] = value
                 continue
+            if key == CONF_FUB_VERIFY_PERSON_ID:
+                merged[key] = str(body[key] or "").strip()
+                continue
             try:
                 merged[key] = _coerce(key, body[key])
             except (TypeError, ValueError):
@@ -395,6 +407,25 @@ class JobView(HomeAssistantView):
                     {"ok": False, "error": "Set the Follow Up Boss API key first."},
                     status_code=400,
                 )
+            use_existing = _coerce(
+                CONF_FUB_VERIFY_EXISTING,
+                body.get(CONF_FUB_VERIFY_EXISTING, settings.get(CONF_FUB_VERIFY_EXISTING)),
+            )
+            person_id = str(
+                body.get(CONF_FUB_VERIFY_PERSON_ID, settings.get(CONF_FUB_VERIFY_PERSON_ID) or "")
+            ).strip()
+            if use_existing and (not person_id.isdigit() or int(person_id) <= 0):
+                return self.json(
+                    {
+                        "ok": False,
+                        "error": "Enter the Follow Up Boss person ID to update.",
+                    },
+                    status_code=400,
+                )
+            merged = dict(settings)
+            merged[CONF_FUB_VERIFY_EXISTING] = bool(use_existing)
+            merged[CONF_FUB_VERIFY_PERSON_ID] = person_id
+            self.hass.config_entries.async_update_entry(entry, options=merged)
             self.hass.async_create_task(
                 runner(
                     "verify_fub",
@@ -402,6 +433,8 @@ class JobView(HomeAssistantView):
                         CONF_FUB_ENABLED: True,
                         CONF_FUB_VERIFY_ONLY: True,
                         CONF_SEND_EMAIL: False,
+                        CONF_FUB_VERIFY_EXISTING: bool(use_existing),
+                        CONF_FUB_VERIFY_PERSON_ID: person_id,
                     },
                 )
             )

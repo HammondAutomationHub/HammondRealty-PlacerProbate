@@ -42,6 +42,8 @@ from .const import (
     CONF_FUB_SOURCE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
+    CONF_FUB_VERIFY_EXISTING,
+    CONF_FUB_VERIFY_PERSON_ID,
     CONF_GENERATE_PDF,
     CONF_KEYWORDS,
     CONF_LOOKAHEAD_DAYS,
@@ -139,6 +141,12 @@ def apply_env(
     os.environ["FUB_VERIFY_ONLY"] = (
         "1" if settings.get(CONF_FUB_VERIFY_ONLY) else "0"
     )
+    os.environ["FUB_VERIFY_EXISTING"] = (
+        "1" if settings.get(CONF_FUB_VERIFY_EXISTING) else "0"
+    )
+    os.environ["FUB_VERIFY_PERSON_ID"] = str(
+        settings.get(CONF_FUB_VERIFY_PERSON_ID) or ""
+    ).strip()
     if mapping_path:
         os.environ["FUB_MAPPING_PATH"] = str(mapping_path)
     if hass is not None:
