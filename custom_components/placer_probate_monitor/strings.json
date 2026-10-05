@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Delivery and schedule",
-        "description": "Who gets the digest and how often the monitor runs. Gmail needs an App Password.",
+        "description": "Who gets the digest and how often the monitor runs. Gmail needs an App Password. Follow Up Boss enable is on this screen; API key is on the last screen. After a full Home Assistant restart, use the sidebar item Probate FUB map.",
         "data": {
           "recipients": "Email recipients (one per line)",
           "frequency": "Frequency",
@@ -17,7 +17,8 @@
           "smtp_user": "SMTP username",
           "smtp_password": "SMTP password",
           "mail_from": "From address",
-          "run_on_start": "Run when Home Assistant starts"
+          "run_on_start": "Run when Home Assistant starts",
+          "fub_enabled": "Enable Follow Up Boss export"
         }
       },
       "search": {
@@ -69,7 +70,8 @@
           "smtp_user": "SMTP username",
           "smtp_password": "SMTP password",
           "mail_from": "From address",
-          "run_on_start": "Run when Home Assistant starts"
+          "run_on_start": "Run when Home Assistant starts",
+          "fub_enabled": "Enable Follow Up Boss export"
         }
       },
       "search": {

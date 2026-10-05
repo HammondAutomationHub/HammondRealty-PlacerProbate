@@ -4,6 +4,7 @@
   "codeowners": ["@HammondAutomationHub"],
   "config_flow": true,
   "documentation": "https://github.com/HammondAutomationHub/HammondRealty-PlacerProbate",
+  "dependencies": ["frontend", "http"],
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/HammondAutomationHub/HammondRealty-PlacerProbate/issues",
@@ -15,5 +16,5 @@
     "tzdata>=2024.1",
     "PyYAML>=6.0.1"
   ],
-  "version": "1.1.0"
+  "version": "1.1.1"
 }

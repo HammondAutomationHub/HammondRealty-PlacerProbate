@@ -107,6 +107,9 @@ def _delivery_schema(defaults: dict) -> vol.Schema:
             vol.Required(
                 CONF_RUN_ON_START, default=bool(defaults.get(CONF_RUN_ON_START, False))
             ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_FUB_ENABLED, default=bool(defaults.get(CONF_FUB_ENABLED, False))
+            ): selector.BooleanSelector(),
         }
     )
 

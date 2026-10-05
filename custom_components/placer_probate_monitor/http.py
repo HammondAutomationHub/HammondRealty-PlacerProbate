@@ -18,6 +18,7 @@ from .fub_client import mapping_payload, save_mapping
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
+PANEL_JS = WWW / "panel.js"
 PANEL_URL_PATH = "placer-probate-fub"
 
 
@@ -47,6 +48,17 @@ class FubMapPageView(HomeAssistantView):
 
     async def get(self, request):
         return web.FileResponse(MAP_HTML)
+
+
+class FubPanelJsView(HomeAssistantView):
+    """Frontend loads this without a bearer token."""
+
+    url = "/api/placer_probate_monitor/panel.js"
+    name = "api:placer_probate_monitor:panel_js"
+    requires_auth = False
+
+    async def get(self, request):
+        return web.FileResponse(PANEL_JS)
 
 
 class FubMappingView(HomeAssistantView):
@@ -88,33 +100,37 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     if hass.data.setdefault(DOMAIN, {}).get("_fub_views"):
         return
     hass.http.register_view(FubMapPageView())
+    hass.http.register_view(FubPanelJsView())
     hass.http.register_view(FubMappingView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 
 
 def async_setup_mapping_ui(hass: HomeAssistant) -> None:
     async_setup_mapping_views(hass)
+    config = {
+        "_panel_custom": {
+            "name": "placer-probate-fub-panel",
+            "embed_iframe": True,
+            "trust_external": False,
+            "js_url": "/api/placer_probate_monitor/panel.js",
+        }
+    }
+    kwargs = {
+        "component_name": "custom",
+        "sidebar_title": "Probate FUB map",
+        "sidebar_icon": "mdi:sitemap",
+        "frontend_url_path": PANEL_URL_PATH,
+        "config": config,
+        "require_admin": True,
+    }
     try:
-        frontend.async_register_built_in_panel(
-            hass,
-            component_name="iframe",
-            sidebar_title="Probate FUB map",
-            sidebar_icon="mdi:sitemap",
-            frontend_url_path=PANEL_URL_PATH,
-            config={"url": "/api/placer_probate_monitor/fub_map"},
-            require_admin=True,
-            update=True,
-        )
+        frontend.async_register_built_in_panel(hass, **kwargs, update=True)
     except TypeError:
-        frontend.async_register_built_in_panel(
-            hass,
-            component_name="iframe",
-            sidebar_title="Probate FUB map",
-            sidebar_icon="mdi:sitemap",
-            frontend_url_path=PANEL_URL_PATH,
-            config={"url": "/api/placer_probate_monitor/fub_map"},
-            require_admin=True,
-        )
+        try:
+            frontend.async_remove_panel(hass, PANEL_URL_PATH)
+        except Exception:  # noqa: BLE001
+            pass
+        frontend.async_register_built_in_panel(hass, **kwargs)
 
 
 def async_unload_mapping_ui(hass: HomeAssistant) -> None:
