@@ -512,6 +512,20 @@ class PlacerProbateFubPanel extends HTMLElement {
               <textarea id="skip_petitioner_contains"></textarea>
             </section>
             <section class="ppm-card">
+              <h2>Inspect a live FUB person</h2>
+              <p class="ppm-note">Pull one existing Follow Up Boss contact to see which built-in and custom fields are populated. Use those API names in the mapping below. This does not change FUB.</p>
+              <div class="ppm-row">
+                <div>
+                  <label>Person id or name</label>
+                  <input id="fub-person-q" placeholder="e.g. 12345 or Jane Doe" />
+                </div>
+              </div>
+              <div class="ppm-actions">
+                <button class="secondary" id="load-person" type="button">Pull FUB person</button>
+              </div>
+              <div id="fub-person"></div>
+            </section>
+            <section class="ppm-card">
               <h2>Custom field associations</h2>
               <p class="ppm-note">These targets are Follow Up Boss fields. Source columns are from the selected county extract (currently Placer).</p>
               <div class="ppm-actions" style="margin-top:0;">
@@ -531,6 +545,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     });
     this._qs("#save").addEventListener("click", () => this._saveMapping());
     this._qs("#load-fub").addEventListener("click", () => this._loadMapping(true));
+    this._qs("#load-person").addEventListener("click", () => this._loadPerson());
     this._qs("#save-fub").addEventListener("click", () => this._saveSettings());
     this._qs("#verify-fub").addEventListener("click", () => this._verify());
     this._qs("#preview-one").addEventListener("click", () => this._preview());
@@ -658,6 +673,43 @@ class PlacerProbateFubPanel extends HTMLElement {
 
   async _loadMapping(refresh) {
     await this._loadAll(refresh);
+  }
+
+  async _loadPerson() {
+    const q = (this._qs("#fub-person-q").value || "").trim();
+    const el = this._qs("#fub-person");
+    if (!q) {
+      this._flash("Enter a Follow Up Boss person id or name.", false);
+      return;
+    }
+    this._flash("Loading person from Follow Up Boss…", true);
+    try {
+      const data = await this._hass.callApi(
+        "GET",
+        "placer_probate_monitor/fub_person?q=" + encodeURIComponent(q),
+      );
+      const core = (data.core || []).map((item) =>
+        `<tr><th>${ppmEsc(item.name)}</th><td>${item.populated ? ppmCell(item.value) : "—"}</td><td>${item.populated ? '<span class="ppm-pill live">Set</span>' : '<span class="ppm-pill wait">Empty</span>'}</td></tr>`
+      ).join("");
+      const custom = (data.custom_fields || []).map((item) =>
+        `<tr><td><b>${ppmEsc(item.label)}</b><div class="ppm-note">${ppmEsc(item.name)}${item.type ? " · " + ppmEsc(item.type) : ""}</div></td><td>${item.populated ? ppmCell(item.value) : "—"}</td><td>${item.populated ? '<span class="ppm-pill live">Set</span>' : '<span class="ppm-pill wait">Empty</span>'}</td></tr>`
+      ).join("");
+      const extra = (data.extra_fields || []).map((item) =>
+        `<tr><th>${ppmEsc(item.name)}</th><td>${ppmCell(item.value)}</td></tr>`
+      ).join("");
+      el.innerHTML = `
+        <p class="ppm-note">Person id ${ppmEsc(data.person_id)} · ${ppmEsc(data.custom_populated)} of ${ppmEsc(data.custom_total)} custom fields have values. Map probate columns to the <b>name</b> (not the label).</p>
+        <h2>Built-in person fields</h2>
+        <table><thead><tr><th>Field</th><th>Value</th><th></th></tr></thead><tbody>${core}</tbody></table>
+        <h2 style="margin-top:16px;">Custom fields in this FUB account</h2>
+        <table><thead><tr><th>FUB field</th><th>Value on this person</th><th></th></tr></thead><tbody>${custom || '<tr><td colspan="3">No custom fields on this account.</td></tr>'}</tbody></table>
+        ${extra ? `<h2 style="margin-top:16px;">Other populated keys</h2><table><tbody>${extra}</tbody></table>` : ""}
+      `;
+      this._flash(`Loaded FUB person ${data.person_id}.`, true);
+    } catch (err) {
+      el.innerHTML = "";
+      this._flash(String(err), false);
+    }
   }
 
   async _saveSettings() {

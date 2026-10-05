@@ -32,9 +32,9 @@ from .const import (
     DOMAIN,
     FUB_EVENT_TYPES,
 )
-from .fub_client import mapping_payload, save_mapping, sources_payload
+from .fub_client import inspect_fub_person, mapping_payload, save_mapping, sources_payload
 
-PANEL_JS_VERSION = "1.2.8"
+PANEL_JS_VERSION = "1.2.9"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -204,6 +204,22 @@ class FubMappingView(HomeAssistantView):
         except ValueError as exc:
             return self.json({"error": str(exc)}, status_code=400)
         return self.json(payload)
+
+
+class FubPersonView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/fub_person"
+    name = "api:placer_probate_monitor:fub_person"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        _apply_key(self.hass)
+        query = str(request.query.get("q") or request.query.get("id") or "")
+        payload = await self.hass.async_add_executor_job(inspect_fub_person, query)
+        status = 200 if payload.get("person_id") else 400
+        return self.json(payload, status_code=status)
 
 
 class SourcesView(HomeAssistantView):
@@ -395,6 +411,7 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(FubMapPageView())
     hass.http.register_view(FubPanelJsView())
     hass.http.register_view(FubMappingView(hass))
+    hass.http.register_view(FubPersonView(hass))
     hass.http.register_view(SourcesView(hass))
     hass.http.register_view(FubSettingsView(hass))
     hass.http.register_view(JobView(hass))

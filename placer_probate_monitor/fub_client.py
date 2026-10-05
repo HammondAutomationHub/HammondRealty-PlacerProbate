@@ -806,6 +806,169 @@ def list_fub_custom_fields(
     return {"fields": fields, "error": None}
 
 
+PERSON_CORE_KEYS = {
+    "id",
+    "created",
+    "updated",
+    "createdById",
+    "createdBy",
+    "lastActivity",
+    "name",
+    "firstName",
+    "lastName",
+    "stage",
+    "source",
+    "sourceUrl",
+    "assignedTo",
+    "assignedUserId",
+    "assignedToId",
+    "emails",
+    "phones",
+    "addresses",
+    "tags",
+    "background",
+    "pictureId",
+    "collaborators",
+    "contacted",
+    "price",
+    "timeframe",
+    "website",
+    "timeZone",
+}
+
+
+def _fub_display_value(value) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict):
+                bits = [
+                    str(item.get(key) or "")
+                    for key in (
+                        "value",
+                        "email",
+                        "number",
+                        "phone",
+                        "street",
+                        "city",
+                        "state",
+                        "code",
+                        "type",
+                    )
+                    if item.get(key)
+                ]
+                parts.append(" ".join(bits) if bits else json.dumps(item, default=str))
+            else:
+                parts.append(str(item))
+        return "; ".join(part for part in parts if part)
+    if isinstance(value, dict):
+        return json.dumps(value, default=str)
+    return str(value)
+
+
+def inspect_fub_person(query: str) -> dict:
+    key = (os.environ.get("FUB_API_KEY") or "").strip()
+    url = os.environ.get("FUB_API_URL") or "https://api.followupboss.com/v1"
+    text = (query or "").strip()
+    if not key:
+        return {"error": "No Follow Up Boss API key configured.", "person": None}
+    if not text:
+        return {"error": "Enter a FUB person id or a name to search.", "person": None}
+    try:
+        if text.isdigit():
+            response = requests.get(
+                f"{_api_root(url)}/people/{text}",
+                auth=(key, ""),
+                headers={"Accept": "application/json"},
+                timeout=20,
+            )
+            payload = response.json() if response.content else {}
+            if response.status_code >= 400:
+                return {
+                    "error": f"FUB HTTP {response.status_code}: {str(payload)[:300]}",
+                    "person": None,
+                }
+            person = payload.get("person") if isinstance(payload.get("person"), dict) else payload
+        else:
+            response = requests.get(
+                f"{_api_root(url)}/people",
+                params={"query": text, "limit": 5},
+                auth=(key, ""),
+                headers={"Accept": "application/json"},
+                timeout=20,
+            )
+            payload = response.json() if response.content else {}
+            if response.status_code >= 400:
+                return {
+                    "error": f"FUB HTTP {response.status_code}: {str(payload)[:300]}",
+                    "person": None,
+                }
+            rows = payload.get("people") if isinstance(payload, dict) else payload
+            if not isinstance(rows, list) or not rows:
+                return {"error": f"No people matched “{text}”.", "person": None}
+            person = rows[0] if isinstance(rows[0], dict) else None
+        if not isinstance(person, dict):
+            return {"error": "Follow Up Boss returned no person object.", "person": None}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)[:300], "person": None}
+
+    catalog = list_fub_custom_fields()
+    custom_meta = {item["name"]: item for item in (catalog.get("fields") or [])}
+    core = []
+    for name in (
+        "id",
+        "firstName",
+        "lastName",
+        "name",
+        "stage",
+        "source",
+        "assignedTo",
+        "emails",
+        "phones",
+        "addresses",
+        "tags",
+        "created",
+        "updated",
+    ):
+        value = _fub_display_value(person.get(name))
+        core.append({"name": name, "value": value, "populated": bool(value)})
+    custom = []
+    for name, meta in custom_meta.items():
+        value = _fub_display_value(person.get(name))
+        custom.append(
+            {
+                "name": name,
+                "label": meta.get("label") or name,
+                "type": meta.get("type") or "",
+                "value": value,
+                "populated": bool(value),
+            }
+        )
+    extras = []
+    known = PERSON_CORE_KEYS | set(custom_meta)
+    for name, raw in person.items():
+        if name in known:
+            continue
+        value = _fub_display_value(raw)
+        if not value:
+            continue
+        extras.append({"name": str(name), "value": value, "populated": True})
+    populated_custom = sum(1 for item in custom if item["populated"])
+    return {
+        "error": None,
+        "custom_error": catalog.get("error"),
+        "person_id": person.get("id"),
+        "query": text,
+        "core": core,
+        "custom_fields": custom,
+        "extra_fields": extras,
+        "custom_populated": populated_custom,
+        "custom_total": len(custom),
+    }
+
+
 def mapping_payload(path: Path | None = None, *, fetch_fub: bool = True) -> dict:
     mapping = load_mapping(path)
     live = list_fub_custom_fields() if fetch_fub else {"fields": [], "error": None}
