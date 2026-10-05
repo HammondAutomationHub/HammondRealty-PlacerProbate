@@ -363,6 +363,10 @@ function ppmRenderPreview(el, st) {
     <tr><th>assignedTo</th><td>${ppmCell(rec.assignedTo)}</td></tr>
     <tr><th>addresses</th><td>${ppmCell(addrLine)}</td></tr>
   `;
+  const attach = rec.de111_attach || {};
+  const attachLine = attach.ok
+    ? (attach.file ? `${attach.file} (${attach.reason || "attached"})` : (attach.reason || "attached"))
+    : (attach.reason || (posted ? "not attached" : ""));
   const heading = viewOnly
     ? "Last live extract (view only)"
     : (posted ? (updated ? "Last verify record (updated)" : "Last verify record (posted)") : "Last verify record");
@@ -370,8 +374,8 @@ function ppmRenderPreview(el, st) {
     ? "This is one live go-case from Placer. Follow Up Boss was not updated."
     : (posted
       ? (updated
-        ? "This existing Follow Up Boss person was updated with the current mapping. Confirm Address 1/2, notes, and name in FUB."
-        : "This go-case was posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only.")
+        ? "This existing Follow Up Boss person was updated with the current mapping, including the DE-111 on Files. Confirm Address 1/2, notes, name, and Files in FUB."
+        : "This go-case was posted to Follow Up Boss, including the DE-111 on Files. Confirm it in FUB, then turn off Verify only.")
       : "This is the go-case Verify tried to upload. Follow Up Boss did not accept it.");
   const pill = viewOnly
     ? '<span class="ppm-pill wait">VIEW ONLY</span>'
@@ -403,6 +407,7 @@ function ppmRenderPreview(el, st) {
             <tr><th>event type</th><td>${ppmCell(mapped.event_type || rec.event_type)}</td></tr>
             <tr><th>lead source</th><td>${ppmCell(mapped.lead_source || rec.lead_source)}</td></tr>
             <tr><th>system</th><td>${ppmCell(mapped.system)}</td></tr>
+            ${attachLine && !viewOnly ? `<tr><th>Files</th><td>${ppmCell(attachLine)}</td></tr>` : ""}
           </tbody>
         </table>
         ${mapped.message ? `<label>Event message</label><p class="ppm-pre">${ppmCell(mapped.message)}</p>` : ""}
@@ -802,7 +807,7 @@ class PlacerProbateFubPanel extends HTMLElement {
               <button class="secondary" id="preview-one" type="button">Preview one record</button>
               <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
             </div>
-            <p class="ppm-note">Preview one record pulls a live go-case so you can check extracted values and the mapped Follow Up Boss look. It does not post. Verify one FUB import creates one new person, or updates one existing person if every go-case was already sent.</p>
+            <p class="ppm-note">Preview one record pulls a live go-case so you can check extracted values and the mapped Follow Up Boss look. It does not post and does not upload files. Verify one FUB import creates or updates one person and uploads that case's DE-111 to Files.</p>
           </section>
           <section class="ppm-card" id="verify-record">
             <h2>Last verify record</h2>

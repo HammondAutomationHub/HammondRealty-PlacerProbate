@@ -639,7 +639,7 @@ GO_NO_GO = [
     "Petitioner address, email, and phone come from DE-111 item 1.",
     "Never map attorney_phone onto person.phones. Attorney stays a custom field at most.",
     "Last residence is DE-111 text, not a verified APN. Case Summary URLs 404 unless you search first.",
-    "DE-111 is downloaded from eCourt and attached to the person Files tab. Preview does not upload.",
+    "DE-111 is downloaded from eCourt and attached to the person Files tab on Verify and on a full import. Preview does not upload.",
     "Only NEW cases are created on a full run. Verify one FUB import may use an already-seen case that has never been sent to Follow Up Boss.",
 ]
 
@@ -2126,17 +2126,19 @@ def attach_de111_file(
     system: str,
     cases: dict,
     key: str,
-) -> None:
+    force: bool = False,
+) -> dict:
     send = mapping.get("send") or {}
     if not send.get("de111_file", True):
-        return
+        print(f"FUB files skip {key}: de111_file toggle off", flush=True)
+        return {"ok": False, "reason": "disabled"}
     record = cases.get(key) or {}
-    if record.get("fub_attachment_id"):
-        return
+    if record.get("fub_attachment_id") and not force:
+        return {"ok": True, "reason": "already_attached", "id": record.get("fub_attachment_id")}
     path = _petition_pdf_path(row)
     if not path:
         print(f"FUB files skip {key}: no DE-111 PDF", flush=True)
-        return
+        return {"ok": False, "reason": "no_pdf"}
     case = case_key(row)
     file_name = f"{petition_safe_case(case)}_DE-111.pdf"
     uri = petition_public_uri(case)
@@ -2159,6 +2161,12 @@ def attach_de111_file(
         f"attachment_id={attachment_id or 'ok'}",
         flush=True,
     )
+    return {
+        "ok": True,
+        "reason": "attached",
+        "id": attachment_id,
+        "file": file_name,
+    }
 
 
 def person_id_from_response(body: dict) -> int | None:
@@ -2281,7 +2289,7 @@ def export_new_leads(
                 summary["verify_record"] = record_view
                 print(f"FUB updated {key} person_id={pid}")
                 try:
-                    attach_de111_file(
+                    attached = attach_de111_file(
                         row,
                         pid,
                         mapping=mapping,
@@ -2290,8 +2298,13 @@ def export_new_leads(
                         system=system,
                         cases=cases,
                         key=key,
+                        force=verify,
                     )
+                    record_view["de111_attach"] = attached
+                    summary["verify_record"] = record_view
                 except Exception as file_exc:  # noqa: BLE001
+                    record_view["de111_attach"] = {"ok": False, "reason": str(file_exc)[:300]}
+                    summary["verify_record"] = record_view
                     print(f"FUB files error {key}: {file_exc}", flush=True)
                 if verify:
                     break
@@ -2329,7 +2342,7 @@ def export_new_leads(
             except Exception as note_exc:  # noqa: BLE001
                 print(f"FUB notes error {key}: {note_exc}", flush=True)
             try:
-                attach_de111_file(
+                attached = attach_de111_file(
                     row,
                     pid,
                     mapping=mapping,
@@ -2338,8 +2351,11 @@ def export_new_leads(
                     system=system,
                     cases=cases,
                     key=key,
+                    force=verify,
                 )
+                record_view["de111_attach"] = attached
             except Exception as file_exc:  # noqa: BLE001
+                record_view["de111_attach"] = {"ok": False, "reason": str(file_exc)[:300]}
                 print(f"FUB files error {key}: {file_exc}", flush=True)
             summary["posted"] += 1
             posted_case = key
