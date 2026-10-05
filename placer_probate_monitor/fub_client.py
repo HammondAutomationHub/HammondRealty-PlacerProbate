@@ -80,8 +80,11 @@ def _normalize_mapping(data: dict) -> dict:
         normalized_sources["placer"] = {"custom_fields": dict(mapping["custom_fields"])}
     mapping["source_mappings"] = normalized_sources
     mapping["custom_fields"] = _split_person_source_keys(mapping["custom_fields"])
+    mapping["custom_fields"] = _rewrite_address2_keys(mapping["custom_fields"])
     for source_id, block in mapping["source_mappings"].items():
-        block["custom_fields"] = _split_person_source_keys(block.get("custom_fields") or {})
+        block["custom_fields"] = _rewrite_address2_keys(
+            _split_person_source_keys(block.get("custom_fields") or {})
+        )
         mapping["source_mappings"][source_id] = block
     if "placer" in mapping["source_mappings"]:
         mapping["custom_fields"] = dict(
@@ -113,6 +116,23 @@ def _split_person_source_keys(fields: dict) -> dict:
         out["petitioner_first"] = "firstName"
     if not out.get("petitioner_last"):
         out["petitioner_last"] = "lastName"
+    return out
+
+
+def _rewrite_address2_keys(fields: dict) -> dict:
+    aliases = {
+        "mailingaddress",
+        "mailing",
+        "addresses.mailing",
+        "person.mailingaddress",
+    }
+    out: dict[str, str] = {}
+    for key, value in (fields or {}).items():
+        target = str(value or "").strip()
+        low = target.lower()
+        if low.startswith("person."):
+            low = low.split(".", 1)[1]
+        out[str(key)] = "address2" if low in aliases else target
     return out
 
 
@@ -502,8 +522,8 @@ FUB_BUILTIN_FIELDS = [
     {"name": "firstName", "label": "First name", "group": "Person", "type": "person"},
     {"name": "lastName", "label": "Last name", "group": "Person", "type": "person"},
     {"name": "assignedTo", "label": "Assigned to", "group": "Person", "type": "person"},
-    {"name": "addresses", "label": "Addresses (subject property)", "group": "Person", "type": "person"},
-    {"name": "mailingAddress", "label": "Mailing address", "group": "Person", "type": "person"},
+    {"name": "addresses", "label": "Address 1", "group": "Person", "type": "person"},
+    {"name": "address2", "label": "Address 2", "group": "Person", "type": "person"},
     {"name": "stage", "label": "Stage", "group": "Person", "type": "person"},
     {"name": "source", "label": "Lead source", "group": "Person", "type": "person"},
     {"name": "tags", "label": "Tags", "group": "Person", "type": "person"},
@@ -537,11 +557,12 @@ PERSON_BUILTIN_TARGETS = {
     "phones",
 }
 
-ADDRESS_BUILTIN_TARGETS = {
-    "mailingAddress": "mailing",
-    "mailing": "mailing",
-    "addresses.mailing": "mailing",
-    "person.mailingAddress": "mailing",
+ADDRESS_SLOT_TARGETS = {
+    "address2": 1,
+    "address 2": 1,
+    "mailingaddress": 1,
+    "mailing": 1,
+    "addresses.mailing": 1,
 }
 
 SEND_TOGGLES = [
@@ -1121,13 +1142,21 @@ def inspect_fub_person(query: str) -> dict:
         value = _fub_display_value(person.get(name))
         core.append({"name": name, "value": value, "populated": bool(value)})
     mailing_line = ""
-    for item in person.get("addresses") or []:
-        if isinstance(item, dict) and str(item.get("type") or "").lower() == "mailing":
-            mailing_line = _fub_display_value(item)
-            break
+    addresses = person.get("addresses") or []
+    if isinstance(addresses, list) and len(addresses) > 1 and isinstance(addresses[1], dict):
+        mailing_line = _fub_display_value(addresses[1])
+    else:
+        for item in addresses:
+            if isinstance(item, dict) and str(item.get("type") or "").lower() in {
+                "mailing",
+                "address 2",
+                "address2",
+            }:
+                mailing_line = _fub_display_value(item)
+                break
     core.append(
         {
-            "name": "mailingAddress",
+            "name": "address2",
             "value": mailing_line,
             "populated": bool(mailing_line),
         }
@@ -1238,26 +1267,23 @@ def split_address(line: str) -> dict | None:
     }
 
 
-def _upsert_typed_address(person: dict, line: str, addr_type: str) -> None:
+def _set_address_slot(person: dict, line: str, index: int, addr_type: str) -> None:
     addr = split_address(line)
     if not addr:
         return
     addr["type"] = addr_type
-    existing = person.get("addresses")
-    rows = list(existing) if isinstance(existing, list) else []
-    out: list[dict] = []
-    replaced = False
-    for item in rows:
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("type") or "").lower() == addr_type.lower():
-            out.append(addr)
-            replaced = True
-        else:
-            out.append(item)
-    if not replaced:
-        out.append(addr)
-    person["addresses"] = out
+    rows = [item for item in (person.get("addresses") or []) if isinstance(item, dict)]
+    if index <= 0:
+        person["addresses"] = [addr] + rows[1:]
+        return
+    if not rows:
+        person["addresses"] = [addr]
+        return
+    if len(rows) > index:
+        rows[index] = addr
+    else:
+        rows.append(addr)
+    person["addresses"] = rows
 
 
 def case_key(row: dict) -> str:
@@ -1407,20 +1433,24 @@ def build_person(
                 target = target.split(".", 1)[1]
             if target in {"emails", "phones"}:
                 continue
-            if target in ADDRESS_BUILTIN_TARGETS:
-                _upsert_typed_address(
-                    person, str(value), ADDRESS_BUILTIN_TARGETS[target]
+            if target.lower() in ADDRESS_SLOT_TARGETS:
+                slot = ADDRESS_SLOT_TARGETS[target.lower()]
+                _set_address_slot(
+                    person,
+                    str(value),
+                    slot,
+                    "mailing" if slot >= 1 else (
+                        mapping.get("subject_address_type") or "subject property"
+                    ),
                 )
                 continue
             if target == "addresses":
-                addr = split_address(str(value))
-                if addr:
-                    addr["type"] = mapping.get("subject_address_type") or "subject property"
-                    _upsert_typed_address(
-                        person,
-                        str(value),
-                        addr["type"],
-                    )
+                _set_address_slot(
+                    person,
+                    str(value),
+                    0,
+                    mapping.get("subject_address_type") or "subject property",
+                )
                 continue
             if target == "tags":
                 person["tags"] = [str(value)]
