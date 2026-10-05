@@ -1244,6 +1244,10 @@ def export_new_leads(
                 summary["skips"].append({"case": key, "reason": "verify_only_limit"})
                 print(f"FUB skip {key}: verify_only_limit")
                 continue
+            record_view = verify_record_payload(row, person, existing_id, settings, mapping)
+            record_view["view_only"] = False
+            record_view["posted"] = False
+            summary["verify_record"] = record_view
             payload = build_event(row, mapping, settings)
             body = post_event(settings["api_url"], api_key, payload, system)
             pid = person_id_from_response(body)
@@ -1255,19 +1259,24 @@ def export_new_leads(
             summary["posted"] += 1
             posted_case = key
             posted_pid = pid
-            summary["verify_record"] = verify_record_payload(
-                row, person, pid, settings, mapping
-            )
+            record_view["posted"] = True
+            record_view["fub_person_id"] = int(pid)
+            record_view["fub_error"] = None
+            summary["verify_record"] = record_view
             print(f"FUB posted {key} person_id={pid}")
+            if verify:
+                break
         except Exception as exc:  # noqa: BLE001
             summary["skipped"] += 1
             err = str(exc)
             summary["error"] = err[:500]
+            summary["skips"].append({"case": key, "reason": "fub_http_error"})
             if key and key in cases:
                 cases[key]["fub_skip"] = "post_failed"
+            if summary.get("verify_record"):
+                summary["verify_record"]["posted"] = False
+                summary["verify_record"]["fub_error"] = err[:500]
             print(f"FUB error {key}: {err}", flush=True)
-            if verify:
-                continue
             break
     summary["verify_case"] = posted_case
     summary["verify_person_id"] = posted_pid
@@ -1278,14 +1287,21 @@ def export_new_leads(
                 flush=True,
             )
         else:
+            rec = summary.get("verify_record") or {}
+            err = summary.get("error")
             skips = summary.get("skips") or []
-            note = "No new go-case imported"
-            if skips:
-                sample = ", ".join(
-                    f"{item.get('case') or '?'}={item.get('reason')}"
-                    for item in skips[:5]
+            if rec.get("case_number") and err:
+                note = (
+                    f"Mapped {rec.get('case_number')} but Follow Up Boss rejected it: {err}"
                 )
-                note = f"{note}. Skips: {sample}"
+            else:
+                note = "No new go-case imported"
+                if skips:
+                    sample = ", ".join(
+                        f"{item.get('case') or '?'}={item.get('reason')}"
+                        for item in skips[:5]
+                    )
+                    note = f"{note}. Skips: {sample}"
             summary["verify_note"] = note
             print(f"FUB verify: {note}", flush=True)
     print(

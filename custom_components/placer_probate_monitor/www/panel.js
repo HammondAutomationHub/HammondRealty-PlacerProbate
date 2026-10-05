@@ -91,19 +91,38 @@ function ppmSkipTable(skips) {
     <table><thead><tr><th>Case</th><th>Why not shown</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+function ppmPreviewRecord(st) {
+  const rec = st && st.fub_verify;
+  if (!rec || (rec.note && !rec.case_number)) return null;
+  return rec;
+}
+
 function ppmRenderPreview(el, st) {
   if (!el) return;
-  const rec = st && st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
+  const rec = ppmPreviewRecord(st);
   const note = (st && (st.fub_verify_note || (st.fub_verify && st.fub_verify.note))) || "";
   const skips = (st && st.fub_skips) || (rec && rec.skips) || [];
   if (!rec) {
     el.innerHTML = `<h2>Last live extract</h2>
-      <p class="ppm-note">${ppmEsc(note || "Run Preview one extract to pull one live go-case and review the values here.")}</p>
+      <p class="ppm-note">${ppmEsc(note || "Run Preview one extract or Verify one FUB import to show a go-case here.")}</p>
       ${ppmSkipTable(skips)}`;
     return;
   }
   const viewOnly = !!rec.view_only;
-  const extract = rec.source_extract || [];
+  const posted = !!rec.posted && !viewOnly;
+  const fubError = rec.fub_error || (st && st.fub_error) || "";
+  let extract = rec.source_extract || [];
+  if (!extract.length) {
+    extract = [
+      { label: "Case number", source: "CNPA / eCourt", value: rec.case_number, empty: !rec.case_number },
+      { label: "Petitioner", source: "eCourt parties", value: rec.petitioner, empty: !rec.petitioner },
+      { label: "Decedent", source: "CNPA / eCourt", value: rec.decedent, empty: !rec.decedent },
+      { label: "Last residence", source: "Petition PDF", value: rec.decedent_residence, empty: !rec.decedent_residence },
+      { label: "Hearing", source: "eCourt", value: rec.hearing, empty: !rec.hearing },
+      { label: "Notice URL", source: "CNPA", value: rec.notice_url, empty: !rec.notice_url },
+      { label: "Court search", source: "Derived", value: rec.court_search, empty: !rec.court_search },
+    ];
+  }
   const mapped = rec.mapped || {};
   const pulledRows = extract.map((item) => {
     const status = item.unavailable
@@ -121,13 +140,34 @@ function ppmRenderPreview(el, st) {
   const custom = (rec.custom_fields || []).map((item) =>
     `<tr><td>${ppmEsc(item.probate_field)}</td><td>${ppmEsc(item.fub_field)}</td><td>${ppmCell(item.value)}</td></tr>`
   ).join("");
+  const addr = rec.address || {};
+  const addrLine = [addr.street, addr.city, addr.state, addr.code].filter(Boolean).join(", ");
+  const mappedFallback = personRows || `
+    <tr><th>firstName</th><td>${ppmCell(rec.firstName)}</td></tr>
+    <tr><th>lastName</th><td>${ppmCell(rec.lastName)}</td></tr>
+    <tr><th>assignedTo</th><td>${ppmCell(rec.assignedTo)}</td></tr>
+    <tr><th>addresses</th><td>${ppmCell(addrLine)}</td></tr>
+  `;
+  const heading = viewOnly
+    ? "Last live extract (view only)"
+    : (posted ? "Last verify record (posted)" : "Last verify record");
+  const blurb = viewOnly
+    ? "This is one live go-case from Placer. Follow Up Boss was not updated."
+    : (posted
+      ? "This go-case was posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only."
+      : "This is the go-case Verify tried to upload. Follow Up Boss did not accept it.");
+  const pill = viewOnly
+    ? '<span class="ppm-pill wait">VIEW ONLY</span>'
+    : (posted
+      ? '<span class="ppm-pill live">GO · POSTED</span>'
+      : '<span class="ppm-pill off">GO · NOT POSTED</span>');
   el.innerHTML = `
-    <h2>${viewOnly ? "Last live extract (view only)" : "Last posted verify record"}</h2>
-    <p class="ppm-note">${viewOnly
-      ? "This is one live go-case from Placer. Follow Up Boss was not updated."
-      : "This go-case was posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only."}</p>
-    <span class="ppm-pill ${viewOnly ? "wait" : "live"}">${viewOnly ? "VIEW ONLY" : "GO · POSTED"}</span>
+    <h2>${heading}</h2>
+    <p class="ppm-note">${blurb}</p>
+    ${fubError ? `<div class="ppm-banner show err">${ppmEsc(fubError)}</div>` : ""}
+    ${pill}
     <span class="ppm-pill">${ppmEsc(rec.case_number || "")}</span>
+    ${posted && rec.fub_person_id ? `<span class="ppm-pill live">FUB person ${ppmEsc(rec.fub_person_id)}</span>` : ""}
     <div class="ppm-compare">
       <div>
         <h2>1. Pulled from Placer</h2>
@@ -142,7 +182,7 @@ function ppmRenderPreview(el, st) {
         <p class="ppm-note">Person name is the petitioner. Decedent and counsel stay on custom fields.</p>
         <table>
           <tbody>
-            ${personRows}
+            ${mappedFallback}
             <tr><th>event type</th><td>${ppmCell(mapped.event_type || rec.event_type)}</td></tr>
             <tr><th>lead source</th><td>${ppmCell(mapped.lead_source || rec.lead_source)}</td></tr>
             <tr><th>system</th><td>${ppmCell(mapped.system)}</td></tr>
@@ -153,6 +193,7 @@ function ppmRenderPreview(el, st) {
         ${custom ? `<h2 style="margin-top:16px;">Custom fields</h2><table><thead><tr><th>Probate</th><th>FUB</th><th>Value</th></tr></thead><tbody>${custom}</tbody></table>` : ""}
       </div>
     </div>
+    ${note && !posted ? `<p class="ppm-note">${ppmEsc(note)}</p>` : ""}
     ${ppmSkipTable(skips)}
   `;
 }
@@ -363,7 +404,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       this._jobSt = st;
       ppmRenderPreview(this._qs("#source-preview"), st);
       const ok = st.last_result !== "failed" && st.last_result !== "running";
-      const rec = st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
+      const rec = ppmPreviewRecord(st);
       this._flash(
         ok
           ? (rec
@@ -659,14 +700,16 @@ class PlacerProbateFubPanel extends HTMLElement {
       const st = await ppmRunJob(this._hass, "verify");
       const ok = st.last_result !== "failed" && st.last_result !== "running";
       this._renderVerify(st);
-      const rec = st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
+      const rec = ppmPreviewRecord(st);
       this._flash(
         ok
           ? (rec
-            ? `Verify posted ${rec.case_number} as FUB person ${rec.fub_person_id}.`
-            : (st.fub_verify_note || "Verify finished. No new go-case was posted."))
+            ? (rec.posted
+              ? `Verify posted ${rec.case_number} as FUB person ${rec.fub_person_id}.`
+              : `Verify mapped ${rec.case_number} but Follow Up Boss did not accept it. Record is shown below.`)
+            : (st.fub_verify_note || "Verify finished. No go-case was mapped."))
           : (st.last_error || "Verify failed."),
-        ok,
+        ok && !(rec && rec.fub_error),
       );
     } catch (err) {
       this._flash(String(err), false);
@@ -679,7 +722,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       const st = await ppmRunJob(this._hass, "preview");
       const ok = st.last_result !== "failed" && st.last_result !== "running";
       this._renderVerify(st);
-      const rec = st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
+      const rec = ppmPreviewRecord(st);
       this._flash(
         ok
           ? (rec

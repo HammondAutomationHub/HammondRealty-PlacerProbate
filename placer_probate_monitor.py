@@ -713,6 +713,7 @@ def main() -> int:
                 "verify_person_id": fub_summary.get("verify_person_id"),
                 "verify_record": fub_summary.get("verify_record"),
                 "verify_note": fub_summary.get("verify_note"),
+                "skips": fub_summary.get("skips") or [],
             },
             indent=2,
         ),

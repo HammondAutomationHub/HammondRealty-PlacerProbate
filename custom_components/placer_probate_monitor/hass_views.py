@@ -34,7 +34,7 @@ from .const import (
 )
 from .fub_client import mapping_payload, save_mapping, sources_payload
 
-PANEL_JS_VERSION = "1.2.7"
+PANEL_JS_VERSION = "1.2.8"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -300,6 +300,8 @@ class JobView(HomeAssistantView):
             payload["fub_verify_note"] = last.get("verify_note")
         payload["fub_skips"] = last.get("skips") or []
         payload["fub_preview"] = bool(last.get("preview"))
+        if last.get("error"):
+            payload["fub_error"] = last.get("error")
         return payload
 
     async def get(self, request):
