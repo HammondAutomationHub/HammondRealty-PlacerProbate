@@ -52,6 +52,7 @@ DEFAULTS = {
     "fub_assigned_to": "Blake Hammond",
     "fub_event_type": "Seller Inquiry",
     "fub_strict_property": False,
+    "fub_verify_only": True,
 }
 
 WEEKDAYS = [
@@ -248,6 +249,7 @@ def apply_env(settings: dict) -> None:
     os.environ["FUB_ASSIGNED_TO"] = str(settings.get("fub_assigned_to") or "Blake Hammond")
     os.environ["FUB_EVENT_TYPE"] = str(settings.get("fub_event_type") or "Seller Inquiry")
     os.environ["FUB_STRICT_PROPERTY"] = "1" if settings.get("fub_strict_property") else "0"
+    os.environ["FUB_VERIFY_ONLY"] = "1" if settings.get("fub_verify_only") else "0"
     os.environ["FUB_MAPPING_PATH"] = str(DATA / "fub_mapping.yaml")
 
 
@@ -257,11 +259,17 @@ def reports_dir() -> Path:
     return path
 
 
-def run_job(reason: str = "scheduled") -> dict:
+def run_job(reason: str = "scheduled", *, verify_one: bool = False) -> dict:
     if not _run_lock.acquire(blocking=False):
         return {"ok": False, "error": "A run is already in progress."}
     settings = load_settings()
     apply_env(settings)
+    if verify_one:
+        if not str(settings.get("fub_api_key") or "").strip():
+            _run_lock.release()
+            return {"ok": False, "error": "Set the Follow Up Boss API key first."}
+        os.environ["FUB_ENABLED"] = "1"
+        os.environ["FUB_VERIFY_ONLY"] = "1"
     save_status(state="running", running=True, last_error=None)
     zone = tzinfo(settings)
     started = datetime.now(zone).isoformat(timespec="seconds")
@@ -277,12 +285,14 @@ def run_job(reason: str = "scheduled") -> dict:
         "--out-dir",
         str(reports_dir()),
     ]
-    if not settings.get("send_email"):
+    if verify_one or not settings.get("send_email"):
         cmd.append("--no-email")
     if settings.get("skip_portal"):
         cmd.append("--skip-portal")
     if not settings.get("generate_pdf"):
         cmd.append("--no-pdf")
+    if verify_one or settings.get("fub_verify_only"):
+        cmd.append("--fub-verify-one")
     try:
         proc = subprocess.run(
             cmd,
@@ -412,6 +422,17 @@ def api_run():
     return jsonify(result), code
 
 
+@app.post("/api/verify-fub")
+def api_verify_fub():
+    result = run_job("verify_fub", verify_one=True)
+    code = 200 if result.get("ok") else 409 if "already" in str(result.get("error") or "") else 500
+    if result.get("ok"):
+        code = 200
+    if result.get("error") and "API key" in str(result.get("error")):
+        code = 400
+    return jsonify(result), code
+
+
 @app.post("/api/test-email")
 def api_test_email():
     settings = load_settings()
@@ -455,6 +476,13 @@ def api_report_file(name: str):
     if not path.exists() or not path.is_file():
         return jsonify({"error": "not found"}), 404
     return send_file(path, as_attachment=True)
+
+
+@app.get("/api/sources")
+def api_sources():
+    from fub_client import sources_payload
+
+    return jsonify(sources_payload(load_settings()))
 
 
 @app.get("/api/fub-mapping")

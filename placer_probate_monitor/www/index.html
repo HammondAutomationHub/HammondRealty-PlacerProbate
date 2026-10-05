@@ -84,7 +84,7 @@
   <header>
     <h1>Placer probate monitor</h1>
     <p>Home Assistant add-on · Hammond IT Consulting</p>
-    <p style="margin-top:10px;"><a href="/" style="color:#f7f3ec;margin-right:14px;">Settings</a><a href="/fub_map.html" style="color:#f7f3ec;">FUB mapping</a></p>
+    <p style="margin-top:10px;"><a href="/" style="color:#f7f3ec;margin-right:14px;">Delivery</a><a href="/sources.html" style="color:#f7f3ec;margin-right:14px;">Data sources</a><a href="/fub_map.html" style="color:#f7f3ec;">Follow Up Boss</a></p>
   </header>
   <main>
     <section class="kpis" style="grid-column: 1 / -1;">
@@ -159,55 +159,17 @@
       </div>
       <label>From address (blank = SMTP user)</label>
       <input id="mail_from" />
-      <h2 style="margin-top:18px;">Search window</h2>
       <div class="row">
-        <div>
-          <label>Lookback days</label>
-          <input id="lookback_days" type="number" min="1" max="120" />
-        </div>
-        <div>
-          <label>Lookahead days</label>
-          <input id="lookahead_days" type="number" min="0" max="120" />
-        </div>
-      </div>
-      <div class="row">
-        <div>
-          <label>County</label>
-          <input id="county" />
-        </div>
         <div>
           <label>Run when add-on starts</label>
           <select id="run_on_start"><option value="false">No</option><option value="true">Yes</option></select>
         </div>
       </div>
-      <label>CNPA keywords</label>
-      <input id="keywords" />
-      <div class="row">
-        <div>
-          <label>Skip eCourt lookups</label>
-          <select id="skip_portal"><option value="false">No</option><option value="true">Yes</option></select>
-        </div>
-        <div>
-          <label>Generate PDF</label>
-          <select id="generate_pdf"><option value="true">Yes</option><option value="false">No</option></select>
-        </div>
-      </div>
-      <div class="row">
-        <div>
-          <label>eCourt pause (seconds)</label>
-          <input id="ecourt_pause_seconds" type="number" step="0.1" min="0.5" max="10" />
-        </div>
-        <div>
-          <label>Max CNPA pages</label>
-          <input id="max_search_pages" type="number" min="1" max="20" />
-        </div>
-      </div>
       <div class="actions">
-        <button id="save">Save settings</button>
+        <button id="save">Save delivery settings</button>
         <button class="secondary" id="test">Send test email</button>
-        <button class="danger" id="run">Run now</button>
       </div>
-      <p class="note">Gmail needs an App Password. Court Case Summary links still 404 unless you search first; the PDF roster opens the newspaper notice.</p>
+      <p class="note">Gmail needs an App Password. County import is on Data sources. CRM verify/mapping is on Follow Up Boss.</p>
     </section>
 
     <section class="card">
@@ -223,9 +185,7 @@
     const $ = (id) => document.getElementById(id);
     const fields = [
       "frequency","run_time","weekly_day","monthly_day","timezone","send_email",
-      "smtp_host","smtp_port","smtp_user","smtp_password","mail_from",
-      "lookback_days","lookahead_days","county","keywords","run_on_start",
-      "skip_portal","generate_pdf","ecourt_pause_seconds","max_search_pages"
+      "smtp_host","smtp_port","smtp_user","smtp_password","mail_from","run_on_start"
     ];
     function flash(msg, ok) {
       const el = $("flash");
@@ -247,8 +207,6 @@
       });
       $("send_email").value = String(!!cfg.send_email);
       $("run_on_start").value = String(!!cfg.run_on_start);
-      $("skip_portal").value = String(!!cfg.skip_portal);
-      $("generate_pdf").value = String(!!cfg.generate_pdf);
       refreshStatus();
       refreshFiles();
     }
@@ -284,14 +242,6 @@
       const res = await fetch("api/test-email", { method: "POST" });
       const data = await res.json();
       flash(data.ok ? "Test email sent." : (data.error || "Test failed"), data.ok);
-    };
-    $("run").onclick = async () => {
-      flash("Run started…", true);
-      const res = await fetch("api/run", { method: "POST" });
-      const data = await res.json();
-      flash(data.ok ? "Run finished." : (data.error || data.log_tail || "Run failed"), data.ok);
-      refreshStatus();
-      refreshFiles();
     };
     load();
     setInterval(refreshStatus, 8000);

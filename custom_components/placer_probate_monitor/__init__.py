@@ -40,6 +40,7 @@ from .const import (
     CONF_FUB_EVENT_TYPE,
     CONF_FUB_SOURCE,
     CONF_FUB_STRICT_PROPERTY,
+    CONF_FUB_VERIFY_ONLY,
     CONF_GENERATE_PDF,
     CONF_KEYWORDS,
     CONF_LOOKAHEAD_DAYS,
@@ -130,6 +131,9 @@ def apply_env(settings: dict, mapping_path: Path | None = None) -> None:
     os.environ["FUB_STRICT_PROPERTY"] = (
         "1" if settings.get(CONF_FUB_STRICT_PROPERTY) else "0"
     )
+    os.environ["FUB_VERIFY_ONLY"] = (
+        "1" if settings.get(CONF_FUB_VERIFY_ONLY) else "0"
+    )
     if mapping_path:
         os.environ["FUB_MAPPING_PATH"] = str(mapping_path)
 
@@ -171,6 +175,8 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
         cmd.append("--skip-portal")
     if not settings.get(CONF_GENERATE_PDF):
         cmd.append("--no-pdf")
+    if settings.get(CONF_FUB_VERIFY_ONLY):
+        cmd.append("--fub-verify-one")
     proc = subprocess.run(
         cmd,
         cwd=str(COMPONENT_DIR),
@@ -266,12 +272,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     hass.data[DOMAIN][entry.entry_id] = store
 
-    async def _execute(reason: str) -> dict:
+    async def _execute(reason: str, overrides: dict | None = None) -> dict:
         if store["running"]:
             return {"ok": False, "error": "A run is already in progress."}
         store["running"] = True
         async_dispatcher_send(hass, f"{DOMAIN}_status")
-        settings = merged_options(entry)
+        settings = {**merged_options(entry), **(overrides or {})}
         try:
             result = await hass.async_add_executor_job(run_monitor_job, hass, settings)
         except Exception:
@@ -366,8 +372,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         await hass.async_add_executor_job(_send)
 
+    async def _svc_verify(_call: ServiceCall) -> None:
+        settings = merged_options(entry)
+        if not str(settings.get(CONF_FUB_API_KEY) or "").strip():
+            raise HomeAssistantError("Set the Follow Up Boss API key first.")
+        result = await _execute(
+            "verify_fub",
+            {
+                CONF_FUB_ENABLED: True,
+                CONF_FUB_VERIFY_ONLY: True,
+                CONF_SEND_EMAIL: False,
+            },
+        )
+        hass.bus.async_fire(f"{DOMAIN}_run_finished", result)
+
     hass.services.async_register(DOMAIN, "run_now", _svc_run)
     hass.services.async_register(DOMAIN, "test_email", _svc_test)
+    hass.services.async_register(DOMAIN, "verify_fub", _svc_verify)
     return True
 
 
@@ -388,6 +409,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not remaining:
         hass.services.async_remove(DOMAIN, "run_now")
         hass.services.async_remove(DOMAIN, "test_email")
+        hass.services.async_remove(DOMAIN, "verify_fub")
         from .http import async_unload_mapping_ui
 
         async_unload_mapping_ui(hass)

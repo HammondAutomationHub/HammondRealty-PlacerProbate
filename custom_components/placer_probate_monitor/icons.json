@@ -20,6 +20,7 @@
   },
   "services": {
     "run_now": "mdi:play",
-    "test_email": "mdi:email-fast-outline"
+    "test_email": "mdi:email-fast-outline",
+    "verify_fub": "mdi:account-check-outline"
   }
 }

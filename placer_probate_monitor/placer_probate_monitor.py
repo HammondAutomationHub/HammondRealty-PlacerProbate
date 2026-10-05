@@ -579,6 +579,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dry-run", action="store_true", help="Print and write report files; do not update state or email")
     p.add_argument("--skip-portal", action="store_true", help="CNPA only; skip eCourt lookups")
     p.add_argument("--no-pdf", action="store_true", help="Do not write the dossier PDF")
+    p.add_argument(
+        "--fub-verify-one",
+        action="store_true",
+        help="Create at most one new Follow Up Boss person, then skip remaining go-cases",
+    )
     p.add_argument("--env-file", default=".env")
     return p.parse_args()
 
@@ -604,6 +609,8 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     root = Path(__file__).resolve().parent
     load_env_file(root / args.env_file)
+    if args.fub_verify_one:
+        os.environ["FUB_VERIFY_ONLY"] = "1"
 
     start, end = default_window(args.lookback_days, args.lookahead_days)
     try:
@@ -668,6 +675,8 @@ def main() -> int:
                 "updated": fub_summary.get("updated"),
                 "skipped": fub_summary.get("skipped"),
                 "error": fub_summary.get("error"),
+                "verify_case": fub_summary.get("verify_case"),
+                "verify_person_id": fub_summary.get("verify_person_id"),
             },
             indent=2,
         ),

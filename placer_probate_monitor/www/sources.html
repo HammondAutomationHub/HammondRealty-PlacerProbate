@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Probate data sources</title>
+  <style>
+    :root { --ink:#1c1915; --muted:#6b645b; --line:#ddd6cc; --paper:#f7f3ec; --card:#fffdf8; --navy:#1b2a4a; --alert:#8b2e2e; --ok:#2d6a4f; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.45 "Segoe UI", system-ui, sans-serif; color: var(--ink); background: var(--paper); }
+    header { background: var(--navy); color: #f7f3ec; padding: 20px 24px 18px; }
+    header p { margin: 4px 0 0; color: #c9c3b8; font-size: 13px; }
+    header a { color: #f7f3ec; margin-right: 14px; }
+    h1 { margin: 0; font-size: 22px; }
+    h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; color: var(--navy); }
+    main { padding: 20px; display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: start; }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+    label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
+    input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: inherit; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    button { border: 0; border-radius: 6px; padding: 8px 12px; font: inherit; cursor: pointer; background: var(--navy); color: #fff; }
+    button.secondary { background: #ece7de; color: var(--ink); }
+    button.list { display: block; width: 100%; text-align: left; margin: 0 0 8px; background: #ece7de; color: var(--ink); }
+    button.list.active { background: var(--navy); color: #fff; }
+    .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .banner { padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; display: none; }
+    .banner.show { display: block; }
+    .banner.ok { background: #e7f4ec; color: var(--ok); }
+    .banner.err { background: #f8e8e8; color: var(--alert); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ece7de; font-size: 11px; }
+    .pill.live { background: #e7f4ec; color: var(--ok); }
+    .pill.wait { background: #f3e3c3; }
+    .pill.off { background: #f8e8e8; color: var(--alert); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Probate data sources</h1>
+    <p>County import settings and extracted-field catalogs.</p>
+    <p style="margin-top:10px;"><a href="/">Delivery</a><a href="/sources.html">Data sources</a><a href="/fub_map.html">Follow Up Boss</a></p>
+  </header>
+  <main>
+    <aside class="card">
+      <h2>Counties</h2>
+      <div id="source-list"></div>
+    </aside>
+    <div>
+      <div id="flash" class="banner"></div>
+      <div id="source-body"></div>
+    </div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let data = { sources: [], placer: {}, fields: [] };
+    let current = "placer";
+    function flash(msg, ok) {
+      const el = $("flash");
+      el.textContent = msg;
+      el.className = "banner show " + (ok ? "ok" : "err");
+    }
+    function esc(value) {
+      return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+    function renderList() {
+      $("source-list").innerHTML = (data.sources || []).map((src) => {
+        const pill = src.status === "live" ? "live" : "wait";
+        const label = src.status === "live" ? "Live" : "Coming next";
+        const active = src.id === current ? "active" : "";
+        return `<button type="button" class="list ${active}" data-source="${esc(src.id)}">${esc(src.name)} <span class="pill ${pill}">${label}</span></button>`;
+      }).join("");
+      document.querySelectorAll("[data-source]").forEach((btn) => {
+        btn.onclick = () => { current = btn.dataset.source; renderList(); renderBody(); };
+      });
+    }
+    function renderBody() {
+      const src = (data.sources || []).find((item) => item.id === current) || {};
+      if (src.status !== "live") {
+        $("source-body").innerHTML = `<section class="card"><h2>${esc(src.name)}</h2><p>${esc(src.description)}</p><p class="note">Not importable yet. Placer is live. Sacramento is next, then Nevada County.</p></section>`;
+        return;
+      }
+      const p = data.placer || {};
+      $("source-body").innerHTML = `
+        <section class="card">
+          <h2>Placer County import</h2>
+          <p class="note">${esc(src.description)}</p>
+          <div class="row">
+            <div><label>Lookback days</label><input id="lookback_days" type="number" min="1" max="120" value="${esc(p.lookback_days ?? 21)}" /></div>
+            <div><label>Lookahead days</label><input id="lookahead_days" type="number" min="0" max="120" value="${esc(p.lookahead_days ?? 21)}" /></div>
+          </div>
+          <div class="row">
+            <div><label>County</label><input value="Placer" disabled /></div>
+            <div><label>Skip eCourt lookups</label><select id="skip_portal"><option value="false">No</option><option value="true">Yes</option></select></div>
+          </div>
+          <label>CNPA keywords</label><input id="keywords" value="${esc(p.keywords || "")}" />
+          <div class="row">
+            <div><label>Generate PDF</label><select id="generate_pdf"><option value="true">Yes</option><option value="false">No</option></select></div>
+            <div><label>eCourt pause (seconds)</label><input id="ecourt_pause_seconds" type="number" step="0.1" value="${esc(p.ecourt_pause_seconds ?? 1.2)}" /></div>
+          </div>
+          <label>Max CNPA pages</label><input id="max_search_pages" type="number" min="1" max="20" value="${esc(p.max_search_pages ?? 10)}" />
+          <div class="actions">
+            <button id="save-source" type="button">Save Placer import</button>
+            <button class="secondary" id="run-source" type="button">Run Placer job</button>
+          </div>
+          <p class="note">Follow Up Boss verify stays on the Follow Up Boss screen.</p>
+        </section>
+        <section class="card" style="margin-top:16px;">
+          <h2>Extracted fields</h2>
+          <table><thead><tr><th>Field</th><th>From</th><th>Status</th></tr></thead><tbody>
+            ${(data.fields || []).map((field) => `<tr><td><b>${esc(field.label)}</b><div class="note">${esc(field.key)}</div></td><td>${esc(field.source)}</td><td>${field.unavailable ? '<span class="pill off">Not extracted</span>' : '<span class="pill live">Available</span>'}</td></tr>`).join("")}
+          </tbody></table>
+        </section>`;
+      $("skip_portal").value = String(!!p.skip_portal);
+      $("generate_pdf").value = String(p.generate_pdf !== false);
+      $("save-source").onclick = saveSource;
+      $("run-source").onclick = runSource;
+    }
+    async function load() {
+      data = await (await fetch("api/sources")).json();
+      renderList();
+      renderBody();
+    }
+    async function saveSource() {
+      const body = {
+        lookback_days: Number($("lookback_days").value),
+        lookahead_days: Number($("lookahead_days").value),
+        keywords: $("keywords").value,
+        skip_portal: $("skip_portal").value === "true",
+        generate_pdf: $("generate_pdf").value === "true",
+        ecourt_pause_seconds: Number($("ecourt_pause_seconds").value),
+        max_search_pages: Number($("max_search_pages").value),
+        county: "Placer",
+      };
+      const res = await fetch("api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const out = await res.json();
+      flash(res.ok ? "Placer import settings saved." : (out.error || "Save failed"), res.ok);
+      await load();
+    }
+    async function runSource() {
+      flash("Placer job started…", true);
+      const res = await fetch("api/run", { method: "POST" });
+      const out = await res.json();
+      flash(out.ok ? "Placer job finished." : (out.error || out.log_tail || "Run failed"), !!out.ok);
+    }
+    load().catch((err) => flash(String(err), false));
+  </script>
+</body>
+</html>

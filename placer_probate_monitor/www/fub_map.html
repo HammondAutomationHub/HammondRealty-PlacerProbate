@@ -90,12 +90,40 @@
 </head>
 <body>
   <header>
-    <h1>Probate → Follow Up Boss mapping</h1>
-    <p>Associate extract fields with FUB Person, Event, and custom fields. Saves <code>fub_mapping.yaml</code>.</p>
-    <nav><a href="/">Settings</a><a href="/fub_map.html">FUB mapping</a></nav>
+    <h1>Follow Up Boss</h1>
+    <p>CRM connection, one-case verification, and field mapping. County extracts are on Data sources.</p>
+    <nav><a href="/" style="color:#f7f3ec;margin-right:14px;">Delivery</a><a href="/sources.html" style="color:#f7f3ec;margin-right:14px;">Data sources</a><a href="/fub_map.html" style="color:#f7f3ec;">Follow Up Boss</a></nav>
   </header>
   <main>
     <div id="flash" class="banner"></div>
+    <section class="card">
+      <h2>Connection &amp; verify</h2>
+      <label class="toggle"><input id="fub_enabled" type="checkbox" /><span>Enable Follow Up Boss export</span></label>
+      <label>API URL</label>
+      <input id="fub_api_url" />
+      <label>API key (leave blank to keep the saved key)</label>
+      <input id="fub_api_key" type="password" placeholder="unchanged if blank" />
+      <p class="note" id="key-note"></p>
+      <div class="row">
+        <div><label>Lead source name</label><input id="fub_source" /></div>
+        <div><label>Assign to</label><input id="fub_assigned_to" /></div>
+      </div>
+      <label>Event type</label>
+      <select id="fub_event_type">
+        <option>Seller Inquiry</option>
+        <option>General Inquiry</option>
+        <option>Property Inquiry</option>
+        <option>Inquiry</option>
+        <option>Registration</option>
+      </select>
+      <label class="toggle"><input id="fub_strict_property" type="checkbox" /><span>Require decedent residence before upload</span></label>
+      <label class="toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: import one new go-case per run</span></label>
+      <div class="actions">
+        <button id="save-fub" type="button">Save FUB connection</button>
+        <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
+      </div>
+      <p class="note">Verify scrapes Placer, then posts only the first new go-case.</p>
+    </section>
     <section class="card">
       <h2>Go / no-go</h2>
       <ul class="rules" id="rules"></ul>
@@ -251,7 +279,47 @@
       await load(true);
       flash(fubFields.length ? "Loaded FUB custom fields." : ($("fub-fields-note").textContent || "No FUB fields"), !!fubFields.length);
     };
-    load(false).catch((err) => flash(String(err), false));
+    $("verify-fub").onclick = async () => {
+      flash("Verify started… scraping, then importing one go-case.", true);
+      const res = await fetch("api/verify-fub", { method: "POST", credentials: "same-origin" });
+      const data = await res.json();
+      flash(data.ok ? "Verify finished. Check Follow Up Boss." : (data.error || data.log_tail || "Verify failed"), data.ok);
+    };
+    async function loadCfg() {
+      const cfg = await (await fetch("api/config")).json();
+      $("fub_enabled").checked = !!cfg.fub_enabled;
+      $("fub_api_url").value = cfg.fub_api_url || "https://api.followupboss.com/v1";
+      $("fub_api_key").value = "";
+      $("key-note").textContent = cfg.fub_api_key_set ? "An API key is already saved." : "No API key saved yet.";
+      $("fub_source").value = cfg.fub_source || "probate";
+      $("fub_assigned_to").value = cfg.fub_assigned_to || "";
+      $("fub_event_type").value = cfg.fub_event_type || "Seller Inquiry";
+      $("fub_strict_property").checked = !!cfg.fub_strict_property;
+      $("fub_verify_only").checked = cfg.fub_verify_only !== false;
+    }
+    $("save-fub").onclick = async () => {
+      const body = {
+        fub_enabled: $("fub_enabled").checked,
+        fub_api_url: $("fub_api_url").value.trim(),
+        fub_source: $("fub_source").value.trim(),
+        fub_assigned_to: $("fub_assigned_to").value.trim(),
+        fub_event_type: $("fub_event_type").value,
+        fub_strict_property: $("fub_strict_property").checked,
+        fub_verify_only: $("fub_verify_only").checked,
+      };
+      const key = $("fub_api_key").value.trim();
+      if (key) body.fub_api_key = key;
+      const res = await fetch("api/config", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      flash(res.ok ? "Follow Up Boss connection saved." : (data.error || "Save failed"), res.ok);
+      if (res.ok) await loadCfg();
+    };
+    Promise.all([load(false), loadCfg()]).catch((err) => flash(String(err), false));
   </script>
 </body>
 </html>

@@ -4,3 +4,6 @@ run_now:
 test_email:
   name: Send test email
   description: Send a test message with the configured SMTP settings and recipients.
+verify_fub:
+  name: Verify one FUB import
+  description: Scrape as usual, then import only the first new go-case into Follow Up Boss. Does not email. Confirm the contact in FUB, then turn off Verify only.

@@ -456,8 +456,60 @@ GO_NO_GO = [
 ]
 
 
+DATA_SOURCES = [
+    {
+        "id": "placer",
+        "name": "Placer County",
+        "status": "live",
+        "description": "California Newspaper Public Notices plus Placer eCourt Public and DE-111 petitions.",
+        "extracts": "CNPA notice, eCourt docket, petition PDF",
+    },
+    {
+        "id": "sacramento",
+        "name": "Sacramento County",
+        "status": "coming_soon",
+        "description": "Next county source. Import settings and field catalog will live on this screen.",
+        "extracts": "Not wired yet",
+    },
+    {
+        "id": "nevada",
+        "name": "Nevada County",
+        "status": "coming_soon",
+        "description": "Queued after Sacramento County.",
+        "extracts": "Not wired yet",
+    },
+]
+
+SOURCE_SETTING_KEYS = [
+    "lookback_days",
+    "lookahead_days",
+    "county",
+    "keywords",
+    "skip_portal",
+    "generate_pdf",
+    "ecourt_pause_seconds",
+    "max_search_pages",
+]
+
+
+def sources_payload(settings: dict | None = None) -> dict:
+    placer = {}
+    for key in SOURCE_SETTING_KEYS:
+        placer[key] = (settings or {}).get(key)
+    if not placer.get("county"):
+        placer["county"] = "Placer"
+    return {
+        "sources": DATA_SOURCES,
+        "active": "placer",
+        "placer": placer,
+        "fields": mapping_catalog()["probate_fields"],
+    }
+
+
 def mapping_catalog() -> dict:
     return {
+        "data_source": "placer",
+        "data_source_name": "Placer County",
         "probate_fields": PROBATE_SOURCE_FIELDS,
         "fub_destinations": FUB_DESTINATIONS,
         "send_toggles": SEND_TOGGLES,
@@ -943,8 +995,11 @@ def export_new_leads(
         "event_type": os.environ.get("FUB_EVENT_TYPE", "Seller Inquiry"),
     }
     strict = _env_bool("FUB_STRICT_PROPERTY")
+    verify = _env_bool("FUB_VERIFY_ONLY")
     system = str(mapping.get("system") or "PlacerProbateMonitor")
     cases = state.setdefault("cases", {})
+    posted_case = None
+    posted_pid = None
     for row in rows:
         key = case_key(row)
         existing_id = stored_person_id(state, key) if key else None
@@ -967,6 +1022,11 @@ def export_new_leads(
         record = cases.get(key) or {}
         try:
             if existing_id is not None:
+                if verify:
+                    summary["skipped"] += 1
+                    summary["skips"].append({"case": key, "reason": "verify_skip_update"})
+                    print(f"FUB skip {key}: verify_skip_update person_id={existing_id}")
+                    continue
                 if record.get("fub_fingerprint") == fingerprint:
                     summary["skipped"] += 1
                     summary["skips"].append({"case": key, "reason": "unchanged"})
@@ -980,6 +1040,11 @@ def export_new_leads(
                 summary["updated"] += 1
                 print(f"FUB updated {key} person_id={pid}")
                 continue
+            if verify and summary["posted"] >= 1:
+                summary["skipped"] += 1
+                summary["skips"].append({"case": key, "reason": "verify_only_limit"})
+                print(f"FUB skip {key}: verify_only_limit")
+                continue
             payload = build_event(row, mapping, settings)
             body = post_event(settings["api_url"], api_key, payload, system)
             pid = person_id_from_response(body)
@@ -989,6 +1054,8 @@ def export_new_leads(
                 )
             _remember_person(cases, key, pid, fingerprint)
             summary["posted"] += 1
+            posted_case = key
+            posted_pid = pid
             print(f"FUB posted {key} person_id={pid}")
         except Exception as exc:  # noqa: BLE001
             summary["skipped"] += 1
@@ -997,7 +1064,19 @@ def export_new_leads(
             if key and key in cases:
                 cases[key]["fub_skip"] = "post_failed"
             print(f"FUB error {key}: {err}", flush=True)
+            if verify:
+                continue
             break
+    summary["verify_case"] = posted_case
+    summary["verify_person_id"] = posted_pid
+    if verify:
+        if posted_case:
+            print(
+                f"FUB verify: posted {posted_case} person_id={posted_pid}",
+                flush=True,
+            )
+        else:
+            print("FUB verify: no new go-case imported", flush=True)
     print(
         f"FUB: posted={summary['posted']} updated={summary['updated']} "
         f"skipped={summary['skipped']}",

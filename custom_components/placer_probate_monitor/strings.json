@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Delivery and schedule",
-        "description": "Who gets the digest and how often the monitor runs. Gmail needs an App Password. Follow Up Boss enable is on this screen; API key is on the last screen. After a full Home Assistant restart, use the sidebar item Probate FUB map.",
+        "description": "Who gets the digest and how often the monitor runs. Gmail needs an App Password. County import screens are Probate sources; CRM screens are Follow Up Boss.",
         "data": {
           "recipients": "Email recipients (one per line)",
           "frequency": "Frequency",
@@ -17,13 +17,12 @@
           "smtp_user": "SMTP username",
           "smtp_password": "SMTP password",
           "mail_from": "From address",
-          "run_on_start": "Run when Home Assistant starts",
-          "fub_enabled": "Enable Follow Up Boss export"
+          "run_on_start": "Run when Home Assistant starts"
         }
       },
       "search": {
-        "title": "Search window",
-        "description": "CNPA and eCourt lookup options.",
+        "title": "Placer County data source",
+        "description": "Import window for Placer notices. Sacramento and Nevada County will be separate source screens.",
         "data": {
           "lookback_days": "Lookback days",
           "lookahead_days": "Lookahead days",
@@ -37,7 +36,7 @@
       },
       "fub": {
         "title": "Follow Up Boss",
-        "description": "Optional CRM export. Petitioner is the Person. Only NEW cases that pass the go/no-go gate are posted. Field mapping is the Probate FUB map sidebar panel (or fub_mapping.yaml under /config/placer_probate_monitor/).",
+        "description": "CRM connection and verification only. Field mapping is the Follow Up Boss sidebar. County extracts are under Probate sources.",
         "data": {
           "fub_enabled": "Enable Follow Up Boss export",
           "fub_api_url": "API URL",
@@ -45,7 +44,11 @@
           "fub_source": "Lead source name",
           "fub_assigned_to": "Assign to (agent full name)",
           "fub_event_type": "Event type",
-          "fub_strict_property": "Require decedent residence before upload"
+          "fub_strict_property": "Require decedent residence before upload",
+          "fub_verify_only": "Verify only: import one new go-case per run"
+        },
+        "data_description": {
+          "fub_verify_only": "Leave on until you confirm one contact in Follow Up Boss. Turn off to import every new go-case."
         }
       }
     },
@@ -70,12 +73,12 @@
           "smtp_user": "SMTP username",
           "smtp_password": "SMTP password",
           "mail_from": "From address",
-          "run_on_start": "Run when Home Assistant starts",
-          "fub_enabled": "Enable Follow Up Boss export"
+          "run_on_start": "Run when Home Assistant starts"
         }
       },
       "search": {
-        "title": "Search window",
+        "title": "Placer County data source",
+        "description": "Import window for Placer notices. Sacramento and Nevada County will be separate source screens.",
         "data": {
           "lookback_days": "Lookback days",
           "lookahead_days": "Lookahead days",
@@ -89,7 +92,7 @@
       },
       "fub": {
         "title": "Follow Up Boss",
-        "description": "Optional CRM export. Petitioner is the Person. Only NEW cases that pass the go/no-go gate are posted. Field mapping is the Probate FUB map sidebar panel (or fub_mapping.yaml under /config/placer_probate_monitor/).",
+        "description": "CRM connection and verification only. Field mapping is the Follow Up Boss sidebar. County extracts are under Probate sources.",
         "data": {
           "fub_enabled": "Enable Follow Up Boss export",
           "fub_api_url": "API URL",
@@ -97,7 +100,11 @@
           "fub_source": "Lead source name",
           "fub_assigned_to": "Assign to (agent full name)",
           "fub_event_type": "Event type",
-          "fub_strict_property": "Require decedent residence before upload"
+          "fub_strict_property": "Require decedent residence before upload",
+          "fub_verify_only": "Verify only: import one new go-case per run"
+        },
+        "data_description": {
+          "fub_verify_only": "Leave on until you confirm one contact in Follow Up Boss. Turn off to import every new go-case."
         }
       }
     }
@@ -140,6 +147,10 @@
     "test_email": {
       "name": "Send test email",
       "description": "Send a test message using the configured SMTP settings."
+    },
+    "verify_fub": {
+      "name": "Verify one FUB import",
+      "description": "Scrape as usual, then import only the first new go-case into Follow Up Boss. Does not email. Turn off Verify only after you confirm the contact in FUB."
     }
   }
 }

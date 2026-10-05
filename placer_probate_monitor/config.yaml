@@ -1,5 +1,5 @@
 name: Placer Probate Monitor
-version: "1.0.1"
+version: "1.1.0"
 slug: placer_probate_monitor
 description: >
   Pulls Placer County NOTICE OF PETITION TO ADMINISTER ESTATE listings,
@@ -51,6 +51,7 @@ options:
   fub_assigned_to: "Blake Hammond"
   fub_event_type: "Seller Inquiry"
   fub_strict_property: false
+  fub_verify_only: true
 schema:
   recipients:
     - email
@@ -81,3 +82,4 @@ schema:
   fub_assigned_to: str
   fub_event_type: list(Seller Inquiry|General Inquiry|Property Inquiry|Inquiry|Registration)
   fub_strict_property: bool
+  fub_verify_only: bool
