@@ -1,0 +1,34 @@
+# Follow Up Boss field mapping for Placer Probate Monitor.
+# Edit keys to match custom fields created in the FUB account.
+# Do not map attorney_phone onto person.phones.
+
+system: PlacerProbateMonitor
+court_search_url: "https://webportal.placerco.org/eCourtPublic/?q=node/48"
+subject_address_type: "subject property"
+
+# Names skipped even if they pass the hard gate (case-insensitive substring).
+skip_petitioner_contains:
+  - public administrator
+
+# Custom field API names (create these in FUB, then keep names in sync).
+custom_fields:
+  case_number: customCaseNumber
+  decedent: customDecedent
+  hearing: customHearing
+  court_search: customCourtSearch
+  notice_url: customNoticeUrl
+  estate_real: customEstateReal
+  petition_pdf: customPetitionPdf
+
+# Person fields we send vs skip.
+send:
+  firstName: true
+  lastName: true
+  emails: false
+  phones: false
+  subject_property_address: true
+  mailing_address: false
+  assignedTo: true
+  source: true
+  message: true
+  custom_fields: true

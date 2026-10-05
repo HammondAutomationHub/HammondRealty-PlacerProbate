@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 import subprocess
 import sys
@@ -20,6 +21,10 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
+    ATTR_FUB_ERROR,
+    ATTR_FUB_POSTED,
+    ATTR_FUB_SKIPPED,
+    ATTR_FUB_UPDATED,
     ATTR_LAST_ERROR,
     ATTR_LAST_RESULT,
     ATTR_LAST_RUN,
@@ -28,6 +33,13 @@ from .const import (
     CONF_COUNTY,
     CONF_ECOURT_PAUSE,
     CONF_FREQUENCY,
+    CONF_FUB_API_KEY,
+    CONF_FUB_API_URL,
+    CONF_FUB_ASSIGNED_TO,
+    CONF_FUB_ENABLED,
+    CONF_FUB_EVENT_TYPE,
+    CONF_FUB_SOURCE,
+    CONF_FUB_STRICT_PROPERTY,
     CONF_GENERATE_PDF,
     CONF_KEYWORDS,
     CONF_LOOKAHEAD_DAYS,
@@ -88,7 +100,7 @@ def tzinfo(settings: dict) -> ZoneInfo:
         return ZoneInfo("America/Los_Angeles")
 
 
-def apply_env(settings: dict) -> None:
+def apply_env(settings: dict, mapping_path: Path | None = None) -> None:
     recipients = parse_recipients(settings.get(CONF_RECIPIENTS))
     os.environ["SMTP_HOST"] = str(settings.get(CONF_SMTP_HOST) or "smtp.gmail.com")
     os.environ["SMTP_PORT"] = str(int(settings.get(CONF_SMTP_PORT) or 587))
@@ -103,6 +115,23 @@ def apply_env(settings: dict) -> None:
     os.environ["PROBATE_KEYWORDS"] = str(settings.get(CONF_KEYWORDS) or DEFAULTS[CONF_KEYWORDS])
     os.environ["PROBATE_MAX_PAGES"] = str(int(settings.get(CONF_MAX_PAGES) or 10))
     os.environ["ECOURT_PAUSE"] = str(float(settings.get(CONF_ECOURT_PAUSE) or 1.2))
+    os.environ["FUB_ENABLED"] = "1" if settings.get(CONF_FUB_ENABLED) else "0"
+    os.environ["FUB_API_URL"] = str(
+        settings.get(CONF_FUB_API_URL) or "https://api.followupboss.com/v1"
+    )
+    os.environ["FUB_API_KEY"] = str(settings.get(CONF_FUB_API_KEY) or "")
+    os.environ["FUB_SOURCE"] = str(settings.get(CONF_FUB_SOURCE) or "probate")
+    os.environ["FUB_ASSIGNED_TO"] = str(
+        settings.get(CONF_FUB_ASSIGNED_TO) or "Blake Hammond"
+    )
+    os.environ["FUB_EVENT_TYPE"] = str(
+        settings.get(CONF_FUB_EVENT_TYPE) or "Seller Inquiry"
+    )
+    os.environ["FUB_STRICT_PROPERTY"] = (
+        "1" if settings.get(CONF_FUB_STRICT_PROPERTY) else "0"
+    )
+    if mapping_path:
+        os.environ["FUB_MAPPING_PATH"] = str(mapping_path)
 
 
 def should_run_now(settings: dict, now: datetime) -> bool:
@@ -120,8 +149,8 @@ def should_run_now(settings: dict, now: datetime) -> bool:
 
 
 def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
-    apply_env(settings)
     data_dir = Path(hass.config.path(DOMAIN))
+    apply_env(settings, mapping_path=data_dir / "fub_mapping.yaml")
     reports = data_dir / "reports"
     reports.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -163,18 +192,57 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
                 pass
             break
     ok = proc.returncode == 0
+    fub_posted = None
+    fub_updated = None
+    fub_skipped = None
+    fub_error = None
+    sidecar = data_dir / "fub_last.json"
+    if sidecar.exists():
+        try:
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            fub_posted = payload.get("posted")
+            fub_updated = payload.get("updated")
+            fub_skipped = payload.get("skipped")
+            fub_error = payload.get("error")
+        except json.JSONDecodeError:
+            pass
+    if fub_posted is None:
+        for line in reversed(log.splitlines()):
+            if line.startswith("FUB: posted="):
+                try:
+                    parts = dict(
+                        item.split("=", 1) for item in line.replace("FUB: ", "").split()
+                    )
+                    fub_posted = int(parts.get("posted", 0))
+                    fub_updated = int(parts.get("updated", 0))
+                    fub_skipped = int(parts.get("skipped", 0))
+                except ValueError:
+                    pass
+                break
+    if fub_error is None:
+        for line in reversed(log.splitlines()):
+            if line.startswith("FUB enabled but") or line.startswith("FUB error"):
+                fub_error = line[-500:]
+                break
     return {
         "ok": ok,
         ATTR_LAST_RESULT: "ok" if ok else "failed",
         ATTR_LAST_ERROR: None if ok else (log[-2000:] or f"exit {proc.returncode}"),
         ATTR_PDF: pdfs[0].name if pdfs else None,
         ATTR_NEW_COUNT: new_count,
+        ATTR_FUB_POSTED: fub_posted,
+        ATTR_FUB_UPDATED: fub_updated,
+        ATTR_FUB_SKIPPED: fub_skipped,
+        ATTR_FUB_ERROR: fub_error,
         "log_tail": log[-1500:],
     }
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.data.setdefault(DOMAIN, {})
+    from .http import async_setup_mapping_views
+
+    async_setup_mapping_views(hass)
     return True
 
 
@@ -190,6 +258,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ATTR_LAST_ERROR: None,
             ATTR_NEW_COUNT: None,
             ATTR_PDF: None,
+            ATTR_FUB_POSTED: None,
+            ATTR_FUB_UPDATED: None,
+            ATTR_FUB_SKIPPED: None,
+            ATTR_FUB_ERROR: None,
         },
     }
     hass.data[DOMAIN][entry.entry_id] = store
@@ -217,6 +289,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ATTR_LAST_ERROR: result.get(ATTR_LAST_ERROR),
                 ATTR_NEW_COUNT: result.get(ATTR_NEW_COUNT),
                 ATTR_PDF: result.get(ATTR_PDF),
+                ATTR_FUB_POSTED: result.get(ATTR_FUB_POSTED),
+                ATTR_FUB_UPDATED: result.get(ATTR_FUB_UPDATED),
+                ATTR_FUB_SKIPPED: result.get(ATTR_FUB_SKIPPED),
+                ATTR_FUB_ERROR: result.get(ATTR_FUB_ERROR),
             }
         )
         store["running"] = False
@@ -265,6 +341,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    from .http import async_setup_mapping_ui
+
+    async_setup_mapping_ui(hass)
+
     async def _svc_run(_call: ServiceCall) -> None:
         result = await _execute("service")
         hass.bus.async_fire(f"{DOMAIN}_run_finished", result)
@@ -302,7 +382,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if store:
         for unsub in store.get("unsubs") or []:
             unsub()
-    if not hass.data.get(DOMAIN):
+    remaining = [
+        key for key in (hass.data.get(DOMAIN) or {}) if key != "_fub_views"
+    ]
+    if not remaining:
         hass.services.async_remove(DOMAIN, "run_now")
         hass.services.async_remove(DOMAIN, "test_email")
+        from .http import async_unload_mapping_ui
+
+        async_unload_mapping_ui(hass)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

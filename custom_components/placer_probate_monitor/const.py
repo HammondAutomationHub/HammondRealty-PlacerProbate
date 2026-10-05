@@ -23,6 +23,21 @@ CONF_SKIP_PORTAL = "skip_portal"
 CONF_GENERATE_PDF = "generate_pdf"
 CONF_ECOURT_PAUSE = "ecourt_pause_seconds"
 CONF_MAX_PAGES = "max_search_pages"
+CONF_FUB_ENABLED = "fub_enabled"
+CONF_FUB_API_URL = "fub_api_url"
+CONF_FUB_API_KEY = "fub_api_key"
+CONF_FUB_SOURCE = "fub_source"
+CONF_FUB_ASSIGNED_TO = "fub_assigned_to"
+CONF_FUB_EVENT_TYPE = "fub_event_type"
+CONF_FUB_STRICT_PROPERTY = "fub_strict_property"
+
+FUB_EVENT_TYPES = [
+    "Seller Inquiry",
+    "General Inquiry",
+    "Property Inquiry",
+    "Inquiry",
+    "Registration",
+]
 
 FREQUENCIES = ["hourly", "daily", "weekdays", "weekly", "monthly"]
 WEEKDAYS = [
@@ -57,6 +72,13 @@ DEFAULTS = {
     CONF_GENERATE_PDF: True,
     CONF_ECOURT_PAUSE: 1.2,
     CONF_MAX_PAGES: 10,
+    CONF_FUB_ENABLED: False,
+    CONF_FUB_API_URL: "https://api.followupboss.com/v1",
+    CONF_FUB_API_KEY: "",
+    CONF_FUB_SOURCE: "probate",
+    CONF_FUB_ASSIGNED_TO: "Blake Hammond",
+    CONF_FUB_EVENT_TYPE: "Seller Inquiry",
+    CONF_FUB_STRICT_PROPERTY: False,
 }
 
 ATTR_LAST_RUN = "last_run"
@@ -64,3 +86,7 @@ ATTR_LAST_RESULT = "last_result"
 ATTR_LAST_ERROR = "last_error"
 ATTR_NEW_COUNT = "new_count"
 ATTR_PDF = "pdf"
+ATTR_FUB_POSTED = "fub_posted"
+ATTR_FUB_UPDATED = "fub_updated"
+ATTR_FUB_SKIPPED = "fub_skipped"
+ATTR_FUB_ERROR = "fub_error"

@@ -13,6 +13,13 @@ from .const import (
     CONF_COUNTY,
     CONF_ECOURT_PAUSE,
     CONF_FREQUENCY,
+    CONF_FUB_API_KEY,
+    CONF_FUB_API_URL,
+    CONF_FUB_ASSIGNED_TO,
+    CONF_FUB_ENABLED,
+    CONF_FUB_EVENT_TYPE,
+    CONF_FUB_SOURCE,
+    CONF_FUB_STRICT_PROPERTY,
     CONF_GENERATE_PDF,
     CONF_KEYWORDS,
     CONF_LOOKAHEAD_DAYS,
@@ -34,6 +41,7 @@ from .const import (
     DEFAULTS,
     DOMAIN,
     FREQUENCIES,
+    FUB_EVENT_TYPES,
     WEEKDAYS,
 )
 
@@ -151,11 +159,52 @@ def _search_schema(defaults: dict) -> vol.Schema:
     )
 
 
+def _fub_schema(defaults: dict) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_FUB_ENABLED, default=bool(defaults.get(CONF_FUB_ENABLED, False))
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_FUB_API_URL,
+                default=defaults.get(
+                    CONF_FUB_API_URL, "https://api.followupboss.com/v1"
+                ),
+            ): selector.TextSelector(),
+            vol.Optional(CONF_FUB_API_KEY, default=""): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+            ),
+            vol.Required(
+                CONF_FUB_SOURCE, default=defaults.get(CONF_FUB_SOURCE, "probate")
+            ): selector.TextSelector(),
+            vol.Required(
+                CONF_FUB_ASSIGNED_TO,
+                default=defaults.get(CONF_FUB_ASSIGNED_TO, "Blake Hammond"),
+            ): selector.TextSelector(),
+            vol.Required(
+                CONF_FUB_EVENT_TYPE,
+                default=defaults.get(CONF_FUB_EVENT_TYPE, "Seller Inquiry"),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=FUB_EVENT_TYPES,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required(
+                CONF_FUB_STRICT_PROPERTY,
+                default=bool(defaults.get(CONF_FUB_STRICT_PROPERTY, False)),
+            ): selector.BooleanSelector(),
+        }
+    )
+
+
 def _normalize(user_input: dict[str, Any], previous: dict | None = None) -> dict[str, Any]:
     data = dict(previous or {})
     data.update(user_input)
     if not data.get(CONF_SMTP_PASSWORD) and previous:
         data[CONF_SMTP_PASSWORD] = previous.get(CONF_SMTP_PASSWORD, "")
+    if not data.get(CONF_FUB_API_KEY) and previous:
+        data[CONF_FUB_API_KEY] = previous.get(CONF_FUB_API_KEY, "")
     for key in (
         CONF_SMTP_PORT,
         CONF_LOOKBACK_DAYS,
@@ -187,10 +236,16 @@ class PlacerProbateMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_search(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
             self._data = _normalize(user_input, self._data)
+            return await self.async_step_fub()
+        return self.async_show_form(step_id="search", data_schema=_search_schema(self._data))
+
+    async def async_step_fub(self, user_input: dict[str, Any] | None = None):
+        if user_input is not None:
+            self._data = _normalize(user_input, self._data)
             await self.async_set_unique_id(DOMAIN)
             self._abort_if_unique_id_configured()
             return self.async_create_entry(title="Placer Probate Monitor", data=self._data)
-        return self.async_show_form(step_id="search", data_schema=_search_schema(self._data))
+        return self.async_show_form(step_id="fub", data_schema=_fub_schema(self._data))
 
     @staticmethod
     @callback
@@ -224,5 +279,12 @@ class PlacerProbateMonitorOptionsFlow(config_entries.OptionsFlow):
         defaults = self._defaults()
         if user_input is not None:
             self._data = _normalize(user_input, defaults)
-            return self.async_create_entry(title="", data=self._data)
+            return await self.async_step_fub()
         return self.async_show_form(step_id="search", data_schema=_search_schema(defaults))
+
+    async def async_step_fub(self, user_input: dict[str, Any] | None = None):
+        defaults = self._defaults()
+        if user_input is not None:
+            self._data = _normalize(user_input, defaults)
+            return self.async_create_entry(title="", data=self._data)
+        return self.async_show_form(step_id="fub", data_schema=_fub_schema(defaults))

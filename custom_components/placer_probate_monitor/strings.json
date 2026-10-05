@@ -33,6 +33,19 @@
           "ecourt_pause_seconds": "eCourt pause (seconds)",
           "max_search_pages": "Max CNPA pages"
         }
+      },
+      "fub": {
+        "title": "Follow Up Boss",
+        "description": "Optional CRM export. Petitioner is the Person. Only NEW cases that pass the go/no-go gate are posted. Field mapping is the Probate FUB map sidebar panel (or fub_mapping.yaml under /config/placer_probate_monitor/).",
+        "data": {
+          "fub_enabled": "Enable Follow Up Boss export",
+          "fub_api_url": "API URL",
+          "fub_api_key": "API key",
+          "fub_source": "Lead source name",
+          "fub_assigned_to": "Assign to (agent full name)",
+          "fub_event_type": "Event type",
+          "fub_strict_property": "Require decedent residence before upload"
+        }
       }
     },
     "abort": {
@@ -71,6 +84,19 @@
           "ecourt_pause_seconds": "eCourt pause (seconds)",
           "max_search_pages": "Max CNPA pages"
         }
+      },
+      "fub": {
+        "title": "Follow Up Boss",
+        "description": "Optional CRM export. Petitioner is the Person. Only NEW cases that pass the go/no-go gate are posted. Field mapping is the Probate FUB map sidebar panel (or fub_mapping.yaml under /config/placer_probate_monitor/).",
+        "data": {
+          "fub_enabled": "Enable Follow Up Boss export",
+          "fub_api_url": "API URL",
+          "fub_api_key": "API key",
+          "fub_source": "Lead source name",
+          "fub_assigned_to": "Assign to (agent full name)",
+          "fub_event_type": "Event type",
+          "fub_strict_property": "Require decedent residence before upload"
+        }
       }
     }
   },
@@ -87,6 +113,9 @@
       },
       "last_pdf": {
         "name": "Last PDF"
+      },
+      "fub_posted": {
+        "name": "FUB posted"
       }
     }
   },

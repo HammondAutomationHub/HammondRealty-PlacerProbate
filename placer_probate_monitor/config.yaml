@@ -44,6 +44,13 @@ options:
   generate_pdf: true
   ecourt_pause_seconds: 1.2
   max_search_pages: 10
+  fub_enabled: false
+  fub_api_url: "https://api.followupboss.com/v1"
+  fub_api_key: ""
+  fub_source: probate
+  fub_assigned_to: "Blake Hammond"
+  fub_event_type: "Seller Inquiry"
+  fub_strict_property: false
 schema:
   recipients:
     - email
@@ -67,3 +74,10 @@ schema:
   generate_pdf: bool
   ecourt_pause_seconds: float(0.5,10)
   max_search_pages: int(1,20)
+  fub_enabled: bool
+  fub_api_url: str
+  fub_api_key: password
+  fub_source: str
+  fub_assigned_to: str
+  fub_event_type: list(Seller Inquiry|General Inquiry|Property Inquiry|Inquiry|Registration)
+  fub_strict_property: bool

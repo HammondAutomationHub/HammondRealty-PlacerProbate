@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Probate → Follow Up Boss mapping</title>
+  <style>
+    :root {
+      --ink: #1c1915;
+      --muted: #6b645b;
+      --line: #ddd6cc;
+      --paper: #f7f3ec;
+      --card: #fffdf8;
+      --navy: #1b2a4a;
+      --gold: #b0893e;
+      --alert: #8b2e2e;
+      --ok: #2d6a4f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    header {
+      background: var(--navy);
+      color: #f7f3ec;
+      padding: 20px 24px 18px;
+    }
+    header p { margin: 4px 0 0; color: #c9c3b8; font-size: 13px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    h2 { margin: 0 0 12px; font-size: 15px; letter-spacing: .04em; text-transform: uppercase; color: var(--navy); }
+    main { padding: 20px; display: grid; gap: 16px; max-width: 1100px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      background: #fff;
+    }
+    textarea { min-height: 64px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font: inherit;
+      cursor: pointer;
+      background: var(--navy);
+      color: #fff;
+    }
+    button.secondary { background: #ece7de; color: var(--ink); }
+    .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .banner { padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; display: none; }
+    .banner.show { display: block; }
+    .banner.ok { background: #e7f4ec; color: var(--ok); }
+    .banner.err { background: #f8e8e8; color: var(--alert); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    .rules { margin: 0; padding-left: 18px; }
+    .rules li { margin: 4px 0; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .toggle { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; }
+    .toggle input { width: auto; margin-top: 3px; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ece7de; font-size: 11px; }
+    .pill.warn { background: #f3e3c3; }
+    .pill.off { background: #f8e8e8; color: var(--alert); }
+    a { color: #1a4f8b; }
+    nav { margin-top: 10px; }
+    nav a { color: #f7f3ec; margin-right: 14px; font-size: 13px; }
+    @media (max-width: 720px) {
+      .row { grid-template-columns: 1fr; }
+      table, thead, tbody, th, td, tr { display: block; }
+      th { display: none; }
+      td { border: 0; padding: 4px 0; }
+      tr { border-bottom: 1px solid var(--line); padding: 10px 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Probate → Follow Up Boss mapping</h1>
+    <p>Associate extract fields with FUB Person, Event, and custom fields. Saves <code>fub_mapping.yaml</code>.</p>
+    <nav><a href="/">Settings</a><a href="/fub_map.html">FUB mapping</a></nav>
+  </header>
+  <main>
+    <div id="flash" class="banner"></div>
+    <section class="card">
+      <h2>Go / no-go</h2>
+      <ul class="rules" id="rules"></ul>
+      <p class="note" id="path-line"></p>
+    </section>
+    <section class="card">
+      <h2>Person &amp; event sends</h2>
+      <div id="toggles"></div>
+      <div class="row">
+        <div>
+          <label>Event system name</label>
+          <input id="system" />
+        </div>
+        <div>
+          <label>Subject address type</label>
+          <input id="subject_address_type" />
+        </div>
+      </div>
+      <label>Court search URL</label>
+      <input id="court_search_url" />
+      <label>Skip petitioner names containing (one phrase per line)</label>
+      <textarea id="skip_petitioner_contains" placeholder="public administrator"></textarea>
+    </section>
+    <section class="card">
+      <h2>Custom field associations</h2>
+      <p class="note">Create the custom field in Follow Up Boss first, then paste its API name (<code>customCaseNumber</code>). Blank means do not send. Built-in Person name/address are toggled above, not remapped here.</p>
+      <div class="actions" style="margin-top:0;">
+        <button class="secondary" id="load-fub" type="button">Load FUB custom fields</button>
+      </div>
+      <p class="note" id="fub-fields-note"></p>
+      <table>
+        <thead>
+          <tr><th>Probate field</th><th>Source</th><th>FUB custom field</th></tr>
+        </thead>
+        <tbody id="matrix"></tbody>
+      </table>
+      <div class="actions">
+        <button id="save" type="button">Save mapping</button>
+      </div>
+    </section>
+  </main>
+  <script>
+    const API = location.pathname.includes("/api/placer_probate_monitor/")
+      ? "/api/placer_probate_monitor/fub_mapping"
+      : "api/fub-mapping";
+    const $ = (id) => document.getElementById(id);
+    let catalog = { probate_fields: [], send_toggles: [], go_no_go: [], default_custom_fields: {} };
+    let fubFields = [];
+
+    function flash(msg, ok) {
+      const el = $("flash");
+      el.textContent = msg;
+      el.className = "banner show " + (ok ? "ok" : "err");
+    }
+    function fieldListHtml() {
+      return fubFields.map((f) =>
+        `<option value="${esc(f.name)}">${esc(f.label)} (${esc(f.name)})</option>`
+      ).join("");
+    }
+    function esc(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+    function renderToggles(send) {
+      $("toggles").innerHTML = (catalog.send_toggles || []).map((item) => {
+        const on = item.forced === false ? false : (send[item.key] !== false);
+        const disabled = item.editable === false ? "disabled" : "";
+        const reason = item.reason ? `<span class="muted">${esc(item.reason)}</span>` : "";
+        return `<label class="toggle"><input type="checkbox" data-send="${esc(item.key)}" ${on ? "checked" : ""} ${disabled} /><span>${esc(item.label)} ${reason}</span></label>`;
+      }).join("");
+    }
+    function renderMatrix(custom) {
+      const defaults = catalog.default_custom_fields || {};
+      $("matrix").innerHTML = (catalog.probate_fields || []).map((field) => {
+        if (field.unavailable) {
+          return `<tr><td><b>${esc(field.label)}</b><div class="muted">${esc(field.key)}</div></td><td>${esc(field.source)}<div class="muted">${esc(field.notes)}</div></td><td><span class="pill off">Not extracted</span></td></tr>`;
+        }
+        if (!field.custom) return "";
+        const value = custom[field.key] ?? "";
+        const hint = field.notes ? `<div class="muted">${esc(field.notes)}</div>` : "";
+        const person = field.person ? `<span class="pill">${esc(field.person)}</span> ` : "";
+        return `<tr>
+          <td><b>${esc(field.label)}</b><div class="muted">${esc(field.key)}</div></td>
+          <td>${person}${esc(field.source)}${hint}</td>
+          <td>
+            <input list="fub-custom-names" data-custom="${esc(field.key)}" value="${esc(value)}" placeholder="${esc(defaults[field.key] || "customFieldName or blank")}" />
+          </td>
+        </tr>`;
+      }).join("") + `<datalist id="fub-custom-names">${fieldListHtml()}</datalist>`;
+    }
+    function applyPayload(data) {
+      catalog = data.catalog || catalog;
+      fubFields = data.fub_custom_fields || [];
+      const mapping = data.mapping || {};
+      $("rules").innerHTML = (catalog.go_no_go || []).map((line) => `<li>${esc(line)}</li>`).join("");
+      $("path-line").textContent = "Saves to " + (data.path || "fub_mapping.yaml") + (data.exists ? "" : " (bundled defaults until you save)");
+      $("system").value = mapping.system || "PlacerProbateMonitor";
+      $("subject_address_type").value = mapping.subject_address_type || "subject property";
+      $("court_search_url").value = mapping.court_search_url || "";
+      $("skip_petitioner_contains").value = (mapping.skip_petitioner_contains || []).join("\n");
+      renderToggles(mapping.send || {});
+      renderMatrix(mapping.custom_fields || {});
+      $("fub-fields-note").textContent = data.fub_custom_error
+        ? data.fub_custom_error
+        : (fubFields.length ? `Loaded ${fubFields.length} custom fields from Follow Up Boss.` : "Create matching custom fields in FUB, then load them here.");
+    }
+    function payload() {
+      const send = {};
+      document.querySelectorAll("[data-send]").forEach((el) => {
+        send[el.dataset.send] = !!el.checked;
+      });
+      send.emails = false;
+      send.phones = false;
+      send.mailing_address = false;
+      const custom_fields = {};
+      document.querySelectorAll("[data-custom]").forEach((el) => {
+        const value = el.value.trim();
+        if (value) custom_fields[el.dataset.custom] = value;
+      });
+      return {
+        system: $("system").value.trim(),
+        subject_address_type: $("subject_address_type").value.trim(),
+        court_search_url: $("court_search_url").value.trim(),
+        skip_petitioner_contains: $("skip_petitioner_contains").value.split(/\n/).map((x) => x.trim()).filter(Boolean),
+        send,
+        custom_fields,
+      };
+    }
+    async function load(refresh) {
+      const url = refresh ? API + (API.includes("?") ? "&" : "?") + "refresh=1" : API;
+      const data = await (await fetch(url, { credentials: "same-origin" })).json();
+      applyPayload(data);
+    }
+    $("save").onclick = async () => {
+      const res = await fetch(API, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload()),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        flash(data.error || "Save failed", false);
+        return;
+      }
+      applyPayload(data);
+      flash("Mapping saved.", true);
+    };
+    $("load-fub").onclick = async () => {
+      await load(true);
+      flash(fubFields.length ? "Loaded FUB custom fields." : ($("fub-fields-note").textContent || "No FUB fields"), !!fubFields.length);
+    };
+    load(false).catch((err) => flash(String(err), false));
+  </script>
+</body>
+</html>

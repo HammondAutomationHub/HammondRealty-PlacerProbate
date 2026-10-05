@@ -652,6 +652,27 @@ def main() -> int:
         print("\nDry run: state and email not written.")
         return 0
     save_state(state_path, state)
+    try:
+        from .fub_client import export_new_leads
+    except ImportError:
+        from fub_client import export_new_leads
+
+    fub_summary = export_new_leads(
+        rows, state, mapping_path=state_path.parent / "fub_mapping.yaml"
+    )
+    save_state(state_path, state)
+    (state_path.parent / "fub_last.json").write_text(
+        json.dumps(
+            {
+                "posted": fub_summary.get("posted"),
+                "updated": fub_summary.get("updated"),
+                "skipped": fub_summary.get("skipped"),
+                "error": fub_summary.get("error"),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     if args.no_email:
         print(f"\nSaved state to {state_path}. Email skipped.")
         return 0

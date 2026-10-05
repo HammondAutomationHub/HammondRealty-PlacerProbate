@@ -12,6 +12,9 @@
       },
       "last_pdf": {
         "default": "mdi:file-pdf-box"
+      },
+      "fub_posted": {
+        "default": "mdi:account-arrow-up"
       }
     }
   },

@@ -45,6 +45,13 @@ DEFAULTS = {
     "generate_pdf": True,
     "ecourt_pause_seconds": 1.2,
     "max_search_pages": 10,
+    "fub_enabled": False,
+    "fub_api_url": "https://api.followupboss.com/v1",
+    "fub_api_key": "",
+    "fub_source": "probate",
+    "fub_assigned_to": "Blake Hammond",
+    "fub_event_type": "Seller Inquiry",
+    "fub_strict_property": False,
 }
 
 WEEKDAYS = [
@@ -232,6 +239,16 @@ def apply_env(settings: dict) -> None:
     )
     os.environ["PROBATE_MAX_PAGES"] = str(int(settings.get("max_search_pages") or 10))
     os.environ["ECOURT_PAUSE"] = str(float(settings.get("ecourt_pause_seconds") or 1.2))
+    os.environ["FUB_ENABLED"] = "1" if settings.get("fub_enabled") else "0"
+    os.environ["FUB_API_URL"] = str(
+        settings.get("fub_api_url") or "https://api.followupboss.com/v1"
+    )
+    os.environ["FUB_API_KEY"] = str(settings.get("fub_api_key") or "")
+    os.environ["FUB_SOURCE"] = str(settings.get("fub_source") or "probate")
+    os.environ["FUB_ASSIGNED_TO"] = str(settings.get("fub_assigned_to") or "Blake Hammond")
+    os.environ["FUB_EVENT_TYPE"] = str(settings.get("fub_event_type") or "Seller Inquiry")
+    os.environ["FUB_STRICT_PROPERTY"] = "1" if settings.get("fub_strict_property") else "0"
+    os.environ["FUB_MAPPING_PATH"] = str(DATA / "fub_mapping.yaml")
 
 
 def reports_dir() -> Path:
@@ -344,6 +361,12 @@ def api_config():
     else:
         safe["smtp_password"] = ""
         safe["smtp_password_set"] = False
+    if safe.get("fub_api_key"):
+        safe["fub_api_key"] = "••••••••"
+        safe["fub_api_key_set"] = True
+    else:
+        safe["fub_api_key"] = ""
+        safe["fub_api_key_set"] = False
     return jsonify(safe)
 
 
@@ -353,6 +376,8 @@ def api_config_save():
     current = load_settings()
     if body.get("smtp_password") in ("", "••••••••", None):
         body["smtp_password"] = current.get("smtp_password") or ""
+    if body.get("fub_api_key") in ("", "••••••••", None):
+        body["fub_api_key"] = current.get("fub_api_key") or ""
     saved = save_settings(body)
     status = load_status()
     nxt = next_run_at(saved, status)
@@ -360,6 +385,8 @@ def api_config_save():
     public = dict(saved)
     public["smtp_password"] = "••••••••" if saved.get("smtp_password") else ""
     public["smtp_password_set"] = bool(saved.get("smtp_password"))
+    public["fub_api_key"] = "••••••••" if saved.get("fub_api_key") else ""
+    public["fub_api_key_set"] = bool(saved.get("fub_api_key"))
     public["next_run"] = nxt.isoformat(timespec="seconds")
     return jsonify(public)
 
@@ -428,6 +455,32 @@ def api_report_file(name: str):
     if not path.exists() or not path.is_file():
         return jsonify({"error": "not found"}), 404
     return send_file(path, as_attachment=True)
+
+
+@app.get("/api/fub-mapping")
+def api_fub_mapping():
+    apply_env(load_settings())
+    from fub_client import mapping_payload
+
+    refresh = str(request.args.get("refresh") or "") in {"1", "true", "yes"}
+    path = DATA / "fub_mapping.yaml"
+    return jsonify(mapping_payload(path, fetch_fub=refresh))
+
+
+@app.post("/api/fub-mapping")
+def api_fub_mapping_save():
+    apply_env(load_settings())
+    from fub_client import mapping_payload, save_mapping
+
+    body = request.get_json(force=True, silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({"error": "Expected a JSON object."}), 400
+    path = DATA / "fub_mapping.yaml"
+    try:
+        save_mapping(body, path)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(mapping_payload(path, fetch_fub=False))
 
 
 def main() -> None:

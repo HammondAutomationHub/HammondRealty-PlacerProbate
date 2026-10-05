@@ -11,6 +11,10 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ATTR_FUB_ERROR,
+    ATTR_FUB_POSTED,
+    ATTR_FUB_SKIPPED,
+    ATTR_FUB_UPDATED,
     ATTR_LAST_ERROR,
     ATTR_LAST_RESULT,
     ATTR_LAST_RUN,
@@ -29,6 +33,7 @@ async def async_setup_entry(
             PlacerProbateStatusSensor(hass, entry, "last_run", ATTR_LAST_RUN),
             PlacerProbateStatusSensor(hass, entry, "new_cases", ATTR_NEW_COUNT),
             PlacerProbateStatusSensor(hass, entry, "last_pdf", ATTR_PDF),
+            PlacerProbateStatusSensor(hass, entry, "fub_posted", ATTR_FUB_POSTED),
         ]
     )
 
@@ -67,6 +72,10 @@ class PlacerProbateStatusSensor(SensorEntity):
         status = store.get("status") or {}
         return {
             ATTR_LAST_ERROR: status.get(ATTR_LAST_ERROR),
+            ATTR_FUB_POSTED: status.get(ATTR_FUB_POSTED),
+            ATTR_FUB_UPDATED: status.get(ATTR_FUB_UPDATED),
+            ATTR_FUB_SKIPPED: status.get(ATTR_FUB_SKIPPED),
+            ATTR_FUB_ERROR: status.get(ATTR_FUB_ERROR),
             "running": store.get("running", False),
         }
 
