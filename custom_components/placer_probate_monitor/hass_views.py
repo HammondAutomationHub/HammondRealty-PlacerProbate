@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from aiohttp import web
+from aiohttp.web import FileResponse
 from homeassistant.components import frontend
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
@@ -32,9 +33,16 @@ from .const import (
     DOMAIN,
     FUB_EVENT_TYPES,
 )
-from .fub_client import inspect_fub_person, mapping_payload, save_mapping, sources_payload
+from .fub_client import (
+    inspect_fub_person,
+    mapping_payload,
+    petition_file_token,
+    petition_safe_case,
+    save_mapping,
+    sources_payload,
+)
 
-PANEL_JS_VERSION = "1.3.18"
+PANEL_JS_VERSION = "1.3.19"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -294,6 +302,41 @@ class FubSettingsView(HomeAssistantView):
         return self.json(_public_fub(merged))
 
 
+class PetitionPdfView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/de111/{token}/{slug}"
+    name = "api:placer_probate_monitor:de111"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request, token, slug):
+        import hmac as hmac_mod
+
+        name = Path(str(slug or "")).name
+        if not name.lower().endswith(".pdf"):
+            return self.json({"error": "not found"}, status_code=404)
+        safe = petition_safe_case(Path(name).stem)
+        entry = _entry(self.hass)
+        expected = petition_file_token(safe, secret=entry.entry_id if entry else None)
+        if not hmac_mod.compare_digest(str(token or ""), expected):
+            return self.json({"error": "not found"}, status_code=404)
+        docs = (Path(self.hass.config.path(DOMAIN)) / "reports" / "docs").resolve()
+        folder = (docs / safe).resolve()
+        try:
+            folder.relative_to(docs)
+        except ValueError:
+            return self.json({"error": "not found"}, status_code=404)
+        named = folder / f"{safe}_DE-111.pdf"
+        path = named if named.is_file() else None
+        if path is None and folder.is_dir():
+            matches = sorted(folder.glob("*.pdf"))
+            path = matches[0] if matches else None
+        if not path or not path.is_file():
+            return self.json({"error": "not found"}, status_code=404)
+        return FileResponse(path)
+
+
 class JobView(HomeAssistantView):
     url = "/api/placer_probate_monitor/job"
     name = "api:placer_probate_monitor:job"
@@ -415,6 +458,7 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(FubPersonView(hass))
     hass.http.register_view(SourcesView(hass))
     hass.http.register_view(FubSettingsView(hass))
+    hass.http.register_view(PetitionPdfView(hass))
     hass.http.register_view(JobView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 

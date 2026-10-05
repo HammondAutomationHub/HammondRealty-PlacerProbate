@@ -497,8 +497,7 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
             for item in portal.get("document_files") or []:
                 if not (item.get("available") and looks_like_probate_petition(item.get("name") or "")):
                     continue
-                file_id = item.get("file_id") or "petition"
-                dest = case_dir / f"{file_id}_petition.pdf"
+                dest = case_dir / f"{re.sub(r'[^\w\-]+', '_', notice.case_number)}_DE-111.pdf"
                 try:
                     time.sleep(client.pause)
                     client.download(item["url"], dest)
@@ -627,14 +626,20 @@ def main() -> int:
         return 2
 
     unique = dedupe(notices)
-    state_path = (root / args.state_file).resolve()
+    state_path = Path(args.state_file)
+    if not state_path.is_absolute():
+        state_path = (root / args.state_file).resolve()
+    else:
+        state_path = state_path.resolve()
     state = load_state(state_path)
     run_date = today_local().isoformat()
     unique = mark_new(unique, state, run_date)
 
     text_body = build_text(unique, start, end, urls)
     html_body = build_html(unique, start, end, urls)
-    out_dir = root / args.out_dir
+    out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = root / args.out_dir
     write_outputs(out_dir, text_body, html_body, unique)
 
     stamp = datetime.now(get_tz()).strftime("%Y-%m-%d")

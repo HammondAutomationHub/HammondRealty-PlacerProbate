@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -430,7 +431,7 @@ PROBATE_SOURCE_FIELDS = [
         "label": "Petition PDF filename",
         "group": "other",
         "source": "Downloaded DE-111",
-        "notes": "Basename only; not uploaded to FUB.",
+        "notes": "Saved locally and attached to the FUB person Files tab after create/update.",
         "person": None,
         "custom": True,
     },
@@ -626,6 +627,11 @@ SEND_TOGGLES = [
     {"key": "source", "label": "Send event source from config", "editable": True},
     {"key": "message", "label": "Send event message/description", "editable": True},
     {"key": "custom_fields", "label": "Send custom fields below", "editable": True},
+    {
+        "key": "de111_file",
+        "label": "Upload DE-111 PDF to Follow Up Boss Files",
+        "editable": True,
+    },
 ]
 
 GO_NO_GO = [
@@ -633,6 +639,7 @@ GO_NO_GO = [
     "Petitioner address, email, and phone come from DE-111 item 1.",
     "Never map attorney_phone onto person.phones. Attorney stays a custom field at most.",
     "Last residence is DE-111 text, not a verified APN. Case Summary URLs 404 unless you search first.",
+    "DE-111 is downloaded from eCourt and attached to the person Files tab. Preview does not upload.",
     "Only NEW cases are created on a full run. Verify one FUB import may use an already-seen case that has never been sent to Follow Up Boss.",
 ]
 
@@ -937,6 +944,19 @@ def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) 
     notes = person.get("background") or combined_notes(row, mapping)
     if notes:
         person_rows.append({"label": "notes", "value": notes})
+    send = mapping.get("send") or {}
+    pdf_path = _petition_pdf_path(row)
+    if send.get("de111_file", True):
+        person_rows.append(
+            {
+                "label": "Files",
+                "value": (
+                    f"{pdf_path.name} → FUB Files (DE-111)"
+                    if pdf_path
+                    else "No DE-111 PDF downloaded yet"
+                ),
+            }
+        )
     return {
         "person": person_rows,
         "event_type": event.get("type") or settings.get("event_type") or "",
@@ -1584,6 +1604,52 @@ def case_key(row: dict) -> str:
     return str(row.get("case_number") or row.get("advert_id") or "").strip()
 
 
+def petition_safe_case(case: str) -> str:
+    return re.sub(r"[^\w\-]+", "_", str(case or "").strip()) or "case"
+
+
+def petition_file_token(case: str, secret: str | None = None) -> str:
+    raw = (secret or os.environ.get("FUB_PETITION_TOKEN_SECRET") or "placer-probate")
+    return hmac.new(
+        str(raw).encode(),
+        f"de111:{petition_safe_case(case)}".encode(),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+
+
+def petition_public_uri(case: str) -> str:
+    base = str(os.environ.get("FUB_PETITION_BASE_URL") or "").rstrip("/")
+    if not base:
+        return ""
+    safe = petition_safe_case(case)
+    slug = f"{safe}.pdf"
+    return f"{base}/{petition_file_token(case)}/{slug}"
+
+
+def _petition_pdf_path(row: dict) -> Path | None:
+    raw = str(row.get("petition_pdf") or "").strip()
+    if raw:
+        path = Path(raw)
+        if path.is_file() and path.stat().st_size > 4:
+            return path
+    case = petition_safe_case(case_key(row))
+    docs = Path(os.environ.get("FUB_PETITION_DOCS_DIR") or "")
+    if not docs.is_dir() or not case:
+        return None
+    folder = docs / case
+    named = folder / f"{case}_DE-111.pdf"
+    if named.is_file():
+        return named
+    if folder.is_dir():
+        for path in sorted(folder.glob("*_petition.pdf")):
+            if path.is_file():
+                return path
+        for path in sorted(folder.glob("*.pdf")):
+            if path.is_file():
+                return path
+    return None
+
+
 def stored_person_id(state: dict, key: str) -> int | None:
     record = (state.get("cases") or {}).get(key) or {}
     raw = record.get("fub_person_id")
@@ -1862,6 +1928,11 @@ def verify_record_payload(
         "hearing": values.get("hearing"),
         "notice_url": values.get("notice_url"),
         "court_search": values.get("court_search"),
+        "de111_file": (
+            str(_petition_pdf_path(row) or "")
+            if (mapping.get("send") or {}).get("de111_file", True)
+            else ""
+        ),
         "custom_fields": custom,
         "source_extract": source_extract_rows(row, mapping),
         "mapped": mapped_look_payload(row, person, settings, mapping),
@@ -1986,6 +2057,110 @@ def post_note(api_url: str, api_key: str, person_id: int, body: str, system: str
         return {}
 
 
+def _attachment_headers(system: str) -> dict:
+    headers = _fub_headers(system)
+    key = str(os.environ.get("FUB_SYSTEM_KEY") or "").strip()
+    if key:
+        headers["X-System-Key"] = key
+    return headers
+
+
+def post_person_attachment(
+    api_url: str,
+    api_key: str,
+    person_id: int,
+    path: Path,
+    *,
+    uri: str,
+    file_name: str,
+    system: str,
+) -> dict:
+    url = f"{_api_root(api_url)}/personAttachments"
+    headers = _attachment_headers(system)
+    errors: list[str] = []
+    if uri:
+        response = requests.post(
+            url,
+            json={
+                "personId": int(person_id),
+                "uri": uri,
+                "fileName": file_name,
+                "fileSize": int(path.stat().st_size),
+            },
+            auth=(api_key, ""),
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code < 400:
+            try:
+                return response.json()
+            except ValueError:
+                return {}
+        errors.append(f"uri {response.status_code}: {response.text[:300]}")
+    mp_headers = {key: value for key, value in headers.items() if key.lower() != "content-type"}
+    with path.open("rb") as handle:
+        response = requests.post(
+            url,
+            data={"personId": str(int(person_id)), "fileName": file_name},
+            files={"file": (file_name, handle, "application/pdf")},
+            auth=(api_key, ""),
+            headers=mp_headers,
+            timeout=60,
+        )
+    if response.status_code < 400:
+        try:
+            return response.json()
+        except ValueError:
+            return {}
+    errors.append(f"upload {response.status_code}: {response.text[:300]}")
+    raise RuntimeError("FUB files " + " | ".join(errors))
+
+
+def attach_de111_file(
+    row: dict,
+    person_id: int,
+    *,
+    mapping: dict,
+    api_url: str,
+    api_key: str,
+    system: str,
+    cases: dict,
+    key: str,
+) -> None:
+    send = mapping.get("send") or {}
+    if not send.get("de111_file", True):
+        return
+    record = cases.get(key) or {}
+    if record.get("fub_attachment_id"):
+        return
+    path = _petition_pdf_path(row)
+    if not path:
+        print(f"FUB files skip {key}: no DE-111 PDF", flush=True)
+        return
+    case = case_key(row)
+    file_name = f"{petition_safe_case(case)}_DE-111.pdf"
+    uri = petition_public_uri(case)
+    body = post_person_attachment(
+        api_url,
+        api_key,
+        person_id,
+        path,
+        uri=uri,
+        file_name=file_name,
+        system=system,
+    )
+    attachment_id = body.get("id")
+    if key not in cases:
+        cases[key] = {}
+    if attachment_id:
+        cases[key]["fub_attachment_id"] = attachment_id
+    print(
+        f"FUB files attached DE-111 {key} person_id={person_id} "
+        f"attachment_id={attachment_id or 'ok'}",
+        flush=True,
+    )
+
+
 def person_id_from_response(body: dict) -> int | None:
     if not isinstance(body, dict):
         return None
@@ -2105,6 +2280,19 @@ def export_new_leads(
                 record_view["fub_error"] = None
                 summary["verify_record"] = record_view
                 print(f"FUB updated {key} person_id={pid}")
+                try:
+                    attach_de111_file(
+                        row,
+                        pid,
+                        mapping=mapping,
+                        api_url=settings["api_url"],
+                        api_key=api_key,
+                        system=system,
+                        cases=cases,
+                        key=key,
+                    )
+                except Exception as file_exc:  # noqa: BLE001
+                    print(f"FUB files error {key}: {file_exc}", flush=True)
                 if verify:
                     break
                 continue
@@ -2140,6 +2328,19 @@ def export_new_leads(
                 )
             except Exception as note_exc:  # noqa: BLE001
                 print(f"FUB notes error {key}: {note_exc}", flush=True)
+            try:
+                attach_de111_file(
+                    row,
+                    pid,
+                    mapping=mapping,
+                    api_url=settings["api_url"],
+                    api_key=api_key,
+                    system=system,
+                    cases=cases,
+                    key=key,
+                )
+            except Exception as file_exc:  # noqa: BLE001
+                print(f"FUB files error {key}: {file_exc}", flush=True)
             summary["posted"] += 1
             posted_case = key
             posted_pid = pid

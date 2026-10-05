@@ -251,6 +251,9 @@ def apply_env(settings: dict) -> None:
     os.environ["FUB_STRICT_PROPERTY"] = "1" if settings.get("fub_strict_property") else "0"
     os.environ["FUB_VERIFY_ONLY"] = "1" if settings.get("fub_verify_only") else "0"
     os.environ["FUB_MAPPING_PATH"] = str(DATA / "fub_mapping.yaml")
+    os.environ["FUB_PETITION_DOCS_DIR"] = str(reports_dir() / "docs")
+    if not os.environ.get("FUB_PETITION_TOKEN_SECRET"):
+        os.environ["FUB_PETITION_TOKEN_SECRET"] = "addon-placer-probate"
 
 
 def reports_dir() -> Path:

@@ -102,7 +102,11 @@ def tzinfo(settings: dict) -> ZoneInfo:
         return ZoneInfo("America/Los_Angeles")
 
 
-def apply_env(settings: dict, mapping_path: Path | None = None) -> None:
+def apply_env(
+    settings: dict,
+    mapping_path: Path | None = None,
+    hass: HomeAssistant | None = None,
+) -> None:
     recipients = parse_recipients(settings.get(CONF_RECIPIENTS))
     os.environ["SMTP_HOST"] = str(settings.get(CONF_SMTP_HOST) or "smtp.gmail.com")
     os.environ["SMTP_PORT"] = str(int(settings.get(CONF_SMTP_PORT) or 587))
@@ -137,6 +141,24 @@ def apply_env(settings: dict, mapping_path: Path | None = None) -> None:
     )
     if mapping_path:
         os.environ["FUB_MAPPING_PATH"] = str(mapping_path)
+    if hass is not None:
+        data_dir = Path(hass.config.path(DOMAIN))
+        os.environ["FUB_PETITION_DOCS_DIR"] = str(data_dir / "reports" / "docs")
+        entry = hass.config_entries.async_entries(DOMAIN)
+        if entry:
+            os.environ["FUB_PETITION_TOKEN_SECRET"] = entry[0].entry_id
+        try:
+            from homeassistant.helpers.network import get_url
+
+            base = str(get_url(hass, prefer_external=True) or "").rstrip("/")
+        except Exception:  # noqa: BLE001
+            base = ""
+        if base:
+            os.environ["FUB_PETITION_BASE_URL"] = (
+                f"{base}/api/placer_probate_monitor/de111"
+            )
+        else:
+            os.environ.pop("FUB_PETITION_BASE_URL", None)
 
 
 def should_run_now(settings: dict, now: datetime) -> bool:
@@ -155,7 +177,7 @@ def should_run_now(settings: dict, now: datetime) -> bool:
 
 def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
     data_dir = Path(hass.config.path(DOMAIN))
-    apply_env(settings, mapping_path=data_dir / "fub_mapping.yaml")
+    apply_env(settings, mapping_path=data_dir / "fub_mapping.yaml", hass=hass)
     reports = data_dir / "reports"
     reports.mkdir(parents=True, exist_ok=True)
     cmd = [
