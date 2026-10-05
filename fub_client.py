@@ -502,7 +502,8 @@ FUB_BUILTIN_FIELDS = [
     {"name": "firstName", "label": "First name", "group": "Person", "type": "person"},
     {"name": "lastName", "label": "Last name", "group": "Person", "type": "person"},
     {"name": "assignedTo", "label": "Assigned to", "group": "Person", "type": "person"},
-    {"name": "addresses", "label": "Addresses", "group": "Person", "type": "person"},
+    {"name": "addresses", "label": "Addresses (subject property)", "group": "Person", "type": "person"},
+    {"name": "mailingAddress", "label": "Mailing address", "group": "Person", "type": "person"},
     {"name": "stage", "label": "Stage", "group": "Person", "type": "person"},
     {"name": "source", "label": "Lead source", "group": "Person", "type": "person"},
     {"name": "tags", "label": "Tags", "group": "Person", "type": "person"},
@@ -534,6 +535,13 @@ PERSON_BUILTIN_TARGETS = {
     "background",
     "emails",
     "phones",
+}
+
+ADDRESS_BUILTIN_TARGETS = {
+    "mailingAddress": "mailing",
+    "mailing": "mailing",
+    "addresses.mailing": "mailing",
+    "person.mailingAddress": "mailing",
 }
 
 SEND_TOGGLES = [
@@ -1112,6 +1120,18 @@ def inspect_fub_person(query: str) -> dict:
     ):
         value = _fub_display_value(person.get(name))
         core.append({"name": name, "value": value, "populated": bool(value)})
+    mailing_line = ""
+    for item in person.get("addresses") or []:
+        if isinstance(item, dict) and str(item.get("type") or "").lower() == "mailing":
+            mailing_line = _fub_display_value(item)
+            break
+    core.append(
+        {
+            "name": "mailingAddress",
+            "value": mailing_line,
+            "populated": bool(mailing_line),
+        }
+    )
     custom = []
     for name, meta in custom_meta.items():
         value = _fub_display_value(person.get(name))
@@ -1216,6 +1236,28 @@ def split_address(line: str) -> dict | None:
         "state": match.group("state").upper(),
         "code": (match.group("zip") or "").strip(),
     }
+
+
+def _upsert_typed_address(person: dict, line: str, addr_type: str) -> None:
+    addr = split_address(line)
+    if not addr:
+        return
+    addr["type"] = addr_type
+    existing = person.get("addresses")
+    rows = list(existing) if isinstance(existing, list) else []
+    out: list[dict] = []
+    replaced = False
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").lower() == addr_type.lower():
+            out.append(addr)
+            replaced = True
+        else:
+            out.append(item)
+    if not replaced:
+        out.append(addr)
+    person["addresses"] = out
 
 
 def case_key(row: dict) -> str:
@@ -1365,11 +1407,20 @@ def build_person(
                 target = target.split(".", 1)[1]
             if target in {"emails", "phones"}:
                 continue
+            if target in ADDRESS_BUILTIN_TARGETS:
+                _upsert_typed_address(
+                    person, str(value), ADDRESS_BUILTIN_TARGETS[target]
+                )
+                continue
             if target == "addresses":
                 addr = split_address(str(value))
                 if addr:
                     addr["type"] = mapping.get("subject_address_type") or "subject property"
-                    person["addresses"] = [addr]
+                    _upsert_typed_address(
+                        person,
+                        str(value),
+                        addr["type"],
+                    )
                 continue
             if target == "tags":
                 person["tags"] = [str(value)]
