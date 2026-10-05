@@ -12,6 +12,8 @@ skip_petitioner_contains:
 
 # Custom field API names (create these in FUB, then keep names in sync).
 custom_fields:
+  petitioner_first: firstName
+  petitioner_last: lastName
   case_number: customCaseNumber
   decedent: customDecedent
   hearing: customHearing

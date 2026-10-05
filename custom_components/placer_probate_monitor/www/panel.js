@@ -106,13 +106,13 @@ function ppmFubFieldSelect(key, selected, fubFields, builtins) {
   </select>`;
 }
 
-function ppmMappingRows(fields, custom, fubFields, person, builtins) {
+function ppmMappingRows(fields, custom, fubFields, person, builtins, defaults) {
   return (fields || []).map((field) => {
     if (!field.custom && field.unavailable) {
       return `<tr><td><b>${ppmEsc(field.label)}</b></td><td>${ppmEsc(field.source)}</td><td colspan="2"><span class="ppm-pill off">Not extracted</span></td></tr>`;
     }
     if (!field.custom) return "";
-    const value = (custom && custom[field.key]) || "";
+    const value = (custom && custom[field.key]) || (defaults && defaults[field.key]) || "";
     const status = field.unavailable
       ? '<span class="ppm-pill wait">Extract later</span>'
       : '<span class="ppm-pill live">Available</span>';
@@ -493,7 +493,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
             : (this._mapData.fub_custom_error || "Save a Follow Up Boss API key, then reload to load custom fields.")}</p>
           ${ppmExamplePersonBar(this._fubPerson && this._fubPerson.query)}
           <table><thead><tr><th>Source field</th><th>From</th><th>FUB custom field</th><th>Example person</th></tr></thead>
-          <tbody>${ppmMappingRows(fields, custom, fubFields, this._fubPerson, this._mapData.fub_builtin_fields || [])}</tbody></table>
+          <tbody>${ppmMappingRows(fields, custom, fubFields, this._fubPerson, this._mapData.fub_builtin_fields || [], (this._catalog && this._catalog.default_custom_fields) || (this._mapData.catalog && this._mapData.catalog.default_custom_fields) || {})}</tbody></table>
           <div class="ppm-actions"><button id="save-source-map" type="button">Save ${ppmEsc(src.name)} mapping</button></div>
         </section>`;
       const saveBtn = this._qs("#save-source-map");
@@ -562,6 +562,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
               this._mapData.fub_custom_fields || [],
               this._fubPerson,
               this._mapData.fub_builtin_fields || [],
+              (this._mapData.catalog && this._mapData.catalog.default_custom_fields) || {},
             )}
           </tbody>
         </table>
@@ -949,6 +950,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       this._fubFields || [],
       this._fubPerson,
       this._fubBuiltins || [],
+      this._catalog.default_custom_fields || {},
     );
     ppmBindMappingExamples(this._qs("#matrix"), this._fubPerson);
     this.querySelectorAll("#matrix select[data-custom]").forEach((el) => {

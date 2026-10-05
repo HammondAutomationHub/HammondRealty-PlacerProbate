@@ -168,10 +168,44 @@ PROBATE_SOURCE_FIELDS = [
         "custom": True,
     },
     {
+        "key": "petitioner_first",
+        "label": "Petitioner first name",
+        "source": "Split from petitioner (all tokens except last)",
+        "notes": "Maps to FUB firstName. Last token is last name.",
+        "person": "firstName",
+        "custom": True,
+    },
+    {
+        "key": "petitioner_last",
+        "label": "Petitioner last name",
+        "source": "Split from petitioner (last token, plus Jr/Sr/II/III)",
+        "notes": "Maps to FUB lastName.",
+        "person": "lastName",
+        "custom": True,
+    },
+    {
         "key": "decedent",
         "label": "Decedent name",
         "source": "CNPA notice / eCourt decedent party",
         "notes": "Never Person first/last name. Custom field only.",
+        "person": None,
+        "custom": True,
+        "block": ["firstName", "lastName", "phones", "emails"],
+    },
+    {
+        "key": "decedent_first",
+        "label": "Decedent first name",
+        "source": "Split from decedent name",
+        "notes": "Custom field only. Do not map onto Person firstName.",
+        "person": None,
+        "custom": True,
+        "block": ["firstName", "lastName", "phones", "emails"],
+    },
+    {
+        "key": "decedent_last",
+        "label": "Decedent last name",
+        "source": "Split from decedent name",
+        "notes": "Custom field only. Do not map onto Person lastName.",
         "person": None,
         "custom": True,
         "block": ["firstName", "lastName", "phones", "emails"],
@@ -595,6 +629,8 @@ def mapping_catalog() -> dict:
         "send_toggles": SEND_TOGGLES,
         "go_no_go": GO_NO_GO,
         "default_custom_fields": {
+            "petitioner_first": "firstName",
+            "petitioner_last": "lastName",
             "case_number": "customCaseNumber",
             "decedent": "customDecedent",
             "hearing": "customHearing",
@@ -625,7 +661,11 @@ def mapping_errors(mapping: dict, *, source_id: str = "placer") -> list[str]:
         if api in PERSON_PHONE_KEYS or api in blocked and api in {"phones", "person.phones"}:
             if "phones" in blocked or local_key == "attorney_phone":
                 errors.append(f"Never map {local_key} onto person.phones.")
-        if api in PERSON_NAME_KEYS and local_key != "petitioner":
+        if api in PERSON_NAME_KEYS and local_key not in {
+            "petitioner",
+            "petitioner_first",
+            "petitioner_last",
+        }:
             errors.append(f"{local_key} cannot map onto Person first/last name.")
         if live and meta.get("unavailable"):
             errors.append(f"{local_key} is not extracted yet.")
@@ -820,7 +860,9 @@ def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) 
 
 def probate_export_values(row: dict, mapping: dict) -> dict:
     petitioner = portal_petitioner(row)
+    first, last = split_person_name(petitioner)
     decedent = str(row.get("decedent") or "").strip()
+    dec_first, dec_last = split_person_name(decedent.split(",")[0] if decedent else "")
     case = case_key(row)
     court_note = _court_search_note(row, mapping)
     petition_name = (
@@ -828,7 +870,11 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
     )
     return {
         "petitioner": petitioner,
+        "petitioner_first": first,
+        "petitioner_last": last,
         "decedent": decedent,
+        "decedent_first": dec_first,
+        "decedent_last": dec_last,
         "case_number": case,
         "decedent_residence": _stringify_field(row.get("decedent_residence")),
         "decedent_city": _stringify_field(row.get("decedent_city")),
@@ -1089,11 +1135,23 @@ def mapping_payload(path: Path | None = None, *, fetch_fub: bool = True, source_
 
 
 def split_person_name(name: str) -> tuple[str, str]:
-    parts = [p for p in re.split(r"\s+", (name or "").strip()) if p]
+    text = re.sub(r"\s+", " ", (name or "").strip())
+    text = text.replace('"', "").replace("'", "")
+    if not text:
+        return "", ""
+    if "," in text:
+        last, _, rest = text.partition(",")
+        first = rest.strip()
+        if first and last.strip():
+            return first.title(), last.strip().title()
+    parts = [part for part in text.split(" ") if part]
     if not parts:
         return "", ""
+    suffixes = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv", "esq", "esq."}
     if len(parts) == 1:
         return parts[0].title(), ""
+    if len(parts) >= 3 and parts[-1].rstrip(".").lower() in suffixes:
+        return " ".join(parts[:-2]).title(), " ".join(parts[-2:]).title()
     return " ".join(parts[:-1]).title(), parts[-1].title()
 
 
