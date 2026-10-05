@@ -584,6 +584,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Create at most one new Follow Up Boss person, then skip remaining go-cases",
     )
+    p.add_argument(
+        "--fub-preview-one",
+        action="store_true",
+        help="Scrape and show one mapped go-case without posting to Follow Up Boss or updating seen state",
+    )
     p.add_argument("--env-file", default=".env")
     return p.parse_args()
 
@@ -609,6 +614,8 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     root = Path(__file__).resolve().parent
     load_env_file(root / args.env_file)
+    if args.fub_preview_one:
+        os.environ["FUB_PREVIEW_ONE"] = "1"
     if args.fub_verify_one:
         os.environ["FUB_VERIFY_ONLY"] = "1"
 
@@ -654,6 +661,33 @@ def main() -> int:
         f"{new_count} new / {len(unique)} unique"
     )
     print(text_body)
+
+    if args.fub_preview_one:
+        try:
+            from .fub_client import preview_one_record
+        except ImportError:
+            from fub_client import preview_one_record
+
+        preview = preview_one_record(
+            rows, mapping_path=state_path.parent / "fub_mapping.yaml"
+        )
+        (state_path.parent / "fub_last.json").write_text(
+            json.dumps(
+                {
+                    "posted": 0,
+                    "updated": 0,
+                    "skipped": len(preview.get("skips") or []),
+                    "error": None,
+                    "preview": True,
+                    "verify_record": preview.get("verify_record"),
+                    "verify_note": preview.get("verify_note"),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print("\nPreview only: Follow Up Boss not updated, seen-cases not updated.")
+        return 0
 
     if args.dry_run:
         print("\nDry run: state and email not written.")

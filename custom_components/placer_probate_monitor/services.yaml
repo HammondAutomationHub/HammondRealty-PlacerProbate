@@ -6,4 +6,7 @@ test_email:
   description: Send a test message with the configured SMTP settings and recipients.
 verify_fub:
   name: Verify one FUB import
-  description: Scrape as usual, then import only the first new go-case into Follow Up Boss. Does not email. Confirm the contact in FUB, then turn off Verify only.
+  description: Scrape as usual, then import only the first go-case that has never been sent to Follow Up Boss. Does not email.
+preview_one:
+  name: Preview one record
+  description: Retrieve one live go-case for display only. Ignores local seen/FUB status. Does not post to Follow Up Boss or update seen-cases.

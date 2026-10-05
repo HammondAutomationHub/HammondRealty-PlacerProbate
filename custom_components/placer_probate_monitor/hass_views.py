@@ -34,7 +34,7 @@ from .const import (
 )
 from .fub_client import mapping_payload, save_mapping, sources_payload
 
-PANEL_JS_VERSION = "1.2.5"
+PANEL_JS_VERSION = "1.2.6"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -336,6 +336,18 @@ class JobView(HomeAssistantView):
                         CONF_FUB_ENABLED: True,
                         CONF_FUB_VERIFY_ONLY: True,
                         CONF_SEND_EMAIL: False,
+                    },
+                )
+            )
+        elif action == "preview":
+            self.hass.async_create_task(
+                runner(
+                    "preview_one",
+                    {
+                        "fub_preview_one": True,
+                        CONF_FUB_VERIFY_ONLY: False,
+                        CONF_SEND_EMAIL: False,
+                        CONF_GENERATE_PDF: False,
                     },
                 )
             )

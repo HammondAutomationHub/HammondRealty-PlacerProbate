@@ -320,9 +320,10 @@ class PlacerProbateFubPanel extends HTMLElement {
             <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: import one new go-case per run</span></label>
             <div class="ppm-actions">
               <button id="save-fub" type="button">Save FUB connection</button>
+              <button class="secondary" id="preview-one" type="button">Preview one record</button>
               <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
             </div>
-            <p class="ppm-note">Verify scrapes Placer, then posts the first go-case that has never been sent to Follow Up Boss (including already-seen notices). The go record appears below.</p>
+            <p class="ppm-note">Preview one record retrieves a live go-case for display only. It ignores local seen/FUB status and does not post to Follow Up Boss. The record appears below.</p>
           </section>
           <section class="ppm-card" id="verify-record">
             <h2>Last verify record</h2>
@@ -368,6 +369,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._qs("#load-fub").addEventListener("click", () => this._loadMapping(true));
     this._qs("#save-fub").addEventListener("click", () => this._saveSettings());
     this._qs("#verify-fub").addEventListener("click", () => this._verify());
+    this._qs("#preview-one").addEventListener("click", () => this._preview());
   }
 
   _setTab(tab) {
@@ -404,7 +406,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     const rec = st && st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
     const note = (st && (st.fub_verify_note || (st.fub_verify && st.fub_verify.note))) || "";
     if (!rec) {
-      el.innerHTML = `<h2>Last verify record</h2><p class="ppm-note">${ppmEsc(note || "Run Verify one FUB import to show the go-case that was posted.")}</p>`;
+      el.innerHTML = `<h2>Last preview / verify record</h2><p class="ppm-note">${ppmEsc(note || "Run Preview one record (view only) or Verify one FUB import.")}</p>`;
       return;
     }
     const addr = rec.address || {};
@@ -431,9 +433,11 @@ class PlacerProbateFubPanel extends HTMLElement {
       `<tr><td>${ppmEsc(item.probate_field)}</td><td>${ppmEsc(item.fub_field)}</td><td>${ppmEsc(item.value)}</td></tr>`
     ).join("");
     el.innerHTML = `
-      <h2>Last verify record</h2>
-      <p class="ppm-note">This is the single go-case posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only.</p>
-      <span class="ppm-pill live">GO</span>
+      <h2>${rec.view_only ? "Last preview record" : "Last verify record"}</h2>
+      <p class="ppm-note">${rec.view_only
+        ? "View only. This case was not posted to Follow Up Boss and local seen status was not changed."
+        : "This is the single go-case posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only."}</p>
+      <span class="ppm-pill ${rec.view_only ? "wait" : "live"}">${rec.view_only ? "VIEW ONLY" : "GO · POSTED"}</span>
       <table>
         <tbody>
           ${rows.map((item) => `<tr><th>${ppmEsc(item[0])}</th><td>${item[1] ? ppmEsc(item[1]) : "—"}</td></tr>`).join("")}
@@ -582,6 +586,26 @@ class PlacerProbateFubPanel extends HTMLElement {
             ? `Verify posted ${rec.case_number} as FUB person ${rec.fub_person_id}.`
             : (st.fub_verify_note || "Verify finished. No new go-case was posted."))
           : (st.last_error || "Verify failed."),
+        ok,
+      );
+    } catch (err) {
+      this._flash(String(err), false);
+    }
+  }
+
+  async _preview() {
+    this._flash("Preview started… retrieving one live go-case (view only).", true);
+    try {
+      const st = await ppmRunJob(this._hass, "preview");
+      const ok = st.last_result !== "failed" && st.last_result !== "running";
+      this._renderVerify(st);
+      const rec = st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
+      this._flash(
+        ok
+          ? (rec
+            ? `Preview loaded ${rec.case_number} (not posted).`
+            : (st.fub_verify_note || "Preview finished. No go-case in this window."))
+          : (st.last_error || "Preview failed."),
         ok,
       );
     } catch (err) {

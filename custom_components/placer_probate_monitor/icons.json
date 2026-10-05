@@ -21,6 +21,7 @@
   "services": {
     "run_now": "mdi:play",
     "test_email": "mdi:email-fast-outline",
-    "verify_fub": "mdi:account-check-outline"
+    "verify_fub": "mdi:account-check-outline",
+    "preview_one": "mdi:eye-outline"
   }
 }

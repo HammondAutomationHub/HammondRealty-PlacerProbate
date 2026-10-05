@@ -176,7 +176,13 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
         cmd.append("--skip-portal")
     if not settings.get(CONF_GENERATE_PDF):
         cmd.append("--no-pdf")
-    if settings.get(CONF_FUB_VERIFY_ONLY):
+    if settings.get("fub_preview_one"):
+        cmd.append("--fub-preview-one")
+        if "--no-email" not in cmd:
+            cmd.append("--no-email")
+        if "--no-pdf" not in cmd:
+            cmd.append("--no-pdf")
+    elif settings.get(CONF_FUB_VERIFY_ONLY):
         cmd.append("--fub-verify-one")
     proc = subprocess.run(
         cmd,
@@ -394,9 +400,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.bus.async_fire(f"{DOMAIN}_run_finished", result)
 
+    async def _svc_preview(_call: ServiceCall) -> None:
+        result = await _execute(
+            "preview_one",
+            {
+                "fub_preview_one": True,
+                CONF_FUB_VERIFY_ONLY: False,
+                CONF_SEND_EMAIL: False,
+                CONF_GENERATE_PDF: False,
+            },
+        )
+        hass.bus.async_fire(f"{DOMAIN}_run_finished", result)
+
     hass.services.async_register(DOMAIN, "run_now", _svc_run)
     hass.services.async_register(DOMAIN, "test_email", _svc_test)
     hass.services.async_register(DOMAIN, "verify_fub", _svc_verify)
+    hass.services.async_register(DOMAIN, "preview_one", _svc_preview)
     return True
 
 
@@ -418,6 +437,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "run_now")
         hass.services.async_remove(DOMAIN, "test_email")
         hass.services.async_remove(DOMAIN, "verify_fub")
+        hass.services.async_remove(DOMAIN, "preview_one")
         from .hass_views import async_unload_mapping_ui
 
         async_unload_mapping_ui(hass)

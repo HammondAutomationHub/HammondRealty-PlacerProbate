@@ -814,6 +814,60 @@ def gate_reason(
     return None
 
 
+def preview_one_record(
+    rows: list[dict],
+    *,
+    mapping_path: Path | None = None,
+) -> dict:
+    mapping = load_mapping(mapping_path)
+    settings = {
+        "source": os.environ.get("FUB_SOURCE", "probate"),
+        "assigned_to": os.environ.get("FUB_ASSIGNED_TO", "Blake Hammond"),
+        "event_type": os.environ.get("FUB_EVENT_TYPE", "Seller Inquiry"),
+    }
+    strict = _env_bool("FUB_STRICT_PROPERTY")
+    skips: list[dict] = []
+    blank_state: dict = {"cases": {}}
+    for row in rows:
+        key = case_key(row)
+        reason = gate_reason(
+            row,
+            blank_state,
+            mapping,
+            strict_property=strict,
+            existing_id=None,
+            allow_seen_without_fub=True,
+        )
+        if reason:
+            skips.append({"case": key, "reason": reason})
+            continue
+        person = build_person(row, mapping, settings, person_id=None)
+        record = verify_record_payload(row, person, None, settings, mapping)
+        record["view_only"] = True
+        record["posted"] = False
+        record["gate"] = "go"
+        print(f"FUB preview: {key} (view only, not posted)", flush=True)
+        return {
+            "ok": True,
+            "verify_record": record,
+            "verify_note": None,
+            "skips": skips,
+        }
+    note = "No go-case in this window"
+    if skips:
+        sample = ", ".join(
+            f"{item.get('case') or '?'}={item.get('reason')}" for item in skips[:5]
+        )
+        note = f"{note}. Skips: {sample}"
+    print(f"FUB preview: {note}", flush=True)
+    return {
+        "ok": False,
+        "verify_record": None,
+        "verify_note": note,
+        "skips": skips,
+    }
+
+
 def _court_search_note(row: dict, mapping: dict) -> str:
     url = mapping.get("court_search_url") or COURT_SEARCH_DEFAULT
     case = case_key(row)
@@ -863,7 +917,7 @@ def person_fingerprint(person: dict) -> str:
 def verify_record_payload(
     row: dict,
     person: dict,
-    pid: int,
+    pid: int | None,
     settings: dict,
     mapping: dict,
 ) -> dict:
@@ -887,7 +941,7 @@ def verify_record_payload(
         "data_source_name": "Placer County",
         "gate": "go",
         "case_number": case_key(row),
-        "fub_person_id": int(pid),
+        "fub_person_id": int(pid) if pid else None,
         "petitioner": portal_petitioner(row),
         "firstName": person.get("firstName"),
         "lastName": person.get("lastName"),

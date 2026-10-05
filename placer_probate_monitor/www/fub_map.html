@@ -120,9 +120,10 @@
       <label class="toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: import one new go-case per run</span></label>
       <div class="actions">
         <button id="save-fub" type="button">Save FUB connection</button>
+        <button class="secondary" id="preview-one" type="button">Preview one record</button>
         <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
       </div>
-      <p class="note">Verify scrapes Placer, then posts only the first new go-case.</p>
+      <p class="note">Preview retrieves one live go-case for display only (ignores seen/FUB status, does not post). Verify posts one go-case that has never been sent to Follow Up Boss.</p>
     </section>
     <section class="card">
       <h2>Go / no-go</h2>
@@ -278,6 +279,12 @@
     $("load-fub").onclick = async () => {
       await load(true);
       flash(fubFields.length ? "Loaded FUB custom fields." : ($("fub-fields-note").textContent || "No FUB fields"), !!fubFields.length);
+    };
+    $("preview-one").onclick = async () => {
+      flash("Preview started… retrieving one live go-case (view only).", true);
+      const res = await fetch("api/preview-one", { method: "POST", credentials: "same-origin" });
+      const data = await res.json();
+      flash(data.ok ? "Preview finished. Check last_run.log — Follow Up Boss was not updated." : (data.error || data.log_tail || "Preview failed"), data.ok);
     };
     $("verify-fub").onclick = async () => {
       flash("Verify started… scraping, then importing one go-case.", true);

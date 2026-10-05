@@ -259,7 +259,12 @@ def reports_dir() -> Path:
     return path
 
 
-def run_job(reason: str = "scheduled", *, verify_one: bool = False) -> dict:
+def run_job(
+    reason: str = "scheduled",
+    *,
+    verify_one: bool = False,
+    preview_one: bool = False,
+) -> dict:
     if not _run_lock.acquire(blocking=False):
         return {"ok": False, "error": "A run is already in progress."}
     settings = load_settings()
@@ -285,13 +290,15 @@ def run_job(reason: str = "scheduled", *, verify_one: bool = False) -> dict:
         "--out-dir",
         str(reports_dir()),
     ]
-    if verify_one or not settings.get("send_email"):
+    if preview_one or verify_one or not settings.get("send_email"):
         cmd.append("--no-email")
     if settings.get("skip_portal"):
         cmd.append("--skip-portal")
-    if not settings.get("generate_pdf"):
+    if preview_one or not settings.get("generate_pdf"):
         cmd.append("--no-pdf")
-    if verify_one or settings.get("fub_verify_only"):
+    if preview_one:
+        cmd.append("--fub-preview-one")
+    elif verify_one or settings.get("fub_verify_only"):
         cmd.append("--fub-verify-one")
     try:
         proc = subprocess.run(
@@ -430,6 +437,15 @@ def api_verify_fub():
         code = 200
     if result.get("error") and "API key" in str(result.get("error")):
         code = 400
+    return jsonify(result), code
+
+
+@app.post("/api/preview-one")
+def api_preview_one():
+    result = run_job("preview_one", preview_one=True)
+    code = 200 if result.get("ok") else 409 if "already" in str(result.get("error") or "") else 500
+    if result.get("ok"):
+        code = 200
     return jsonify(result), code
 
 
