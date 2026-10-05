@@ -24,14 +24,15 @@ from .const import (
     CONF_LOOKAHEAD_DAYS,
     CONF_LOOKBACK_DAYS,
     CONF_MAX_PAGES,
+    CONF_SEND_EMAIL,
     CONF_SKIP_PORTAL,
     DEFAULTS,
     DOMAIN,
     FUB_EVENT_TYPES,
 )
-
-PANEL_JS_VERSION = "1.2.0"
 from .fub_client import mapping_payload, save_mapping, sources_payload
+
+PANEL_JS_VERSION = "1.2.1"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -75,6 +76,13 @@ def mapping_file(hass: HomeAssistant) -> Path:
 def _entry(hass: HomeAssistant):
     entries = hass.config_entries.async_entries(DOMAIN)
     return entries[0] if entries else None
+
+
+def _store(hass: HomeAssistant):
+    entry = _entry(hass)
+    if not entry:
+        return None
+    return (hass.data.get(DOMAIN) or {}).get(entry.entry_id)
 
 
 def _merged(entry) -> dict:
@@ -256,6 +264,68 @@ class FubSettingsView(HomeAssistantView):
         return self.json(_public_fub(merged))
 
 
+class JobView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/job"
+    name = "api:placer_probate_monitor:job"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    def _status(self) -> dict | None:
+        store = _store(self.hass)
+        if not store:
+            return None
+        payload = dict(store.get("status") or {})
+        payload["running"] = bool(store.get("running"))
+        return payload
+
+    async def get(self, request):
+        status = self._status()
+        if status is None:
+            return self.json({"error": "Integration is not configured."}, status_code=400)
+        return self.json(status)
+
+    async def post(self, request):
+        store = _store(self.hass)
+        entry = _entry(self.hass)
+        runner = (store or {}).get("run") if store else None
+        if not store or not runner or not entry:
+            return self.json({"error": "Integration is not configured."}, status_code=400)
+        if store.get("running"):
+            return self.json(
+                {"ok": False, "error": "A run is already in progress.", "running": True},
+                status_code=409,
+            )
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        action = str(body.get("action") or "run")
+        if action == "verify":
+            settings = _merged(entry)
+            if not str(settings.get(CONF_FUB_API_KEY) or "").strip():
+                return self.json(
+                    {"ok": False, "error": "Set the Follow Up Boss API key first."},
+                    status_code=400,
+                )
+            self.hass.async_create_task(
+                runner(
+                    "verify_fub",
+                    {
+                        CONF_FUB_ENABLED: True,
+                        CONF_FUB_VERIFY_ONLY: True,
+                        CONF_SEND_EMAIL: False,
+                    },
+                )
+            )
+        else:
+            self.hass.async_create_task(runner("panel"))
+        return self.json({"ok": True, "started": True, "action": action})
+
+
 def _register_panel(hass: HomeAssistant, url_path: str, title: str, icon: str, element: str) -> None:
     config = {
         "_panel_custom": {
@@ -291,6 +361,7 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(FubMappingView(hass))
     hass.http.register_view(SourcesView(hass))
     hass.http.register_view(FubSettingsView(hass))
+    hass.http.register_view(JobView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 
 

@@ -38,6 +38,28 @@ const PPM_CSS = `
   .ppm-hide { display: none !important; }
 `;
 
+function ppmSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ppmRunJob(hass, action) {
+  const before = await hass.callApi("GET", "placer_probate_monitor/job");
+  const beforeRun = before.last_run;
+  await hass.callApi("POST", "placer_probate_monitor/job", { action });
+  for (let i = 0; i < 120; i += 1) {
+    await ppmSleep(3000);
+    const st = await hass.callApi("GET", "placer_probate_monitor/job");
+    if (st.running) continue;
+    if (st.last_run && st.last_run !== beforeRun) {
+      return st;
+    }
+    if (i >= 1 && !st.running && st.last_error && st.last_run === beforeRun) {
+      return st;
+    }
+  }
+  return { last_result: "running", last_error: "Still running. Check the Status sensor." };
+}
+
 function ppmEsc(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -216,10 +238,17 @@ class PlacerProbateSourcesPanel extends HTMLElement {
   }
 
   async _run() {
-    this._flash("Placer job started…", true);
+    this._flash("Placer job started. CNPA and eCourt can take several minutes…", true);
     try {
-      await this._hass.callService("placer_probate_monitor", "run_now");
-      this._flash("Placer job finished. Check sensors and last_run.log.", true);
+      const st = await ppmRunJob(this._hass, "run");
+      const ok = st.last_result !== "failed" && st.last_result !== "running";
+      const extra = st.new_count != null ? ` · ${st.new_count} new cases` : "";
+      this._flash(
+        ok
+          ? `Placer job finished (${st.last_result || "ok"})${extra}`
+          : (st.last_error || "Placer job failed. Check last_run.log."),
+        ok,
+      );
     } catch (err) {
       this._flash(String(err), false);
     }
@@ -491,8 +520,14 @@ class PlacerProbateFubPanel extends HTMLElement {
   async _verify() {
     this._flash("Verify started… scraping Placer, then importing one go-case.", true);
     try {
-      await this._hass.callService("placer_probate_monitor", "verify_fub");
-      this._flash("Verify finished. Check Follow Up Boss and the FUB posted sensor.", true);
+      const st = await ppmRunJob(this._hass, "verify");
+      const ok = st.last_result !== "failed" && st.last_result !== "running";
+      this._flash(
+        ok
+          ? "Verify finished. Check Follow Up Boss and the FUB posted sensor."
+          : (st.last_error || "Verify failed."),
+        ok,
+      );
     } catch (err) {
       this._flash(String(err), false);
     }
