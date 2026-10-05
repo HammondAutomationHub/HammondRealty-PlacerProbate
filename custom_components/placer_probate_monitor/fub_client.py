@@ -528,6 +528,7 @@ FUB_BUILTIN_FIELDS = [
     {"name": "source", "label": "Lead source", "group": "Person", "type": "person"},
     {"name": "tags", "label": "Tags", "group": "Person", "type": "person"},
     {"name": "background", "label": "Background", "group": "Person", "type": "person"},
+    {"name": "notes", "label": "Notes", "group": "Person", "type": "person"},
     {
         "name": "emails",
         "label": "Emails (not extracted yet)",
@@ -564,6 +565,8 @@ ADDRESS_SLOT_TARGETS = {
     "mailing": 1,
     "addresses.mailing": 1,
 }
+
+NOTES_TARGETS = {"notes", "note", "background"}
 
 SEND_TOGGLES = [
     {"key": "firstName", "label": "Send petitioner firstName", "editable": True},
@@ -906,11 +909,14 @@ def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) 
             ),
         },
     ]
-    skip = {"id", "firstName", "lastName", "assignedTo", "addresses"}
+    skip = {"id", "firstName", "lastName", "assignedTo", "addresses", "background"}
     for key, value in person.items():
         if key in skip or value in (None, "", []):
             continue
         person_rows.append({"label": str(key), "value": str(value)})
+    notes = person.get("background") or combined_notes(row, mapping)
+    if notes:
+        person_rows.append({"label": "notes", "value": notes})
     return {
         "person": person_rows,
         "event_type": event.get("type") or settings.get("event_type") or "",
@@ -962,6 +968,46 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
         "case_type": _stringify_field(row.get("case_type")),
         "court_status": _stringify_field(row.get("court_status")),
     }
+
+
+def _fub_target_name(api_name: str) -> str:
+    target = str(api_name or "").strip()
+    if target.lower().startswith("person."):
+        return target.split(".", 1)[1]
+    return target
+
+
+def _is_notes_target(api_name: str) -> bool:
+    return _fub_target_name(api_name).lower() in NOTES_TARGETS
+
+
+def combined_notes(row: dict, mapping: dict) -> str:
+    values = probate_export_values(row, mapping)
+    labels = {
+        str(item.get("key") or ""): str(item.get("label") or item.get("key") or "")
+        for item in PROBATE_SOURCE_FIELDS
+    }
+    fields = mapping.get("custom_fields") or {}
+    parts: list[str] = []
+    seen: set[str] = set()
+    for item in PROBATE_SOURCE_FIELDS:
+        key = str(item.get("key") or "")
+        api = fields.get(key)
+        if not key or not api or not _is_notes_target(str(api)):
+            continue
+        value = values.get(key)
+        if value in (None, ""):
+            continue
+        parts.append(f"{labels.get(key, key)}: {value}")
+        seen.add(key)
+    for key, api in fields.items():
+        if key in seen or not _is_notes_target(str(api)):
+            continue
+        value = values.get(key)
+        if value in (None, ""):
+            continue
+        parts.append(f"{labels.get(key, key)}: {value}")
+    return "\n".join(parts)
 
 
 def list_fub_custom_fields(
@@ -1138,6 +1184,7 @@ def inspect_fub_person(query: str) -> dict:
         "tags",
         "created",
         "updated",
+        "background",
     ):
         value = _fub_display_value(person.get(name))
         core.append({"name": name, "value": value, "populated": bool(value)})
@@ -1159,6 +1206,16 @@ def inspect_fub_person(query: str) -> dict:
             "name": "address2",
             "value": mailing_line,
             "populated": bool(mailing_line),
+        }
+    )
+    notes_text = _fetch_person_notes(person.get("id")) or _fub_display_value(
+        person.get("background")
+    )
+    core.append(
+        {
+            "name": "notes",
+            "value": notes_text,
+            "populated": bool(notes_text),
         }
     )
     custom = []
@@ -1194,6 +1251,40 @@ def inspect_fub_person(query: str) -> dict:
         "custom_populated": populated_custom,
         "custom_total": len(custom),
     }
+
+
+def _fetch_person_notes(person_id) -> str:
+    key = (os.environ.get("FUB_API_KEY") or "").strip()
+    url = os.environ.get("FUB_API_URL") or "https://api.followupboss.com/v1"
+    if not key or person_id in (None, "", 0, "0"):
+        return ""
+    try:
+        response = requests.get(
+            f"{_api_root(url)}/notes",
+            params={"personId": int(person_id), "limit": 10},
+            auth=(key, ""),
+            headers={"Accept": "application/json"},
+            timeout=20,
+        )
+        payload = response.json() if response.content else {}
+        if response.status_code >= 400 or not isinstance(payload, dict):
+            return ""
+        rows = payload.get("notes")
+        if not isinstance(rows, list):
+            return ""
+        parts = []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            body = str(item.get("body") or "").strip()
+            subject = str(item.get("subject") or "").strip()
+            if subject and body:
+                parts.append(f"{subject}: {body}")
+            elif body:
+                parts.append(body)
+        return "\n---\n".join(parts)
+    except Exception:
+        return ""
 
 
 def mapping_payload(path: Path | None = None, *, fetch_fub: bool = True, source_id: str = "placer") -> dict:
@@ -1433,6 +1524,8 @@ def build_person(
                 target = target.split(".", 1)[1]
             if target in {"emails", "phones"}:
                 continue
+            if _is_notes_target(target):
+                continue
             if target.lower() in ADDRESS_SLOT_TARGETS:
                 slot = ADDRESS_SLOT_TARGETS[target.lower()]
                 _set_address_slot(
@@ -1459,6 +1552,9 @@ def build_person(
                 person[target] = str(value)
                 continue
             person[str(api_name)] = str(value)
+    notes = combined_notes(row, mapping)
+    if notes:
+        person["background"] = notes
     return person
 
 
@@ -1599,6 +1695,32 @@ def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system
         return {}
 
 
+def post_note(api_url: str, api_key: str, person_id: int, body: str, system: str) -> dict:
+    text = (body or "").strip()
+    if not text:
+        return {}
+    response = requests.post(
+        f"{_api_root(api_url)}/notes",
+        json={
+            "personId": int(person_id),
+            "subject": "Placer probate",
+            "body": text,
+            "isHtml": False,
+        },
+        auth=(api_key, ""),
+        headers=_fub_headers(system),
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"FUB notes HTTP {response.status_code}: {response.text[:500]}"
+        )
+    try:
+        return response.json()
+    except ValueError:
+        return {}
+
+
 def person_id_from_response(body: dict) -> int | None:
     if not isinstance(body, dict):
         return None
@@ -1715,6 +1837,16 @@ def export_new_leads(
                     "FUB create returned no person id; refusing to continue without a trackable ID"
                 )
             _remember_person(cases, key, pid, fingerprint)
+            try:
+                post_note(
+                    settings["api_url"],
+                    api_key,
+                    pid,
+                    combined_notes(row, mapping),
+                    system,
+                )
+            except Exception as note_exc:  # noqa: BLE001
+                print(f"FUB notes error {key}: {note_exc}", flush=True)
             summary["posted"] += 1
             posted_case = key
             posted_pid = pid
