@@ -34,7 +34,7 @@ from .const import (
 )
 from .fub_client import inspect_fub_person, mapping_payload, save_mapping, sources_payload
 
-PANEL_JS_VERSION = "1.2.9"
+PANEL_JS_VERSION = "1.3.0"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -181,10 +181,10 @@ class FubMappingView(HomeAssistantView):
 
     async def get(self, request):
         _apply_key(self.hass)
-        refresh = str(request.query.get("refresh") or "") in {"1", "true", "yes"}
         path = mapping_file(self.hass)
+        source_id = str(request.query.get("source") or "placer")
         payload = await self.hass.async_add_executor_job(
-            lambda: mapping_payload(path, fetch_fub=refresh)
+            lambda: mapping_payload(path, fetch_fub=True, source_id=source_id)
         )
         return self.json(payload)
 
@@ -194,10 +194,11 @@ class FubMappingView(HomeAssistantView):
         if not isinstance(body, dict):
             return self.json({"error": "Expected a JSON object."}, status_code=400)
         path = mapping_file(self.hass)
+        source_id = str(body.get("source_id") or "placer")
 
         def _save():
             save_mapping(body, path)
-            return mapping_payload(path, fetch_fub=False)
+            return mapping_payload(path, fetch_fub=True, source_id=source_id)
 
         try:
             payload = await self.hass.async_add_executor_job(_save)

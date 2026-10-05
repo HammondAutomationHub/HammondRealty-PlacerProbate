@@ -62,6 +62,23 @@ def _normalize_mapping(data: dict) -> dict:
         for k, v in (fields.items() if isinstance(fields, dict) else [])
         if str(k).strip() and str(v).strip()
     }
+    sources = mapping.get("source_mappings") or {}
+    normalized_sources: dict = {}
+    if isinstance(sources, dict):
+        for source_id, block in sources.items():
+            if not isinstance(block, dict):
+                continue
+            nested = block.get("custom_fields") or {}
+            normalized_sources[str(source_id)] = {
+                "custom_fields": {
+                    str(k): str(v).strip()
+                    for k, v in (nested.items() if isinstance(nested, dict) else [])
+                    if str(k).strip() and str(v).strip()
+                }
+            }
+    if "placer" not in normalized_sources and mapping["custom_fields"]:
+        normalized_sources["placer"] = {"custom_fields": dict(mapping["custom_fields"])}
+    mapping["source_mappings"] = normalized_sources
     return mapping
 
 
@@ -492,6 +509,30 @@ SOURCE_SETTING_KEYS = [
 ]
 
 
+def source_field_catalog(source_id: str) -> list[dict]:
+    if str(source_id or "placer") == "placer":
+        return PROBATE_SOURCE_FIELDS
+    rows = []
+    for item in PROBATE_SOURCE_FIELDS:
+        row = dict(item)
+        row["unavailable"] = True
+        row["source"] = "Not extracted yet"
+        rows.append(row)
+    return rows
+
+
+def custom_fields_for_source(mapping: dict, source_id: str) -> dict:
+    source_id = str(source_id or "placer")
+    sources = mapping.get("source_mappings") or {}
+    block = sources.get(source_id) or {}
+    fields = block.get("custom_fields") if isinstance(block, dict) else None
+    if isinstance(fields, dict) and fields:
+        return fields
+    if source_id == "placer":
+        return mapping.get("custom_fields") or {}
+    return {}
+
+
 def sources_payload(settings: dict | None = None) -> dict:
     placer = {}
     for key in SOURCE_SETTING_KEYS:
@@ -502,7 +543,8 @@ def sources_payload(settings: dict | None = None) -> dict:
         "sources": DATA_SOURCES,
         "active": "placer",
         "placer": placer,
-        "fields": mapping_catalog()["probate_fields"],
+        "fields": source_field_catalog("placer"),
+        "source_fields": {item["id"]: source_field_catalog(item["id"]) for item in DATA_SOURCES},
     }
 
 
@@ -526,7 +568,7 @@ def mapping_catalog() -> dict:
     }
 
 
-def mapping_errors(mapping: dict) -> list[str]:
+def mapping_errors(mapping: dict, *, source_id: str = "placer") -> list[str]:
     errors: list[str] = []
     send = mapping.get("send") or {}
     if send.get("phones"):
@@ -534,7 +576,8 @@ def mapping_errors(mapping: dict) -> list[str]:
     if send.get("emails"):
         errors.append("Petitioner email is not extracted; leave person.emails off.")
     fields = mapping.get("custom_fields") or {}
-    by_key = {item["key"]: item for item in PROBATE_SOURCE_FIELDS}
+    by_key = {item["key"]: item for item in source_field_catalog(source_id)}
+    live = str(source_id or "placer") == "placer"
     for local_key, api_name in fields.items():
         api = str(api_name or "").strip()
         if not api:
@@ -546,12 +589,12 @@ def mapping_errors(mapping: dict) -> list[str]:
                 errors.append(f"Never map {local_key} onto person.phones.")
         if api in PERSON_NAME_KEYS and local_key != "petitioner":
             errors.append(f"{local_key} cannot map onto Person first/last name.")
-        if meta.get("unavailable"):
+        if live and meta.get("unavailable"):
             errors.append(f"{local_key} is not extracted yet.")
         if api in {"phones", "emails", "firstName", "lastName", "addresses"}:
             errors.append(
                 f"{local_key} custom-field target {api} collides with a built-in Person field; "
-                "use a customXxx API name created in FUB."
+                "use a custom field created in Follow Up Boss."
             )
     return errors
 
@@ -588,28 +631,48 @@ def _dump_simple_mapping(mapping: dict) -> str:
 
 
 def save_mapping(mapping: dict, path: Path | None = None) -> Path:
-    mapping = _normalize_mapping(mapping)
-    send = dict(mapping.get("send") or {})
+    incoming = _normalize_mapping(mapping)
+    source_id = str(mapping.get("source_id") or "placer")
+    existing = load_mapping(path)
+    sources = dict(existing.get("source_mappings") or {})
+    if existing.get("custom_fields") and "placer" not in sources:
+        sources["placer"] = {"custom_fields": dict(existing.get("custom_fields") or {})}
+    sources[source_id] = {"custom_fields": dict(incoming.get("custom_fields") or {})}
+    send = dict(incoming.get("send") or existing.get("send") or {})
     send["phones"] = False
     send["emails"] = False
     send["mailing_address"] = False
-    mapping["send"] = send
-    errors = mapping_errors(mapping)
+    incoming["send"] = send
+    incoming["source_mappings"] = sources
+    errors = mapping_errors(
+        {**incoming, "custom_fields": sources[source_id]["custom_fields"]},
+        source_id=source_id,
+    )
     if errors:
         raise ValueError("; ".join(errors))
-    if not mapping.get("system"):
-        mapping["system"] = "PlacerProbateMonitor"
-    if not mapping.get("court_search_url"):
-        mapping["court_search_url"] = COURT_SEARCH_DEFAULT
-    if not mapping.get("subject_address_type"):
-        mapping["subject_address_type"] = "subject property"
+    incoming["custom_fields"] = dict(
+        (sources.get("placer") or {}).get("custom_fields") or {}
+    )
+    if not incoming.get("system"):
+        incoming["system"] = existing.get("system") or "PlacerProbateMonitor"
+    if not incoming.get("court_search_url"):
+        incoming["court_search_url"] = (
+            existing.get("court_search_url") or COURT_SEARCH_DEFAULT
+        )
+    if not incoming.get("subject_address_type"):
+        incoming["subject_address_type"] = (
+            existing.get("subject_address_type") or "subject property"
+        )
+    incoming.pop("source_id", None)
+    if "skip_petitioner_contains" not in mapping:
+        incoming["skip_petitioner_contains"] = existing.get("skip_petitioner_contains") or []
     target = writable_mapping_path(path)
     try:
         import yaml  # type: ignore
 
-        body = yaml.safe_dump(mapping, sort_keys=False, allow_unicode=True)
+        body = yaml.safe_dump(incoming, sort_keys=False, allow_unicode=True)
     except Exception:
-        body = _dump_simple_mapping(mapping)
+        body = _dump_simple_mapping(incoming)
     target.write_text(MAPPING_HEADER + "\n" + body, encoding="utf-8")
     return target
 
@@ -969,15 +1032,21 @@ def inspect_fub_person(query: str) -> dict:
     }
 
 
-def mapping_payload(path: Path | None = None, *, fetch_fub: bool = True) -> dict:
+def mapping_payload(path: Path | None = None, *, fetch_fub: bool = True, source_id: str = "placer") -> dict:
     mapping = load_mapping(path)
     live = list_fub_custom_fields() if fetch_fub else {"fields": [], "error": None}
     written = resolve_mapping_path(path)
+    source_id = str(source_id or "placer")
+    source_fields = {item["id"]: source_field_catalog(item["id"]) for item in DATA_SOURCES}
     return {
         "mapping": mapping,
         "path": str(written),
         "exists": written.exists(),
         "catalog": mapping_catalog(),
+        "data_sources": DATA_SOURCES,
+        "source_id": source_id,
+        "source_fields": source_fields,
+        "source_custom_fields": custom_fields_for_source(mapping, source_id),
         "fub_custom_fields": live.get("fields") or [],
         "fub_custom_error": live.get("error"),
     }
