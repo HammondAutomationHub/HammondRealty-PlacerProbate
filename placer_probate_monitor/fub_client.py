@@ -79,7 +79,41 @@ def _normalize_mapping(data: dict) -> dict:
     if "placer" not in normalized_sources and mapping["custom_fields"]:
         normalized_sources["placer"] = {"custom_fields": dict(mapping["custom_fields"])}
     mapping["source_mappings"] = normalized_sources
+    mapping["custom_fields"] = _split_person_source_keys(mapping["custom_fields"])
+    for source_id, block in mapping["source_mappings"].items():
+        block["custom_fields"] = _split_person_source_keys(block.get("custom_fields") or {})
+        mapping["source_mappings"][source_id] = block
+    if "placer" in mapping["source_mappings"]:
+        mapping["custom_fields"] = dict(
+            mapping["source_mappings"]["placer"].get("custom_fields") or {}
+        )
+    else:
+        mapping["source_mappings"]["placer"] = {
+            "custom_fields": dict(mapping["custom_fields"])
+        }
     return mapping
+
+
+def _split_person_source_keys(fields: dict) -> dict:
+    """Replace a full petitioner name mapped onto first/last with split source keys."""
+    out = dict(fields or {})
+    target = str(out.get("petitioner") or "").strip()
+    if target in PERSON_NAME_KEYS:
+        out.pop("petitioner", None)
+        if target in {"firstName", "person.firstName"}:
+            out.setdefault("petitioner_first", "firstName")
+            out.setdefault("petitioner_last", "lastName")
+        elif target in {"lastName", "person.lastName"}:
+            out.setdefault("petitioner_last", "lastName")
+            out.setdefault("petitioner_first", "firstName")
+        else:
+            out.setdefault("petitioner_first", "firstName")
+            out.setdefault("petitioner_last", "lastName")
+    if not out.get("petitioner_first"):
+        out["petitioner_first"] = "firstName"
+    if not out.get("petitioner_last"):
+        out["petitioner_last"] = "lastName"
+    return out
 
 
 def _read_mapping_file(target: Path) -> dict:
@@ -160,28 +194,29 @@ PERSON_NAME_KEYS = {"firstName", "lastName", "person.firstName", "person.lastNam
 
 PROBATE_SOURCE_FIELDS = [
     {
-        "key": "petitioner",
-        "label": "Petitioner name",
-        "source": "eCourt parties, else CNPA notice",
-        "notes": "This is the FUB Person. Split into firstName / lastName.",
-        "person": "firstName+lastName",
-        "custom": True,
-    },
-    {
         "key": "petitioner_first",
         "label": "Petitioner first name",
-        "source": "Split from petitioner (all tokens except last)",
-        "notes": "Maps to FUB firstName. Last token is last name.",
+        "source": "eCourt petitioner, all tokens except last",
+        "notes": "This is the source field for FUB firstName.",
         "person": "firstName",
         "custom": True,
     },
     {
         "key": "petitioner_last",
         "label": "Petitioner last name",
-        "source": "Split from petitioner (last token, plus Jr/Sr/II/III)",
-        "notes": "Maps to FUB lastName.",
+        "source": "eCourt petitioner, last token (plus Jr/Sr/II/III)",
+        "notes": "This is the source field for FUB lastName.",
         "person": "lastName",
         "custom": True,
+    },
+    {
+        "key": "petitioner",
+        "label": "Petitioner full name",
+        "source": "eCourt parties, else CNPA notice",
+        "notes": "Raw extracted name. Map first/last above, not this row.",
+        "person": None,
+        "custom": False,
+        "block": ["firstName", "lastName", "phones", "emails"],
     },
     {
         "key": "decedent",
@@ -406,13 +441,13 @@ FUB_DESTINATIONS = [
         "id": "person.firstName",
         "label": "Person firstName",
         "group": "person",
-        "locked_to": "petitioner",
+        "locked_to": "petitioner_first",
     },
     {
         "id": "person.lastName",
         "label": "Person lastName",
         "group": "person",
-        "locked_to": "petitioner",
+        "locked_to": "petitioner_last",
     },
     {
         "id": "person.addresses",
@@ -662,7 +697,6 @@ def mapping_errors(mapping: dict, *, source_id: str = "placer") -> list[str]:
             if "phones" in blocked or local_key == "attorney_phone":
                 errors.append(f"Never map {local_key} onto person.phones.")
         if api in PERSON_NAME_KEYS and local_key not in {
-            "petitioner",
             "petitioner_first",
             "petitioner_last",
         }:

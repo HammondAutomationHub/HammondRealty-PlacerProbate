@@ -171,8 +171,8 @@ function ppmFieldAssociations(mapping, sourceId, catalogFields) {
     }
   };
   Object.keys(custom || {}).forEach((key) => add(custom[key], key));
-  add("firstName", "petitioner");
-  add("lastName", "petitioner");
+  add("firstName", "petitioner_first");
+  add("lastName", "petitioner_last");
   add("addresses", "decedent_residence");
   add("assignedTo", "assignedTo");
   add("source", "lead_source");
@@ -313,7 +313,9 @@ function ppmRenderPreview(el, st) {
   if (!extract.length) {
     extract = [
       { label: "Case number", source: "CNPA / eCourt", value: rec.case_number, empty: !rec.case_number },
-      { label: "Petitioner", source: "eCourt parties", value: rec.petitioner, empty: !rec.petitioner },
+      { label: "Petitioner first name", source: "Split from petitioner", value: rec.firstName || rec.petitioner_first, empty: !(rec.firstName || rec.petitioner_first) },
+      { label: "Petitioner last name", source: "Split from petitioner", value: rec.lastName || rec.petitioner_last, empty: !(rec.lastName || rec.petitioner_last) },
+      { label: "Petitioner full name", source: "eCourt parties", value: rec.petitioner, empty: !rec.petitioner },
       { label: "Decedent", source: "CNPA / eCourt", value: rec.decedent, empty: !rec.decedent },
       { label: "Last residence", source: "Petition PDF", value: rec.decedent_residence, empty: !rec.decedent_residence },
       { label: "Hearing", source: "eCourt", value: rec.hearing, empty: !rec.hearing },
