@@ -149,7 +149,7 @@ Do not raise the rate. One run per day is enough.
 | File | Role |
 |---|---|
 | `hacs.json` | HACS custom-repository metadata |
-| `brand/icon.png` | HACS brand icon |
+| `brand/icon.png` | HACS brand icon (also at `custom_components/placer_probate_monitor/brand/icon.png`) |
 | `custom_components/placer_probate_monitor/` | Home Assistant integration (HACS) |
 | `repository.yaml` | Supervisor add-on repository index |
 | `placer_probate_monitor/` | Home Assistant add-on (Dockerfile, Ingress UI) |

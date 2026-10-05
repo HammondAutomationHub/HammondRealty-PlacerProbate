@@ -70,6 +70,7 @@ def main() -> None:
     data = build()
     targets = [
         ROOT / "brand" / "icon.png",
+        ROOT / "custom_components" / "placer_probate_monitor" / "brand" / "icon.png",
         ROOT / "placer_probate_monitor" / "icon.png",
         ROOT / "placer_probate_monitor" / "logo.png",
     ]
