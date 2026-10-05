@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from aiohttp import web
@@ -10,6 +11,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    ATTR_FUB_VERIFY,
     CONF_ECOURT_PAUSE,
     CONF_FUB_API_KEY,
     CONF_FUB_API_URL,
@@ -32,7 +34,7 @@ from .const import (
 )
 from .fub_client import mapping_payload, save_mapping, sources_payload
 
-PANEL_JS_VERSION = "1.2.2"
+PANEL_JS_VERSION = "1.2.4"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -67,6 +69,17 @@ BOOL_KEYS = {
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
 }
+
+
+def _fub_last(hass: HomeAssistant) -> dict:
+    path = Path(hass.config.path(DOMAIN)) / "fub_last.json"
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def mapping_file(hass: HomeAssistant) -> Path:
@@ -278,6 +291,11 @@ class JobView(HomeAssistantView):
             return None
         payload = dict(store.get("status") or {})
         payload["running"] = bool(store.get("running"))
+        last = _fub_last(self.hass)
+        if not payload.get(ATTR_FUB_VERIFY) and last.get("verify_record"):
+            payload[ATTR_FUB_VERIFY] = last.get("verify_record")
+        if last.get("verify_note"):
+            payload["fub_verify_note"] = last.get("verify_note")
         return payload
 
     async def get(self, request):

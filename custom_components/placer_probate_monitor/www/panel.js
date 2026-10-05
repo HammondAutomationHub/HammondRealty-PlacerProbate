@@ -322,7 +322,11 @@ class PlacerProbateFubPanel extends HTMLElement {
               <button id="save-fub" type="button">Save FUB connection</button>
               <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
             </div>
-            <p class="ppm-note">Verify scrapes Placer, then posts only the first new go-case. Confirm the contact in Follow Up Boss, then turn off Verify only.</p>
+            <p class="ppm-note">Verify scrapes Placer, then posts only the first new go-case. The go record appears below.</p>
+          </section>
+          <section class="ppm-card" id="verify-record">
+            <h2>Last verify record</h2>
+            <p class="ppm-note">Run Verify one FUB import to show the go-case that was posted.</p>
           </section>
           <div id="tab-mapping" class="ppm-hide">
             <section class="ppm-card">
@@ -372,6 +376,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       btn.classList.toggle("active", btn.dataset.tab === tab);
     });
     this._qs("#tab-connection").classList.toggle("ppm-hide", tab !== "connection");
+    this._qs("#verify-record").classList.toggle("ppm-hide", tab !== "connection");
     this._qs("#tab-mapping").classList.toggle("ppm-hide", tab !== "mapping");
   }
 
@@ -391,6 +396,51 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._qs("#fub_event_type").value = data.fub_event_type || "Seller Inquiry";
     this._qs("#fub_strict_property").checked = !!data.fub_strict_property;
     this._qs("#fub_verify_only").checked = data.fub_verify_only !== false;
+  }
+
+  _renderVerify(st) {
+    const el = this._qs("#verify-record");
+    if (!el) return;
+    const rec = st && st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
+    const note = (st && (st.fub_verify_note || (st.fub_verify && st.fub_verify.note))) || "";
+    if (!rec) {
+      el.innerHTML = `<h2>Last verify record</h2><p class="ppm-note">${ppmEsc(note || "Run Verify one FUB import to show the go-case that was posted.")}</p>`;
+      return;
+    }
+    const addr = rec.address || {};
+    const addrLine = [addr.street, addr.city, addr.state, addr.code].filter(Boolean).join(", ");
+    const rows = [
+      ["Gate", rec.gate || "go"],
+      ["Data source", rec.data_source_name || rec.data_source || "Placer County"],
+      ["Case number", rec.case_number],
+      ["FUB person id", rec.fub_person_id],
+      ["Petitioner", rec.petitioner],
+      ["FUB firstName", rec.firstName],
+      ["FUB lastName", rec.lastName],
+      ["Assigned to", rec.assignedTo],
+      ["Lead source", rec.lead_source],
+      ["Event type", rec.event_type],
+      ["Decedent", rec.decedent],
+      ["Last residence", rec.decedent_residence],
+      ["Address sent", addrLine],
+      ["Hearing", rec.hearing],
+      ["Notice URL", rec.notice_url],
+      ["Court search", rec.court_search],
+    ];
+    const custom = (rec.custom_fields || []).map((item) =>
+      `<tr><td>${ppmEsc(item.probate_field)}</td><td>${ppmEsc(item.fub_field)}</td><td>${ppmEsc(item.value)}</td></tr>`
+    ).join("");
+    el.innerHTML = `
+      <h2>Last verify record</h2>
+      <p class="ppm-note">This is the single go-case posted to Follow Up Boss. Confirm it in FUB, then turn off Verify only.</p>
+      <span class="ppm-pill live">GO</span>
+      <table>
+        <tbody>
+          ${rows.map((item) => `<tr><th>${ppmEsc(item[0])}</th><td>${item[1] ? ppmEsc(item[1]) : "—"}</td></tr>`).join("")}
+        </tbody>
+      </table>
+      ${custom ? `<h2 style="margin-top:16px;">Custom fields sent</h2><table><thead><tr><th>Probate</th><th>FUB</th><th>Value</th></tr></thead><tbody>${custom}</tbody></table>` : ""}
+    `;
   }
 
   _applyMapping(data) {
@@ -463,14 +513,16 @@ class PlacerProbateFubPanel extends HTMLElement {
 
   async _loadAll(refreshMapping) {
     try {
-      const [settings, mapping] = await Promise.all([
+      const [settings, mapping, job] = await Promise.all([
         this._hass.callApi("GET", "placer_probate_monitor/fub_settings"),
         this._hass.callApi("GET", refreshMapping
           ? "placer_probate_monitor/fub_mapping?refresh=1"
           : "placer_probate_monitor/fub_mapping"),
+        this._hass.callApi("GET", "placer_probate_monitor/job").catch(() => ({})),
       ]);
       this._applySettings(settings);
       this._applyMapping(mapping);
+      this._renderVerify(job);
       if (refreshMapping) {
         this._flash(this._fubFields.length ? "Loaded FUB custom fields." : "No FUB fields loaded.", !!this._fubFields.length);
       }
@@ -522,9 +574,13 @@ class PlacerProbateFubPanel extends HTMLElement {
     try {
       const st = await ppmRunJob(this._hass, "verify");
       const ok = st.last_result !== "failed" && st.last_result !== "running";
+      this._renderVerify(st);
+      const rec = st.fub_verify && !st.fub_verify.note ? st.fub_verify : null;
       this._flash(
         ok
-          ? "Verify finished. Check Follow Up Boss and the FUB posted sensor."
+          ? (rec
+            ? `Verify posted ${rec.case_number} as FUB person ${rec.fub_person_id}.`
+            : (st.fub_verify_note || "Verify finished. No new go-case was posted."))
           : (st.last_error || "Verify failed."),
         ok,
       );

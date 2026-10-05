@@ -859,6 +859,50 @@ def person_fingerprint(person: dict) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def verify_record_payload(
+    row: dict,
+    person: dict,
+    pid: int,
+    settings: dict,
+    mapping: dict,
+) -> dict:
+    values = probate_export_values(row, mapping)
+    custom = []
+    for local_key, api_name in (mapping.get("custom_fields") or {}).items():
+        value = values.get(local_key)
+        if api_name and value not in (None, ""):
+            custom.append(
+                {
+                    "probate_field": local_key,
+                    "fub_field": str(api_name),
+                    "value": str(value),
+                }
+            )
+    addr = {}
+    if person.get("addresses"):
+        addr = person["addresses"][0] if isinstance(person["addresses"][0], dict) else {}
+    return {
+        "data_source": "placer",
+        "data_source_name": "Placer County",
+        "gate": "go",
+        "case_number": case_key(row),
+        "fub_person_id": int(pid),
+        "petitioner": portal_petitioner(row),
+        "firstName": person.get("firstName"),
+        "lastName": person.get("lastName"),
+        "assignedTo": person.get("assignedTo"),
+        "lead_source": settings.get("source"),
+        "event_type": settings.get("event_type"),
+        "decedent": row.get("decedent"),
+        "decedent_residence": row.get("decedent_residence"),
+        "address": addr,
+        "hearing": values.get("hearing"),
+        "notice_url": values.get("notice_url"),
+        "court_search": values.get("court_search"),
+        "custom_fields": custom,
+    }
+
+
 def build_event(
     row: dict,
     mapping: dict,
@@ -978,6 +1022,8 @@ def export_new_leads(
         "skipped": 0,
         "error": None,
         "skips": [],
+        "verify_record": None,
+        "verify_note": None,
     }
     if not _env_bool("FUB_ENABLED"):
         return summary
@@ -1056,6 +1102,9 @@ def export_new_leads(
             summary["posted"] += 1
             posted_case = key
             posted_pid = pid
+            summary["verify_record"] = verify_record_payload(
+                row, person, pid, settings, mapping
+            )
             print(f"FUB posted {key} person_id={pid}")
         except Exception as exc:  # noqa: BLE001
             summary["skipped"] += 1
@@ -1076,7 +1125,16 @@ def export_new_leads(
                 flush=True,
             )
         else:
-            print("FUB verify: no new go-case imported", flush=True)
+            skips = summary.get("skips") or []
+            note = "No new go-case imported"
+            if skips:
+                sample = ", ".join(
+                    f"{item.get('case') or '?'}={item.get('reason')}"
+                    for item in skips[:5]
+                )
+                note = f"{note}. Skips: {sample}"
+            summary["verify_note"] = note
+            print(f"FUB verify: {note}", flush=True)
     print(
         f"FUB: posted={summary['posted']} updated={summary['updated']} "
         f"skipped={summary['skipped']}",

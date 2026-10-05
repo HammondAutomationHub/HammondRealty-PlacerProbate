@@ -25,6 +25,7 @@ from .const import (
     ATTR_FUB_POSTED,
     ATTR_FUB_SKIPPED,
     ATTR_FUB_UPDATED,
+    ATTR_FUB_VERIFY,
     ATTR_LAST_ERROR,
     ATTR_LAST_RESULT,
     ATTR_LAST_RUN,
@@ -202,6 +203,7 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
     fub_updated = None
     fub_skipped = None
     fub_error = None
+    fub_verify = None
     sidecar = data_dir / "fub_last.json"
     if sidecar.exists():
         try:
@@ -210,6 +212,9 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
             fub_updated = payload.get("updated")
             fub_skipped = payload.get("skipped")
             fub_error = payload.get("error")
+            fub_verify = payload.get("verify_record")
+            if not fub_verify and payload.get("verify_note"):
+                fub_verify = {"note": payload.get("verify_note")}
         except json.JSONDecodeError:
             pass
     if fub_posted is None:
@@ -240,6 +245,7 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
         ATTR_FUB_UPDATED: fub_updated,
         ATTR_FUB_SKIPPED: fub_skipped,
         ATTR_FUB_ERROR: fub_error,
+        ATTR_FUB_VERIFY: fub_verify,
         "log_tail": log[-1500:],
     }
 
@@ -268,6 +274,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ATTR_FUB_UPDATED: None,
             ATTR_FUB_SKIPPED: None,
             ATTR_FUB_ERROR: None,
+            ATTR_FUB_VERIFY: None,
         },
     }
     hass.data[DOMAIN][entry.entry_id] = store
@@ -299,6 +306,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ATTR_FUB_UPDATED: result.get(ATTR_FUB_UPDATED),
                 ATTR_FUB_SKIPPED: result.get(ATTR_FUB_SKIPPED),
                 ATTR_FUB_ERROR: result.get(ATTR_FUB_ERROR),
+                ATTR_FUB_VERIFY: result.get(ATTR_FUB_VERIFY),
             }
         )
         store["running"] = False
