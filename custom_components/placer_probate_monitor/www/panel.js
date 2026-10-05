@@ -322,7 +322,7 @@ class PlacerProbateFubPanel extends HTMLElement {
               <button id="save-fub" type="button">Save FUB connection</button>
               <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
             </div>
-            <p class="ppm-note">Verify scrapes Placer, then posts only the first new go-case. The go record appears below.</p>
+            <p class="ppm-note">Verify scrapes Placer, then posts the first go-case that has never been sent to Follow Up Boss (including already-seen notices). The go record appears below.</p>
           </section>
           <section class="ppm-card" id="verify-record">
             <h2>Last verify record</h2>

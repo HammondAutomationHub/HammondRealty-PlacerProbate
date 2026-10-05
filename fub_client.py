@@ -452,7 +452,7 @@ GO_NO_GO = [
     "No petitioner phone or email is extracted yet — leave person.phones and person.emails off.",
     "Never map attorney_phone onto person.phones. Attorney stays a custom field at most.",
     "Last residence is DE-111 text, not a verified APN. Case Summary URLs 404 unless you search first.",
-    "Only NEW cases that pass the go/no-go gate are created; stored FUB person IDs are updated in place.",
+    "Only NEW cases are created on a full run. Verify one FUB import may use an already-seen case that has never been sent to Follow Up Boss.",
 ]
 
 
@@ -790,11 +790,12 @@ def gate_reason(
     *,
     strict_property: bool,
     existing_id: int | None,
+    allow_seen_without_fub: bool = False,
 ) -> str | None:
     key = case_key(row)
     if not key:
         return "missing_case_number"
-    if existing_id is None and not is_new_row(row):
+    if existing_id is None and not is_new_row(row) and not allow_seen_without_fub:
         return "not_new"
     petitioner = portal_petitioner(row)
     first, last = split_person_name(petitioner)
@@ -1055,6 +1056,7 @@ def export_new_leads(
             mapping,
             strict_property=strict,
             existing_id=existing_id,
+            allow_seen_without_fub=verify,
         )
         if reason:
             summary["skipped"] += 1

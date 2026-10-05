@@ -34,7 +34,7 @@ from .const import (
 )
 from .fub_client import mapping_payload, save_mapping, sources_payload
 
-PANEL_JS_VERSION = "1.2.4"
+PANEL_JS_VERSION = "1.2.5"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
