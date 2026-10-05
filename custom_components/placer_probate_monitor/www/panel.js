@@ -5,6 +5,14 @@ const PPM_CSS = `
   .ppm-wrap h1 { margin: 0; font-size: 22px; }
   .ppm-wrap h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; color: #1b2a4a; }
   .ppm-wrap main { padding: 20px; display: grid; gap: 16px; max-width: 1180px; }
+  .ppm-wrap main.ppm-wide { max-width: 1440px; }
+  .ppm-fub-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+  .ppm-fub-side { position: sticky; top: 12px; max-height: calc(100vh - 28px); overflow: auto; }
+  .ppm-assoc { font-size: 11px; color: #6b645b; }
+  @media (max-width: 1100px) {
+    .ppm-fub-layout { grid-template-columns: 1fr; }
+    .ppm-fub-side { position: static; max-height: none; }
+  }
   .ppm-card { background: #fffdf8; border: 1px solid #ddd6cc; border-radius: 10px; padding: 16px 18px; }
   .ppm-wrap label { display: block; font-size: 12px; font-weight: 600; color: #6b645b; margin: 10px 0 4px; }
   .ppm-wrap input, .ppm-wrap textarea, .ppm-wrap select {
@@ -132,6 +140,67 @@ function ppmBindMappingExamples(root, person) {
       if (cell) cell.innerHTML = ppmFubExampleCell(person, el.value.trim());
     });
   });
+}
+
+function ppmFieldAssociations(mapping, sourceId, catalogFields) {
+  const source = sourceId || "placer";
+  const custom = ((mapping && mapping.source_mappings && mapping.source_mappings[source]
+    && mapping.source_mappings[source].custom_fields)
+    || (source === "placer" && mapping && mapping.custom_fields)
+    || {});
+  const labels = {};
+  (catalogFields || []).forEach((field) => {
+    labels[field.key] = field.label || field.key;
+  });
+  const byFub = {};
+  const add = (fubName, key) => {
+    if (!fubName) return;
+    byFub[fubName] = byFub[fubName] || [];
+    if (!byFub[fubName].some((item) => item.key === key)) {
+      byFub[fubName].push({ key, label: labels[key] || key });
+    }
+  };
+  Object.keys(custom || {}).forEach((key) => add(custom[key], key));
+  add("firstName", "petitioner");
+  add("lastName", "petitioner");
+  add("addresses", "decedent_residence");
+  add("assignedTo", "assignedTo");
+  add("source", "lead_source");
+  return byFub;
+}
+
+function ppmLiveClientHtml(person, associations) {
+  if (!person || !person.person_id) {
+    return `<p class="ppm-note">Pull a live Follow Up Boss contact to see its data and which probate fields map to it. This does not change FUB.</p>`;
+  }
+  const name = ppmFubPersonLookup(person, "name")
+    || [ppmFubPersonLookup(person, "firstName"), ppmFubPersonLookup(person, "lastName")].filter(Boolean).join(" ");
+  const assocOf = (fubName) => {
+    const items = (associations && associations[fubName]) || [];
+    if (!items.length) return '<div class="ppm-assoc">Not mapped from probate</div>';
+    return `<div class="ppm-assoc">Mapped from ${items.map((item) => ppmEsc(item.label)).join(", ")}</div>`;
+  };
+  const core = (person.core || []).map((item) =>
+    `<tr>
+      <td><b>${ppmEsc(item.name)}</b>${assocOf(item.name)}</td>
+      <td>${item.populated ? ppmCell(item.value) : "—"}</td>
+      <td>${item.populated ? '<span class="ppm-pill live">Set</span>' : '<span class="ppm-pill wait">Empty</span>'}</td>
+    </tr>`
+  ).join("");
+  const custom = (person.custom_fields || []).map((item) =>
+    `<tr>
+      <td><b>${ppmEsc(item.label)}</b><div class="ppm-note">${ppmEsc(item.name)}</div>${assocOf(item.name)}</td>
+      <td>${item.populated ? ppmCell(item.value) : "—"}</td>
+      <td>${item.populated ? '<span class="ppm-pill live">Set</span>' : '<span class="ppm-pill wait">Empty</span>'}</td>
+    </tr>`
+  ).join("");
+  return `
+    <p class="ppm-note"><b>${ppmEsc(name || person.person_id)}</b> · id ${ppmEsc(person.person_id)} · ${ppmEsc(person.custom_populated)}/${ppmEsc(person.custom_total)} custom fields set</p>
+    <h2>Built-in fields</h2>
+    <table><thead><tr><th>FUB field</th><th>Value</th><th></th></tr></thead><tbody>${core}</tbody></table>
+    <h2 style="margin-top:16px;">Custom fields</h2>
+    <table><thead><tr><th>FUB field</th><th>Value</th><th></th></tr></thead><tbody>${custom || "<tr><td colspan='3'>None</td></tr>"}</tbody></table>
+  `;
 }
 
 function ppmPersonSnapshot(person) {
@@ -676,8 +745,10 @@ class PlacerProbateFubPanel extends HTMLElement {
             <button class="ghost" type="button" data-tab="mapping">Field mapping</button>
           </div>
         </header>
-        <main>
+        <main class="ppm-wide">
           <div id="flash" class="ppm-banner"></div>
+          <div class="ppm-fub-layout">
+            <div>
           <section class="ppm-card" id="tab-connection">
             <h2>Connection</h2>
             <label class="ppm-toggle"><input id="fub_enabled" type="checkbox" /><span>Enable Follow Up Boss export</span></label>
@@ -705,20 +776,6 @@ class PlacerProbateFubPanel extends HTMLElement {
             <h2>Last verify record</h2>
             <p class="ppm-note">Run Verify one FUB import to show the go-case that was posted.</p>
           </section>
-          <section class="ppm-card" id="fub-example">
-            <h2>Example FUB person</h2>
-            <p class="ppm-note">Pull a real Follow Up Boss contact to compare with the probate extract. This is read-only.</p>
-            <div class="ppm-row">
-              <div>
-                <label>Person id or name</label>
-                <input id="fub-example-q" placeholder="e.g. 12345 or Jane Doe" />
-              </div>
-            </div>
-            <div class="ppm-actions">
-              <button class="secondary" id="load-example" type="button">Pull example person</button>
-            </div>
-            <div id="fub-example-shot"></div>
-          </section>
           <div id="tab-mapping" class="ppm-hide">
             <section class="ppm-card">
               <h2>Go / no-go</h2>
@@ -738,20 +795,6 @@ class PlacerProbateFubPanel extends HTMLElement {
               <textarea id="skip_petitioner_contains"></textarea>
             </section>
             <section class="ppm-card">
-              <h2>Inspect a live FUB person</h2>
-              <p class="ppm-note">Pull one existing Follow Up Boss contact to see which built-in and custom fields are populated. Use those API names in the mapping below. This does not change FUB.</p>
-              <div class="ppm-row">
-                <div>
-                  <label>Person id or name</label>
-                  <input id="fub-person-q" placeholder="e.g. 12345 or Jane Doe" />
-                </div>
-              </div>
-              <div class="ppm-actions">
-                <button class="secondary" id="load-person" type="button">Pull FUB person</button>
-              </div>
-              <div id="fub-person"></div>
-            </section>
-            <section class="ppm-card">
               <h2>Custom field associations</h2>
               <p class="ppm-note">Dropdowns are live custom fields from Follow Up Boss. Pick a county source, then map each extract column. Built-in person fields (name, address) are not listed here.</p>
               <div class="ppm-tabs" id="map-sources"></div>
@@ -764,6 +807,18 @@ class PlacerProbateFubPanel extends HTMLElement {
               <div class="ppm-actions"><button id="save" type="button">Save mapping</button></div>
             </section>
           </div>
+            </div>
+            <aside class="ppm-card ppm-fub-side" id="live-client">
+              <h2>Live FUB client</h2>
+              <p class="ppm-note">Stays open while you map. Pull a real contact to see its values and which probate fields are associated.</p>
+              <label>Person id or name</label>
+              <input id="live-client-q" placeholder="e.g. 12345 or Jane Doe" />
+              <div class="ppm-actions">
+                <button class="secondary" id="load-live-client" type="button">Pull live client</button>
+              </div>
+              <div id="live-client-body"></div>
+            </aside>
+          </div>
         </main>
       </div>
     `;
@@ -772,8 +827,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     });
     this._qs("#save").addEventListener("click", () => this._saveMapping());
     this._qs("#load-fub").addEventListener("click", () => this._loadMapping(true));
-    this._qs("#load-person").addEventListener("click", () => this._loadPerson("inspect"));
-    this._qs("#load-example").addEventListener("click", () => this._loadPerson("example"));
+    this._qs("#load-live-client").addEventListener("click", () => this._loadPerson());
     this._qs("#save-fub").addEventListener("click", () => this._saveSettings());
     this._qs("#verify-fub").addEventListener("click", () => this._verify());
     this._qs("#preview-one").addEventListener("click", () => this._preview());
@@ -786,7 +840,6 @@ class PlacerProbateFubPanel extends HTMLElement {
     });
     this._qs("#tab-connection").classList.toggle("ppm-hide", tab !== "connection");
     this._qs("#verify-record").classList.toggle("ppm-hide", tab !== "connection");
-    this._qs("#fub-example").classList.toggle("ppm-hide", tab !== "connection");
     this._qs("#tab-mapping").classList.toggle("ppm-hide", tab !== "mapping");
   }
 
@@ -812,7 +865,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._jobSt = st || this._jobSt;
     this._lastRec = ppmPreviewRecord(st);
     ppmRenderPreview(this._qs("#verify-record"), st);
-    this._renderFubExample();
+    this._renderLiveClient();
   }
 
   _applyMapping(data) {
@@ -834,6 +887,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       btn.addEventListener("click", () => {
         this._mapSource = btn.dataset.mapSource;
         this._renderMatrix();
+        this._renderLiveClient();
         this.querySelectorAll("[data-map-source]").forEach((el) => {
           el.classList.toggle("active", el.dataset.mapSource === this._mapSource);
         });
@@ -862,7 +916,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       : (this._fubFields.length
         ? `Loaded ${this._fubFields.length} Follow Up Boss custom fields as dropdown options.`
         : "No custom fields came back from Follow Up Boss. Create them in FUB, then reload.");
-    this._renderFubExample();
+    this._renderLiveClient();
   }
 
   _renderMatrix() {
@@ -878,18 +932,30 @@ class PlacerProbateFubPanel extends HTMLElement {
       || {});
     this._qs("#matrix").innerHTML = ppmMappingRows(fields, custom, this._fubFields || [], this._fubPerson);
     ppmBindMappingExamples(this._qs("#matrix"), this._fubPerson);
+    this.querySelectorAll("#matrix select[data-custom]").forEach((el) => {
+      el.addEventListener("change", () => this._renderLiveClient());
+    });
   }
 
-  _renderFubExample() {
-    const shot = this._qs("#fub-example-shot");
-    if (!shot) return;
-    const rec = ppmPreviewRecord({ fub_verify: (this._jobSt && this._jobSt.fub_verify) || (this._mapData && this._mapData.fub_verify) });
-    const person = this._fubPerson;
-    if (!person) {
-      shot.innerHTML = `<p class="ppm-note">Enter a FUB person id or name, then pull. AssignedTo on that contact is the exact user name FUB will accept.</p>`;
-      return;
+  _renderLiveClient() {
+    const el = this._qs("#live-client-body");
+    if (!el) return;
+    const data = this._mapData || {};
+    const fields = (data.source_fields && data.source_fields[this._mapSource])
+      || this._catalog.probate_fields
+      || [];
+    const mapping = Object.assign({}, data.mapping || {});
+    const custom = {};
+    this.querySelectorAll("#matrix select[data-custom]").forEach((input) => {
+      if (input.value.trim()) custom[input.dataset.custom] = input.value.trim();
+    });
+    if (Object.keys(custom).length) {
+      mapping.source_mappings = Object.assign({}, mapping.source_mappings || {});
+      mapping.source_mappings[this._mapSource || "placer"] = { custom_fields: custom };
     }
-    shot.innerHTML = ppmPersonSnapshot(person) + ppmCompareExtractToFub(this._lastRec || rec, person);
+    const associations = ppmFieldAssociations(mapping, this._mapSource, fields);
+    el.innerHTML = ppmLiveClientHtml(this._fubPerson, associations)
+      + (this._fubPerson && this._lastRec ? ppmCompareExtractToFub(this._lastRec, this._fubPerson) : "");
   }
 
   _mappingPayload() {
@@ -939,50 +1005,20 @@ class PlacerProbateFubPanel extends HTMLElement {
     await this._loadAll(refresh);
   }
 
-  async _loadPerson(from) {
-    const inspect = this._qs("#fub-person-q");
-    const example = this._qs("#fub-example-q");
-    const q = (
-      (from === "example" ? (example && example.value) : (inspect && inspect.value))
-      || (inspect && inspect.value)
-      || (example && example.value)
-      || ""
-    ).trim();
-    const el = this._qs("#fub-person");
+  async _loadPerson() {
+    const input = this._qs("#live-client-q");
+    const q = ((input && input.value) || "").trim();
     if (!q) {
       this._flash("Enter a Follow Up Boss person id or name.", false);
       return;
     }
-    if (inspect) inspect.value = q;
-    if (example) example.value = q;
-    this._flash("Loading person from Follow Up Boss…", true);
+    this._flash("Loading live FUB client…", true);
     try {
-      const data = await ppmFetchFubPerson(this._hass, q);
-      this._fubPerson = data;
-      const core = (data.core || []).map((item) =>
-        `<tr><th>${ppmEsc(item.name)}</th><td>${item.populated ? ppmCell(item.value) : "—"}</td><td>${item.populated ? '<span class="ppm-pill live">Set</span>' : '<span class="ppm-pill wait">Empty</span>'}</td></tr>`
-      ).join("");
-      const custom = (data.custom_fields || []).map((item) =>
-        `<tr><td><b>${ppmEsc(item.label)}</b><div class="ppm-note">${ppmEsc(item.name)}${item.type ? " · " + ppmEsc(item.type) : ""}</div></td><td>${item.populated ? ppmCell(item.value) : "—"}</td><td>${item.populated ? '<span class="ppm-pill live">Set</span>' : '<span class="ppm-pill wait">Empty</span>'}</td></tr>`
-      ).join("");
-      const extra = (data.extra_fields || []).map((item) =>
-        `<tr><th>${ppmEsc(item.name)}</th><td>${ppmCell(item.value)}</td></tr>`
-      ).join("");
-      if (el) {
-        el.innerHTML = `
-        <p class="ppm-note">Person id ${ppmEsc(data.person_id)} · ${ppmEsc(data.custom_populated)} of ${ppmEsc(data.custom_total)} custom fields have values. The <b>name</b> is what mapping dropdowns use.</p>
-        <h2>Built-in person fields</h2>
-        <table><thead><tr><th>Field</th><th>Value</th><th></th></tr></thead><tbody>${core}</tbody></table>
-        <h2 style="margin-top:16px;">Custom fields in this FUB account</h2>
-        <table><thead><tr><th>FUB field</th><th>Value on this person</th><th></th></tr></thead><tbody>${custom || '<tr><td colspan="3">No custom fields on this account.</td></tr>'}</tbody></table>
-        ${extra ? `<h2 style="margin-top:16px;">Other populated keys</h2><table><tbody>${extra}</tbody></table>` : ""}
-      `;
-      }
+      this._fubPerson = await ppmFetchFubPerson(this._hass, q);
       this._renderMatrix();
-      this._renderFubExample();
-      this._flash(`Loaded example FUB person ${data.person_id}.`, true);
+      this._renderLiveClient();
+      this._flash(`Loaded live FUB client ${this._fubPerson.person_id}.`, true);
     } catch (err) {
-      if (el) el.innerHTML = "";
       this._flash(String(err), false);
     }
   }
