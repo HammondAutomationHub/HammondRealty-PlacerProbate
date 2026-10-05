@@ -801,13 +801,13 @@ class PlacerProbateFubPanel extends HTMLElement {
             <label>Event type</label>
             <select id="fub_event_type"></select>
             <label class="ppm-toggle"><input id="fub_strict_property" type="checkbox" /><span>Require decedent residence before upload</span></label>
-            <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: create or update one go-case per run</span></label>
+            <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: update the last test person, or create one if none exist</span></label>
             <div class="ppm-actions">
               <button id="save-fub" type="button">Save FUB connection</button>
               <button class="secondary" id="preview-one" type="button">Preview one record</button>
               <button class="secondary" id="verify-fub" type="button">Verify one FUB import</button>
             </div>
-            <p class="ppm-note">Preview one record pulls a live go-case so you can check extracted values and the mapped Follow Up Boss look. It does not post and does not upload files. Verify one FUB import creates or updates one person and uploads that case's DE-111 to Files.</p>
+            <p class="ppm-note">Preview does not post. Verify one FUB import reuses the last test person when that case is still in the scrape window, updates name/addresses/notes/files, and creates a new person only if none of the current go-cases already exist in Follow Up Boss.</p>
           </section>
           <section class="ppm-card" id="verify-record">
             <h2>Last verify record</h2>
@@ -1110,7 +1110,9 @@ class PlacerProbateFubPanel extends HTMLElement {
         ok
           ? (rec
             ? (rec.posted
-              ? `Verify posted ${rec.case_number} as FUB person ${rec.fub_person_id}.`
+              ? (rec.updated
+                ? `Verify updated ${rec.case_number} (FUB person ${rec.fub_person_id}).`
+                : `Verify posted ${rec.case_number} as FUB person ${rec.fub_person_id}.`)
               : `Verify mapped ${rec.case_number} but Follow Up Boss did not accept it. Record is shown below.`)
             : (st.fub_verify_note || "Verify finished. No go-case was mapped."))
           : (st.last_error || "Verify failed."),

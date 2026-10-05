@@ -640,7 +640,7 @@ GO_NO_GO = [
     "Never map attorney_phone onto person.phones. Attorney stays a custom field at most.",
     "Last residence is DE-111 text, not a verified APN. Case Summary URLs 404 unless you search first.",
     "DE-111 is downloaded from eCourt and attached to the person Files tab on Verify and on a full import. Preview does not upload.",
-    "Only NEW cases are created on a full run. Verify one FUB import may use an already-seen case that has never been sent to Follow Up Boss.",
+    "Only NEW cases are created on a full run. Verify one FUB import updates the last test person when that case is still in the window; it creates only if none of the current go-cases already exist in Follow Up Boss.",
 ]
 
 
@@ -1661,6 +1661,25 @@ def stored_person_id(state: dict, key: str) -> int | None:
         return None
 
 
+def _rows_for_export(rows: list[dict], state: dict, *, verify: bool) -> list[dict]:
+    if not verify:
+        return list(rows)
+    last = str(state.get("last_fub_verify_case") or "").strip()
+    preferred: list[dict] = []
+    existing: list[dict] = []
+    fresh: list[dict] = []
+    for row in rows:
+        key = case_key(row)
+        pid = stored_person_id(state, key) if key else None
+        if last and key == last and pid is not None:
+            preferred.append(row)
+        elif pid is not None:
+            existing.append(row)
+        else:
+            fresh.append(row)
+    return preferred + existing + fresh
+
+
 def is_new_row(row: dict) -> bool:
     return bool(row.get("first_seen") or str(row.get("status") or "").lower() == "new")
 
@@ -2228,7 +2247,8 @@ def export_new_leads(
     cases = state.setdefault("cases", {})
     posted_case = None
     posted_pid = None
-    for row in rows:
+    work_rows = _rows_for_export(rows, state, verify=verify)
+    for row in work_rows:
         key = case_key(row)
         existing_id = stored_person_id(state, key) if key else None
         reason = gate_reason(
@@ -2288,6 +2308,18 @@ def export_new_leads(
                 record_view["fub_error"] = None
                 summary["verify_record"] = record_view
                 print(f"FUB updated {key} person_id={pid}")
+                if verify:
+                    state["last_fub_verify_case"] = key
+                    try:
+                        post_note(
+                            settings["api_url"],
+                            api_key,
+                            pid,
+                            combined_notes(row, mapping),
+                            system,
+                        )
+                    except Exception as note_exc:  # noqa: BLE001
+                        print(f"FUB notes error {key}: {note_exc}", flush=True)
                 try:
                     attached = attach_de111_file(
                         row,
@@ -2366,6 +2398,7 @@ def export_new_leads(
             summary["verify_record"] = record_view
             print(f"FUB posted {key} person_id={pid}")
             if verify:
+                state["last_fub_verify_case"] = key
                 break
         except Exception as exc:  # noqa: BLE001
             summary["skipped"] += 1
