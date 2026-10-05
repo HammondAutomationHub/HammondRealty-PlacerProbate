@@ -16,6 +16,12 @@ ADDR_RE = re.compile(
     r"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*(?P<state>[A-Z]{2})\s*(?P<zip>\d{5}(?:-\d{4})?)?$",
     re.I,
 )
+ADDR_FLEX_RE = re.compile(
+    r"^(?P<street>.+?),\s*(?P<city>[A-Za-z .'-]+?)(?:\s*,\s*|\s+)(?P<state>[A-Z]{2})\s*(?P<zip>\d{5}(?:-\d{4})?)?\s*$",
+    re.I,
+)
+ADDRESS1_TYPE = "subject property"
+ADDRESS2_TYPE = "mailing"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -523,8 +529,8 @@ FUB_BUILTIN_FIELDS = [
     {"name": "firstName", "label": "First name", "group": "Person", "type": "person"},
     {"name": "lastName", "label": "Last name", "group": "Person", "type": "person"},
     {"name": "assignedTo", "label": "Assigned to", "group": "Person", "type": "person"},
-    {"name": "addresses", "label": "Address 1", "group": "Person", "type": "person"},
-    {"name": "address2", "label": "Address 2", "group": "Person", "type": "person"},
+    {"name": "addresses", "label": "Address 1 (subject property)", "group": "Person", "type": "person"},
+    {"name": "address2", "label": "Address 2 (mailing)", "group": "Person", "type": "person"},
     {"name": "stage", "label": "Stage", "group": "Person", "type": "person"},
     {"name": "source", "label": "Lead source", "group": "Person", "type": "person"},
     {"name": "tags", "label": "Tags", "group": "Person", "type": "person"},
@@ -892,22 +898,18 @@ def source_extract_rows(row: dict, mapping: dict) -> list[dict]:
 
 def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) -> dict:
     event = build_event(row, mapping, settings)
-    addr = {}
-    if person.get("addresses"):
-        first = person["addresses"][0]
-        if isinstance(first, dict):
-            addr = first
+    addresses = person.get("addresses") or []
     person_rows = [
         {"label": "firstName", "value": person.get("firstName") or ""},
         {"label": "lastName", "value": person.get("lastName") or ""},
         {"label": "assignedTo", "value": person.get("assignedTo") or ""},
         {
-            "label": "addresses",
-            "value": ", ".join(
-                str(addr.get(k) or "")
-                for k in ("street", "city", "state", "code", "type")
-                if addr.get(k)
-            ),
+            "label": "Address 1",
+            "value": _format_fub_address(addresses[0] if addresses else None),
+        },
+        {
+            "label": "Address 2",
+            "value": _format_fub_address(addresses[1] if len(addresses) > 1 else None),
         },
     ]
     skip = {"id", "firstName", "lastName", "assignedTo", "addresses", "background"}
@@ -1401,22 +1403,91 @@ def split_address(line: str) -> dict | None:
     text = re.sub(r"\s+", " ", (line or "").strip())
     if not text:
         return None
-    match = ADDR_RE.match(text)
+    match = ADDR_RE.match(text) or ADDR_FLEX_RE.match(text)
     if not match:
         return {"street": text}
     return {
-        "street": match.group("street").strip(),
-        "city": match.group("city").strip(),
+        "street": match.group("street").strip(" ,"),
+        "city": match.group("city").strip(" ,"),
         "state": match.group("state").upper(),
         "code": (match.group("zip") or "").strip(),
     }
 
 
-def _set_address_slot(person: dict, line: str, index: int, addr_type: str) -> None:
-    addr = split_address(line)
+def _fub_address(
+    line: str,
+    addr_type: str,
+    *,
+    city: str = "",
+    state: str = "",
+    code: str = "",
+) -> dict | None:
+    parsed = split_address(line)
+    if not parsed:
+        return None
+    street = str(parsed.get("street") or "").strip()
+    city = str(parsed.get("city") or city or "").strip()
+    state = str(parsed.get("state") or state or "").strip().upper()
+    zip_code = str(parsed.get("code") or code or "").strip()
+    if city and street.lower().endswith(city.lower()):
+        street = street[: -len(city)].strip(" ,")
+    if not street:
+        return None
+    addr = {
+        "street": street,
+        "type": addr_type,
+    }
+    if city:
+        addr["city"] = city
+    if state:
+        addr["state"] = state
+    if zip_code:
+        addr["code"] = zip_code
+    return addr
+
+
+def _format_fub_address(addr) -> str:
+    if not isinstance(addr, dict):
+        return ""
+    bits = [
+        f"address={addr.get('street') or ''}",
+        "line2=",
+        f"city={addr.get('city') or ''}",
+        f"state={addr.get('state') or ''}",
+        f"zip={addr.get('code') or ''}",
+        f"type={addr.get('type') or ''}",
+    ]
+    return "; ".join(bits)
+
+
+def _address_parts_from_source(local_key: str, values: dict) -> tuple[str, str, str]:
+    if local_key in {
+        "decedent_residence",
+        "decedent_city",
+        "decedent_zip",
+        "decedent",
+    }:
+        return (
+            str(values.get("decedent_city") or "").strip(),
+            "CA",
+            str(values.get("decedent_zip") or "").strip(),
+        )
+    return "", "", ""
+
+
+def _set_address_slot(
+    person: dict,
+    line: str,
+    index: int,
+    addr_type: str,
+    *,
+    city: str = "",
+    state: str = "",
+    code: str = "",
+) -> None:
+    addr = _fub_address(line, addr_type, city=city, state=state, code=code)
     if not addr:
         return
-    addr["type"] = addr_type
     rows = [item for item in (person.get("addresses") or []) if isinstance(item, dict)]
     if index <= 0:
         person["addresses"] = [addr] + rows[1:]
@@ -1562,9 +1633,16 @@ def build_person(
     if send.get("assignedTo", True) and settings.get("assigned_to"):
         person["assignedTo"] = settings["assigned_to"]
     if send.get("subject_property_address", True):
-        addr = split_address(str(row.get("decedent_residence") or ""))
+        values = probate_export_values(row, mapping)
+        city, state, code = _address_parts_from_source("decedent_residence", values)
+        addr = _fub_address(
+            str(row.get("decedent_residence") or ""),
+            ADDRESS1_TYPE,
+            city=city,
+            state=state,
+            code=code,
+        )
         if addr:
-            addr["type"] = mapping.get("subject_address_type") or "subject property"
             person["addresses"] = [addr]
     if send.get("custom_fields", True):
         fields = mapping.get("custom_fields") or {}
@@ -1580,15 +1658,17 @@ def build_person(
                 continue
             if _is_notes_target(target):
                 continue
+            city, state, code = _address_parts_from_source(local_key, values)
             if target.lower() in ADDRESS_SLOT_TARGETS:
                 slot = ADDRESS_SLOT_TARGETS[target.lower()]
                 _set_address_slot(
                     person,
                     str(value),
                     slot,
-                    "mailing" if slot >= 1 else (
-                        mapping.get("subject_address_type") or "subject property"
-                    ),
+                    ADDRESS2_TYPE if slot >= 1 else ADDRESS1_TYPE,
+                    city=city,
+                    state=state,
+                    code=code,
                 )
                 continue
             if target == "addresses":
@@ -1596,7 +1676,10 @@ def build_person(
                     person,
                     str(value),
                     0,
-                    mapping.get("subject_address_type") or "subject property",
+                    ADDRESS1_TYPE,
+                    city=city,
+                    state=state,
+                    code=code,
                 )
                 continue
             if target == "tags":
@@ -1638,8 +1721,11 @@ def verify_record_payload(
                 }
             )
     addr = {}
+    addr2 = {}
     if person.get("addresses"):
         addr = person["addresses"][0] if isinstance(person["addresses"][0], dict) else {}
+        if len(person["addresses"]) > 1 and isinstance(person["addresses"][1], dict):
+            addr2 = person["addresses"][1]
     return {
         "data_source": "placer",
         "data_source_name": "Placer County",
@@ -1655,6 +1741,7 @@ def verify_record_payload(
         "decedent": row.get("decedent"),
         "decedent_residence": row.get("decedent_residence"),
         "address": addr,
+        "address2": addr2,
         "hearing": values.get("hearing"),
         "notice_url": values.get("notice_url"),
         "court_search": values.get("court_search"),
