@@ -14,13 +14,6 @@ skip_petitioner_contains:
 custom_fields:
   petitioner_first: firstName
   petitioner_last: lastName
-  case_number: customCaseNumber
-  decedent: customDecedent
-  hearing: customHearing
-  court_search: customCourtSearch
-  notice_url: customNoticeUrl
-  estate_real: customEstateReal
-  petition_pdf: customPetitionPdf
 
 # Person fields we send vs skip.
 send:

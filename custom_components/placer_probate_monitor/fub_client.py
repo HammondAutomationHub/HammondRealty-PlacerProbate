@@ -705,13 +705,6 @@ def mapping_catalog() -> dict:
         "default_custom_fields": {
             "petitioner_first": "firstName",
             "petitioner_last": "lastName",
-            "case_number": "customCaseNumber",
-            "decedent": "customDecedent",
-            "hearing": "customHearing",
-            "court_search": "customCourtSearch",
-            "notice_url": "customNoticeUrl",
-            "estate_real": "customEstateReal",
-            "petition_pdf": "customPetitionPdf",
         },
     }
 
@@ -1113,6 +1106,38 @@ def list_fub_custom_fields(
             }
         )
     return {"fields": fields, "error": None}
+
+
+def fub_custom_field_names() -> set[str]:
+    catalog = list_fub_custom_fields()
+    return {
+        str(item.get("name") or "").strip()
+        for item in (catalog.get("fields") or [])
+        if str(item.get("name") or "").strip()
+    }
+
+
+def _can_send_custom_field(api_name: str, allowed: set[str] | None) -> bool:
+    name = str(api_name or "").strip()
+    if name.lower().startswith("person."):
+        name = name.split(".", 1)[1]
+    if not name:
+        return False
+    if (
+        name in PERSON_BUILTIN_TARGETS
+        or name.lower() in ADDRESS_SLOT_TARGETS
+        or _is_notes_target(name)
+    ):
+        return True
+    if allowed is None:
+        return True
+    if name in allowed:
+        return True
+    print(
+        f"FUB omit {name} (not a custom field on this Follow Up Boss account)",
+        flush=True,
+    )
+    return False
 
 
 PERSON_CORE_KEYS = {
@@ -1579,7 +1604,13 @@ def preview_one_record(
         if reason:
             skips.append({"case": key, "reason": reason})
             continue
-        person = build_person(row, mapping, settings, person_id=None)
+        person = build_person(
+            row,
+            mapping,
+            settings,
+            person_id=None,
+            allowed_custom=fub_custom_field_names(),
+        )
         record = verify_record_payload(row, person, None, settings, mapping)
         record["view_only"] = True
         record["posted"] = False
@@ -1619,6 +1650,7 @@ def build_person(
     settings: dict,
     *,
     person_id: int | None = None,
+    allowed_custom: set[str] | None = None,
 ) -> dict:
     send = mapping.get("send") or {}
     petitioner = portal_petitioner(row)
@@ -1687,6 +1719,8 @@ def build_person(
                 continue
             if target in PERSON_BUILTIN_TARGETS:
                 person[target] = str(value)
+                continue
+            if not _can_send_custom_field(api_name, allowed_custom):
                 continue
             person[str(api_name)] = str(value)
     notes = combined_notes(row, mapping)
@@ -1757,6 +1791,7 @@ def build_event(
     settings: dict,
     *,
     person_id: int | None = None,
+    allowed_custom: set[str] | None = None,
 ) -> dict:
     send = mapping.get("send") or {}
     decedent = str(row.get("decedent") or "").strip()
@@ -1771,7 +1806,13 @@ def build_event(
     event: dict = {
         "system": mapping.get("system") or "PlacerProbateMonitor",
         "type": settings.get("event_type") or "Seller Inquiry",
-        "person": build_person(row, mapping, settings, person_id=person_id),
+        "person": build_person(
+            row,
+            mapping,
+            settings,
+            person_id=person_id,
+            allowed_custom=allowed_custom,
+        ),
     }
     if person_id is None and send.get("source", True):
         event["source"] = settings.get("source") or "probate"
@@ -1917,6 +1958,7 @@ def export_new_leads(
     strict = _env_bool("FUB_STRICT_PROPERTY")
     verify = _env_bool("FUB_VERIFY_ONLY")
     system = str(mapping.get("system") or "PlacerProbateMonitor")
+    allowed_custom = fub_custom_field_names()
     cases = state.setdefault("cases", {})
     posted_case = None
     posted_pid = None
@@ -1938,7 +1980,13 @@ def export_new_leads(
                 cases[key]["fub_skip"] = reason
             print(f"FUB skip {key or '(no case)'}: {reason}")
             continue
-        person = build_person(row, mapping, settings, person_id=existing_id)
+        person = build_person(
+            row,
+            mapping,
+            settings,
+            person_id=existing_id,
+            allowed_custom=allowed_custom,
+        )
         fingerprint = person_fingerprint(person)
         record = cases.get(key) or {}
         try:
@@ -1986,7 +2034,12 @@ def export_new_leads(
             record_view["view_only"] = False
             record_view["posted"] = False
             summary["verify_record"] = record_view
-            payload = build_event(row, mapping, settings)
+            payload = build_event(
+                row,
+                mapping,
+                settings,
+                allowed_custom=allowed_custom,
+            )
             body = post_event(settings["api_url"], api_key, payload, system)
             pid = person_id_from_response(body)
             if pid is None:
