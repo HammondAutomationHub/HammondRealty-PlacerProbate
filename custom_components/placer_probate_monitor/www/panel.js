@@ -174,6 +174,7 @@ function ppmFieldAssociations(mapping, sourceId, catalogFields) {
   add("firstName", "petitioner_first");
   add("lastName", "petitioner_last");
   add("addresses", "decedent_residence");
+  add("address2", "mailing_address");
   add("assignedTo", "assignedTo");
   add("source", "lead_source");
   return byFub;
@@ -319,6 +320,7 @@ function ppmRenderPreview(el, st) {
       { label: "Petitioner full name", source: "eCourt parties", value: rec.petitioner, empty: !rec.petitioner },
       { label: "Decedent", source: "CNPA / eCourt", value: rec.decedent, empty: !rec.decedent },
       { label: "Last residence", source: "Petition PDF", value: rec.decedent_residence, empty: !rec.decedent_residence },
+      { label: "Petitioner mailing address", source: "DE-111 item 1", value: rec.mailing_address, empty: !rec.mailing_address },
       { label: "Hearing", source: "eCourt", value: rec.hearing, empty: !rec.hearing },
       { label: "Notice URL", source: "CNPA", value: rec.notice_url, empty: !rec.notice_url },
       { label: "Court search", source: "Derived", value: rec.court_search, empty: !rec.court_search },
@@ -991,7 +993,6 @@ class PlacerProbateFubPanel extends HTMLElement {
     });
     send.emails = false;
     send.phones = false;
-    send.mailing_address = false;
     const custom_fields = {};
     this.querySelectorAll("[data-custom]").forEach((el) => {
       const value = el.value.trim();

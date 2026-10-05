@@ -16,6 +16,12 @@ RESIDENCE_RE = re.compile(
     r"(?:Form Adopted|Fonn |Character and estimated value|3\.\s*d\.|PETITION FOR PROBATE)",
     re.I | re.S,
 )
+PETITIONER_ITEM_RE = re.compile(
+    r"1\.?\s*Petitioner\s*\([^)]*name[^)]*\)\s*:?\s*(?P<body>.+?)"
+    r"(?=2\.?\s*Petitioner\s+is\b|Telephone no\.|Fax no\.|3\.\s*Decedent|"
+    r"Publication of Notice|ATTORNEY OR PARTY WITHOUT ATTORNEY)",
+    re.I | re.S,
+)
 ROAD = (
     r"(?:Road|Rd|Lane|Ln|Drive|Dr|Street|St|Way|Court|Ct|Avenue|Ave|"
     r"Place|Pl|Circle|Cir|Boulevard|Blvd|Highway|Hwy)\.?"
@@ -68,7 +74,7 @@ def extract_pdf_text(path: Path) -> str:
     return "\n".join(parts)
 
 
-def _parse_address(body: str) -> dict:
+def _parse_address(body: str, *, prefix: str = "decedent") -> dict:
     body = re.sub(r"[ \t]+", " ", body)
     body = re.sub(
         r",\s+(Road|Rd\.?|Lane|Ln\.?|Drive|Dr\.?|Street|St\.?|Way|Court|Ct\.?|"
@@ -92,6 +98,13 @@ def _parse_address(body: str) -> dict:
             line += f", {state}"
         if zipp:
             line += f" {zipp}"
+        if prefix == "mailing":
+            return {
+                "mailing_address": line,
+                "mailing_city": city,
+                "mailing_state": state,
+                "mailing_zip": zipp,
+            }
         return {
             "decedent_residence": line,
             "decedent_city": city,
@@ -114,6 +127,9 @@ def parse_de111_text(text: str) -> dict:
     res = RESIDENCE_RE.search(text)
     if res:
         out.update(_parse_address(res.group("body")))
+    pet = PETITIONER_ITEM_RE.search(text)
+    if pet:
+        out.update(_parse_address(pet.group("body"), prefix="mailing"))
     personal = PERSONAL_RE.search(text)
     if personal:
         out["estate_personal"] = personal.group("amt").replace(",", "")

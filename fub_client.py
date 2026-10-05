@@ -122,6 +122,8 @@ def _split_person_source_keys(fields: dict) -> dict:
         out["petitioner_first"] = "firstName"
     if not out.get("petitioner_last"):
         out["petitioner_last"] = "lastName"
+    if not out.get("mailing_address"):
+        out["mailing_address"] = "address2"
     return out
 
 
@@ -455,11 +457,10 @@ PROBATE_SOURCE_FIELDS = [
     {
         "key": "mailing_address",
         "label": "Petitioner mailing address",
-        "source": "Not extracted",
-        "notes": "DE-111 mailing address is not parsed yet.",
-        "person": None,
-        "custom": False,
-        "unavailable": True,
+        "source": "DE-111 item 1 petitioner address",
+        "notes": "FUB Address 2 (mailing). Line 2 is left empty.",
+        "person": "address2",
+        "custom": True,
     },
 ]
 
@@ -599,10 +600,8 @@ SEND_TOGGLES = [
     },
     {
         "key": "mailing_address",
-        "label": "Send mailing address",
-        "editable": False,
-        "forced": False,
-        "reason": "Mailing address is not parsed yet.",
+        "label": "Send petitioner mailing as Address 2",
+        "editable": True,
     },
     {"key": "assignedTo", "label": "Send assignedTo from config", "editable": True},
     {"key": "source", "label": "Send event source from config", "editable": True},
@@ -705,6 +704,7 @@ def mapping_catalog() -> dict:
         "default_custom_fields": {
             "petitioner_first": "firstName",
             "petitioner_last": "lastName",
+            "mailing_address": "address2",
         },
     }
 
@@ -782,7 +782,6 @@ def save_mapping(mapping: dict, path: Path | None = None) -> Path:
     send = dict(incoming.get("send") or existing.get("send") or {})
     send["phones"] = False
     send["emails"] = False
-    send["mailing_address"] = False
     incoming["send"] = send
     incoming["source_mappings"] = sources
     errors = mapping_errors(
@@ -944,6 +943,10 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
         "decedent_residence": _stringify_field(row.get("decedent_residence")),
         "decedent_city": _stringify_field(row.get("decedent_city")),
         "decedent_zip": _stringify_field(row.get("decedent_zip")),
+        "mailing_address": _stringify_field(row.get("mailing_address")),
+        "mailing_city": _stringify_field(row.get("mailing_city")),
+        "mailing_state": _stringify_field(row.get("mailing_state")),
+        "mailing_zip": _stringify_field(row.get("mailing_zip")),
         "decedent_died": _stringify_field(row.get("decedent_died")),
         "death_place": _stringify_field(row.get("death_place")),
         "estate_real": _stringify_field(row.get("estate_real")),
@@ -1487,6 +1490,16 @@ def _format_fub_address(addr) -> str:
 
 def _address_parts_from_source(local_key: str, values: dict) -> tuple[str, str, str]:
     if local_key in {
+        "mailing_address",
+        "mailing_city",
+        "mailing_zip",
+    }:
+        return (
+            str(values.get("mailing_city") or "").strip(),
+            str(values.get("mailing_state") or "CA").strip() or "CA",
+            str(values.get("mailing_zip") or "").strip(),
+        )
+    if local_key in {
         "decedent_residence",
         "decedent_city",
         "decedent_zip",
@@ -1664,8 +1677,8 @@ def build_person(
         person["lastName"] = last
     if send.get("assignedTo", True) and settings.get("assigned_to"):
         person["assignedTo"] = settings["assigned_to"]
+    values = probate_export_values(row, mapping)
     if send.get("subject_property_address", True):
-        values = probate_export_values(row, mapping)
         city, state, code = _address_parts_from_source("decedent_residence", values)
         addr = _fub_address(
             str(row.get("decedent_residence") or ""),
@@ -1676,9 +1689,19 @@ def build_person(
         )
         if addr:
             person["addresses"] = [addr]
+    if send.get("mailing_address", True):
+        city, state, code = _address_parts_from_source("mailing_address", values)
+        _set_address_slot(
+            person,
+            str(values.get("mailing_address") or row.get("mailing_address") or ""),
+            1,
+            ADDRESS2_TYPE,
+            city=city,
+            state=state,
+            code=code,
+        )
     if send.get("custom_fields", True):
         fields = mapping.get("custom_fields") or {}
-        values = probate_export_values(row, mapping)
         for local_key, api_name in fields.items():
             value = values.get(local_key)
             if not api_name or value in (None, ""):
