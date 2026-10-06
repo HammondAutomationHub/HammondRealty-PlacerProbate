@@ -506,7 +506,7 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                 portal = client.enrich(notice.case_number, year=year)
             except requests.RequestException as exc:
                 portal = {"found": False, "error": str(exc), "case_number": notice.case_number}
-        if docs_dir and portal.get("found"):
+        if docs_dir and portal.get("found") and portal.get("error") != "ecourt_view_limit":
             case_dir = docs_dir / re.sub(r"[^\w\-]+", "_", notice.case_number)
             safe = re.sub(r"[^\w\-]+", "_", notice.case_number)
             petition_item = None
@@ -592,7 +592,40 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
         if not row.get("filed"):
             row["filed"] = portal.get("filed") or portal.get("filed_from_docket")
         rows.append(row)
+    limit_cases = sorted(
+        {
+            str(row.get("case_number") or "")
+            for row in rows
+            if row.get("error") == "ecourt_view_limit" or row.get("ecourt_view_limit")
+        }
+        - {""}
+    )
+    if limit_cases:
+        print(
+            "ECOURT_VIEW_LIMIT source=placer source_name=Placer County "
+            f"cases={','.join(limit_cases)}",
+            flush=True,
+        )
     return rows
+
+
+def write_ecourt_alerts(path: Path, rows: list[dict]) -> dict:
+    cases = sorted(
+        {
+            str(row.get("case_number") or "")
+            for row in rows
+            if row.get("error") == "ecourt_view_limit" or row.get("ecourt_view_limit")
+        }
+        - {""}
+    )
+    payload = {
+        "error": "ecourt_view_limit" if cases else None,
+        "source": "placer",
+        "source_name": "Placer County",
+        "cases": cases,
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return payload
 
 
 def send_email(subject: str, text_body: str, html_body: str, pdf_path: Path | None = None) -> None:
@@ -718,6 +751,7 @@ def main() -> int:
         print("Looking up each case on Placer eCourt Public…")
         rows = enrich_notices(unique, year=start.year, docs_dir=out_dir / "docs")
         (out_dir / f"dossiers-{stamp}.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    write_ecourt_alerts(state_path.parent / "ecourt_alerts.json", rows)
     if not args.no_pdf:
         try:
             from .pdf_report import build_pdf

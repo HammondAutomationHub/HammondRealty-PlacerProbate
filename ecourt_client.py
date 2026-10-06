@@ -161,7 +161,18 @@ class ECourtClient:
             if detail.get("error") == "ecourt_view_limit":
                 time.sleep(max(self.pause * 5, 6.0))
                 detail = self.fetch_summary(hit["court_url"])
-        return {"found": True, **hit, **detail}
+            if detail.get("error") == "ecourt_view_limit":
+                print(
+                    f"ECOURT_VIEW_LIMIT source=placer case={case_number}",
+                    flush=True,
+                )
+                return {
+                    "found": True,
+                    **hit,
+                    **detail,
+                    "ecourt_view_limit": True,
+                    "document_files": [],
+                }
 
 
 def parse_document_table(soup, base: str = PORTAL_HOME) -> list[dict]:

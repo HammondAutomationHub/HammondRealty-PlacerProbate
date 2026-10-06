@@ -26,11 +26,13 @@ from .const import (
     ATTR_FUB_SKIPPED,
     ATTR_FUB_UPDATED,
     ATTR_FUB_VERIFY,
+    ATTR_ECOURT_VIEW_LIMIT,
     ATTR_LAST_ERROR,
     ATTR_LAST_RESULT,
     ATTR_LAST_RUN,
     ATTR_NEW_COUNT,
     ATTR_PDF,
+    EVENT_ECOURT_VIEW_LIMIT,
     CONF_COUNTY,
     CONF_ECOURT_PAUSE,
     CONF_FREQUENCY,
@@ -189,6 +191,88 @@ def should_run_now(settings: dict, now: datetime) -> bool:
     return True
 
 
+def _read_ecourt_view_limit(data_dir: Path, log: str) -> dict:
+    payload = {
+        "error": "ecourt_view_limit",
+        "source": "placer",
+        "source_name": "Placer County",
+        "cases": [],
+    }
+    path = data_dir / "ecourt_alerts.json"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                payload["source"] = str(data.get("source") or "placer")
+                payload["source_name"] = str(data.get("source_name") or "Placer County")
+                cases = [
+                    str(item) for item in (data.get("cases") or []) if str(item).strip()
+                ]
+                if cases:
+                    payload["cases"] = cases
+                    payload["error"] = str(data.get("error") or "ecourt_view_limit")
+                    return payload
+        except json.JSONDecodeError:
+            pass
+    cases: list[str] = []
+    for line in log.splitlines():
+        if not line.startswith("ECOURT_VIEW_LIMIT"):
+            continue
+        if "cases=" in line:
+            raw = line.split("cases=", 1)[1].strip()
+            cases.extend(part.strip() for part in raw.split(",") if part.strip())
+        elif "case=" in line:
+            cases.append(line.split("case=", 1)[1].strip().split()[0])
+    payload["cases"] = list(dict.fromkeys(cases))
+    if not payload["cases"]:
+        payload["error"] = None
+    return payload
+
+
+async def notify_ecourt_view_limit(hass: HomeAssistant, alert: dict) -> None:
+    cases = [str(item) for item in (alert or {}).get("cases") or [] if str(item).strip()]
+    if not cases:
+        return
+    source = str((alert or {}).get("source") or "placer")
+    source_name = str((alert or {}).get("source_name") or "Placer County")
+    error = str((alert or {}).get("error") or "ecourt_view_limit")
+    shown = ", ".join(cases[:12])
+    extra = f" (+{len(cases) - 12} more)" if len(cases) > 12 else ""
+    message = (
+        f"Data source: {source_name} ({source})\n"
+        f"Error: {error}\n"
+        "Placer eCourt Public reached its case view limit, so some dockets "
+        "and PDFs were not loaded.\n"
+        f"Cases affected: {shown}{extra}\n"
+        "Wait and run again, or raise the eCourt pause in the integration options."
+    )
+    await hass.services.async_call(
+        "persistent_notification",
+        "create",
+        {
+            "title": "Placer Probate Monitor: eCourt view limit",
+            "message": message,
+            "notification_id": EVENT_ECOURT_VIEW_LIMIT,
+        },
+        blocking=False,
+    )
+    hass.bus.async_fire(
+        EVENT_ECOURT_VIEW_LIMIT,
+        {
+            "source": source,
+            "source_name": source_name,
+            "error": error,
+            "cases": cases,
+        },
+    )
+    _LOGGER.warning(
+        "eCourt view limit on %s (%s): %s",
+        source_name,
+        source,
+        ", ".join(cases),
+    )
+
+
 def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
     data_dir = Path(hass.config.path(DOMAIN))
     apply_env(settings, mapping_path=data_dir / "fub_mapping.yaml", hass=hass)
@@ -259,6 +343,7 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
                 fub_verify = {"note": payload.get("verify_note")}
         except json.JSONDecodeError:
             pass
+    view_limit = _read_ecourt_view_limit(data_dir, log)
     if fub_posted is None:
         for line in reversed(log.splitlines()):
             if line.startswith("FUB: posted="):
@@ -288,6 +373,7 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
         ATTR_FUB_SKIPPED: fub_skipped,
         ATTR_FUB_ERROR: fub_error,
         ATTR_FUB_VERIFY: fub_verify,
+        ATTR_ECOURT_VIEW_LIMIT: view_limit,
         "log_tail": log[-1500:],
     }
 
@@ -317,6 +403,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ATTR_FUB_SKIPPED: None,
             ATTR_FUB_ERROR: None,
             ATTR_FUB_VERIFY: None,
+            ATTR_ECOURT_VIEW_LIMIT: None,
         },
     }
     hass.data[DOMAIN][entry.entry_id] = store
@@ -349,10 +436,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ATTR_FUB_SKIPPED: result.get(ATTR_FUB_SKIPPED),
                 ATTR_FUB_ERROR: result.get(ATTR_FUB_ERROR),
                 ATTR_FUB_VERIFY: result.get(ATTR_FUB_VERIFY),
+                ATTR_ECOURT_VIEW_LIMIT: result.get(ATTR_ECOURT_VIEW_LIMIT),
             }
         )
         store["running"] = False
         async_dispatcher_send(hass, f"{DOMAIN}_status")
+        await notify_ecourt_view_limit(hass, result.get(ATTR_ECOURT_VIEW_LIMIT) or {})
         _LOGGER.info("Placer probate monitor %s run: %s", reason, result.get(ATTR_LAST_RESULT))
         return result
 

@@ -11,6 +11,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ATTR_ECOURT_VIEW_LIMIT,
     ATTR_FUB_ERROR,
     ATTR_FUB_POSTED,
     ATTR_FUB_SKIPPED,
@@ -76,6 +77,7 @@ class PlacerProbateStatusSensor(SensorEntity):
             ATTR_FUB_UPDATED: status.get(ATTR_FUB_UPDATED),
             ATTR_FUB_SKIPPED: status.get(ATTR_FUB_SKIPPED),
             ATTR_FUB_ERROR: status.get(ATTR_FUB_ERROR),
+            ATTR_ECOURT_VIEW_LIMIT: status.get(ATTR_ECOURT_VIEW_LIMIT),
             "running": store.get("running", False),
         }
 
