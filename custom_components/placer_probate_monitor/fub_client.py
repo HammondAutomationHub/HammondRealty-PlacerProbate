@@ -31,7 +31,7 @@ ADDRESS_COMPONENT_KEYS = {
     "mailing_zip",
 }
 ADDRESS1_TYPE = "home"
-ADDRESS2_TYPE = "decedent"
+ADDRESS2_TYPE = "mailing"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -615,7 +615,7 @@ SEND_TOGGLES = [
     {"key": "phones", "label": "Send petitioner phone", "editable": True},
     {
         "key": "subject_property_address",
-        "label": "Send decedent last residence as Address 2",
+        "label": "Send decedent last residence as Address 2 (FUB type mailing)",
         "editable": True,
     },
     {
@@ -1327,6 +1327,8 @@ def inspect_fub_person(query: str) -> dict:
         for item in addresses:
             if isinstance(item, dict) and str(item.get("type") or "").lower() in {
                 "mailing",
+                "investment",
+                "decedent",
                 "address 2",
                 "address2",
             }:
@@ -1524,6 +1526,7 @@ def _fub_address(
     addr = {
         "street": street,
         "type": addr_type,
+        "country": "United States",
     }
     if city:
         addr["city"] = city
@@ -1828,7 +1831,7 @@ def build_person(
         city, state, code = _address_parts_from_source("decedent_residence", values)
         _set_address_slot(
             person,
-            str(row.get("decedent_residence") or ""),
+            str(values.get("decedent_residence") or row.get("decedent_residence") or ""),
             1,
             ADDRESS2_TYPE,
             city=city,
