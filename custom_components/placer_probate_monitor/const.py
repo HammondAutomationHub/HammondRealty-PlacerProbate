@@ -33,6 +33,7 @@ CONF_FUB_STAGE = "fub_stage"
 CONF_FUB_EVENT_TYPE = "fub_event_type"
 CONF_FUB_STRICT_PROPERTY = "fub_strict_property"
 CONF_FUB_VERIFY_ONLY = "fub_verify_only"
+CONF_FUB_UPDATE_EXISTING = "fub_update_existing"
 CONF_FUB_VERIFY_EXISTING = "fub_verify_existing"
 CONF_FUB_VERIFY_PERSON_ID = "fub_verify_person_id"
 
@@ -87,6 +88,7 @@ DEFAULTS = {
     CONF_FUB_EVENT_TYPE: "Seller Inquiry",
     CONF_FUB_STRICT_PROPERTY: False,
     CONF_FUB_VERIFY_ONLY: True,
+    CONF_FUB_UPDATE_EXISTING: False,
     CONF_FUB_VERIFY_EXISTING: False,
     CONF_FUB_VERIFY_PERSON_ID: "",
 }

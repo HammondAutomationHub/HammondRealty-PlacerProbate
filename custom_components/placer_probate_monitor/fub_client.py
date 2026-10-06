@@ -2770,6 +2770,8 @@ def export_new_leads(
     }
     strict = _env_bool("FUB_STRICT_PROPERTY")
     verify = _env_bool("FUB_VERIFY_ONLY")
+    update_existing = _env_bool("FUB_UPDATE_EXISTING")
+    refresh = verify or update_existing
     forced_id = _forced_verify_person_id() if verify else None
     if verify and _env_bool("FUB_VERIFY_EXISTING") and forced_id is None:
         summary["error"] = "Use existing is on but Follow Up Boss person ID is empty"
@@ -2822,7 +2824,7 @@ def export_new_leads(
                     print(f"FUB skip {key}: verify_only_limit")
                     _progress_fub(summary, "verify-only skip", key)
                     continue
-                if not verify and record.get("fub_fingerprint") == fingerprint:
+                if not verify and not update_existing and record.get("fub_fingerprint") == fingerprint:
                     summary["skipped"] += 1
                     summary["skips"].append({"case": key, "reason": "unchanged"})
                     print(f"FUB skip {key}: unchanged person_id={existing_id}")
@@ -2881,8 +2883,9 @@ def export_new_leads(
                     summary["verify_record"] = record_view
                     print(f"FUB updated {key} person_id={pid}")
                     _progress_fub(summary, "updated", key)
-                    if verify:
-                        state["last_fub_verify_case"] = key
+                    if refresh:
+                        if verify:
+                            state["last_fub_verify_case"] = key
                         try:
                             post_note(
                                 settings["api_url"],
@@ -2903,7 +2906,7 @@ def export_new_leads(
                             system=system,
                             cases=cases,
                             key=key,
-                            force=verify,
+                            force=refresh,
                         )
                         record_view["court_url_note"] = court_note
                     except Exception as court_exc:  # noqa: BLE001
@@ -2922,7 +2925,7 @@ def export_new_leads(
                             system=system,
                             cases=cases,
                             key=key,
-                            force=verify,
+                            force=refresh,
                         )
                         record_view["de111_attach"] = attached
                         summary["verify_record"] = record_view
@@ -2940,7 +2943,7 @@ def export_new_leads(
                             system=system,
                             cases=cases,
                             key=key,
-                            force=verify,
+                            force=refresh,
                         )
                         record_view["de147_attach"] = duties
                         summary["verify_record"] = record_view
@@ -2994,7 +2997,7 @@ def export_new_leads(
                     system=system,
                     cases=cases,
                     key=key,
-                    force=verify,
+                    force=refresh,
                 )
                 record_view["court_url_note"] = court_note
             except Exception as court_exc:  # noqa: BLE001
@@ -3013,7 +3016,7 @@ def export_new_leads(
                     system=system,
                     cases=cases,
                     key=key,
-                    force=verify,
+                    force=refresh,
                 )
                 record_view["de111_attach"] = attached
             except Exception as file_exc:  # noqa: BLE001
@@ -3029,7 +3032,7 @@ def export_new_leads(
                     system=system,
                     cases=cases,
                     key=key,
-                    force=verify,
+                    force=refresh,
                 )
                 record_view["de147_attach"] = duties
             except Exception as duties_exc:  # noqa: BLE001

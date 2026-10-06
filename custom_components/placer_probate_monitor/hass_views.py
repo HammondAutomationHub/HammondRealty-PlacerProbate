@@ -25,6 +25,7 @@ from .const import (
     CONF_FUB_SOURCE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
+    CONF_FUB_UPDATE_EXISTING,
     CONF_FUB_VERIFY_EXISTING,
     CONF_FUB_VERIFY_PERSON_ID,
     CONF_GENERATE_PDF,
@@ -47,7 +48,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.58"
+PANEL_JS_VERSION = "1.3.59"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -76,6 +77,7 @@ FUB_KEYS = {
     CONF_FUB_EVENT_TYPE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
+    CONF_FUB_UPDATE_EXISTING,
     CONF_FUB_VERIFY_EXISTING,
     CONF_FUB_VERIFY_PERSON_ID,
 }
@@ -86,6 +88,7 @@ BOOL_KEYS = {
     CONF_FUB_ENABLED,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
+    CONF_FUB_UPDATE_EXISTING,
     CONF_FUB_VERIFY_EXISTING,
 }
 
@@ -164,6 +167,7 @@ def _public_fub(settings: dict) -> dict:
         CONF_FUB_EVENT_TYPE: settings.get(CONF_FUB_EVENT_TYPE) or "Seller Inquiry",
         CONF_FUB_STRICT_PROPERTY: bool(settings.get(CONF_FUB_STRICT_PROPERTY)),
         CONF_FUB_VERIFY_ONLY: bool(settings.get(CONF_FUB_VERIFY_ONLY, True)),
+        CONF_FUB_UPDATE_EXISTING: bool(settings.get(CONF_FUB_UPDATE_EXISTING, False)),
         CONF_FUB_VERIFY_EXISTING: bool(settings.get(CONF_FUB_VERIFY_EXISTING, False)),
         CONF_FUB_VERIFY_PERSON_ID: str(
             settings.get(CONF_FUB_VERIFY_PERSON_ID) or ""

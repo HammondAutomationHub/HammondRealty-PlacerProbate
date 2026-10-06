@@ -931,6 +931,8 @@ class PlacerProbateFubPanel extends HTMLElement {
             <select id="fub_event_type"></select>
             <label class="ppm-toggle"><input id="fub_strict_property" type="checkbox" /><span>Require decedent residence before upload</span></label>
             <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: update one person per run</span></label>
+            <label class="ppm-toggle"><input id="fub_update_existing" type="checkbox" /><span>Update all existing Follow Up Boss people on this run</span></label>
+            <p class="ppm-note">Turn Verify only off and turn Update all existing on, then Run Placer job. That PUTs every matched person (addresses, notes, DE-111) even if they were skipped as unchanged. Turn Update all existing back off after the catch-up so daily runs stay quiet.</p>
             <label class="ppm-toggle"><input id="fub_verify_existing" type="checkbox" /><span>Use existing Follow Up Boss person</span></label>
             <label>Existing person ID</label>
             <input id="fub_verify_person_id" inputmode="numeric" placeholder="e.g. 12345" />
@@ -1033,6 +1035,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._qs("#fub_event_type").value = data.fub_event_type || "Seller Inquiry";
     this._qs("#fub_strict_property").checked = !!data.fub_strict_property;
     this._qs("#fub_verify_only").checked = data.fub_verify_only !== false;
+    this._qs("#fub_update_existing").checked = !!data.fub_update_existing;
     this._qs("#fub_verify_existing").checked = !!data.fub_verify_existing;
     this._qs("#fub_verify_person_id").value = data.fub_verify_person_id || "";
   }
@@ -1229,6 +1232,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       fub_event_type: this._qs("#fub_event_type").value,
       fub_strict_property: this._qs("#fub_strict_property").checked,
       fub_verify_only: this._qs("#fub_verify_only").checked,
+      fub_update_existing: this._qs("#fub_update_existing").checked,
       fub_verify_existing: this._qs("#fub_verify_existing").checked,
       fub_verify_person_id: this._qs("#fub_verify_person_id").value.trim(),
     };

@@ -47,6 +47,7 @@ from .const import (
     CONF_FUB_SOURCE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
+    CONF_FUB_UPDATE_EXISTING,
     CONF_FUB_VERIFY_EXISTING,
     CONF_FUB_VERIFY_PERSON_ID,
     CONF_GENERATE_PDF,
@@ -147,6 +148,9 @@ def apply_env(
     )
     os.environ["FUB_VERIFY_ONLY"] = (
         "1" if settings.get(CONF_FUB_VERIFY_ONLY) else "0"
+    )
+    os.environ["FUB_UPDATE_EXISTING"] = (
+        "1" if settings.get(CONF_FUB_UPDATE_EXISTING) else "0"
     )
     os.environ["FUB_VERIFY_EXISTING"] = (
         "1" if settings.get(CONF_FUB_VERIFY_EXISTING) else "0"

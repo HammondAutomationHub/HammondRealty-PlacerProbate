@@ -46,10 +46,12 @@
           "fub_stage": "Person stage (must match a Follow Up Boss stage name)",
           "fub_event_type": "Event type",
           "fub_strict_property": "Require decedent residence before upload",
-          "fub_verify_only": "Verify only: import one new go-case per run"
+          "fub_verify_only": "Verify only: import one new go-case per run",
+          "fub_update_existing": "Update all existing Follow Up Boss people"
         },
         "data_description": {
-          "fub_verify_only": "Leave on until you confirm one contact in Follow Up Boss. Turn off to import every new go-case."
+          "fub_verify_only": "Leave on until you confirm one contact in Follow Up Boss. Turn off to import every new go-case.",
+          "fub_update_existing": "When on, a Placer job PUTs every case that already has a Follow Up Boss person ID, even if the payload is unchanged. Turn off after catch-up."
         }
       }
     },
@@ -103,10 +105,12 @@
           "fub_stage": "Person stage (must match a Follow Up Boss stage name)",
           "fub_event_type": "Event type",
           "fub_strict_property": "Require decedent residence before upload",
-          "fub_verify_only": "Verify only: import one new go-case per run"
+          "fub_verify_only": "Verify only: import one new go-case per run",
+          "fub_update_existing": "Update all existing Follow Up Boss people"
         },
         "data_description": {
-          "fub_verify_only": "Leave on until you confirm one contact in Follow Up Boss. Turn off to import every new go-case."
+          "fub_verify_only": "Leave on until you confirm one contact in Follow Up Boss. Turn off to import every new go-case.",
+          "fub_update_existing": "When on, a Placer job PUTs every case that already has a Follow Up Boss person ID, even if the payload is unchanged. Turn off after catch-up."
         }
       }
     }

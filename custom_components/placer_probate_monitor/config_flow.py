@@ -22,6 +22,7 @@ from .const import (
     CONF_FUB_SOURCE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
+    CONF_FUB_UPDATE_EXISTING,
     CONF_GENERATE_PDF,
     CONF_KEYWORDS,
     CONF_LOOKAHEAD_DAYS,
@@ -203,6 +204,10 @@ def _fub_schema(defaults: dict) -> vol.Schema:
             vol.Required(
                 CONF_FUB_VERIFY_ONLY,
                 default=bool(defaults.get(CONF_FUB_VERIFY_ONLY, True)),
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_FUB_UPDATE_EXISTING,
+                default=bool(defaults.get(CONF_FUB_UPDATE_EXISTING, False)),
             ): selector.BooleanSelector(),
         }
     )
