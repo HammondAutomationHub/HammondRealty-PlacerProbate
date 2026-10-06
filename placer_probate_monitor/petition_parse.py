@@ -414,7 +414,7 @@ def _item3h_address(text: str) -> dict:
     match = ITEM3H_RE.search(text) or PERMANENT_ADDR_RE.search(text)
     if not match:
         return {}
-    return _first_parsed_address(match.group("body")[:500], prefix="mailing")
+    return _contact_from_blob(match.group("body")[:500])
 
 
 def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
@@ -465,24 +465,16 @@ def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
         ):
             mailing = {}
     out.update(mailing)
-    contact_src = body or text
-    if contact_src:
-        phone = PHONE_RE.search(body) if body else None
-        if phone:
-            out["petitioner_phone"] = re.sub(r"\s+", " ", phone.group("phone")).strip()
+    skip_phones = _caption_phones(text)
+    phone = _petitioner_phone_from_text(text, skip=skip_phones)
+    if phone:
+        out["petitioner_phone"] = phone
+    if not out.get("petitioner_email"):
         email = EMAIL_RE.search(body) if body else None
-        if email:
+        if email and _parse_caption_mailing(text):
             out["petitioner_email"] = email.group("email").strip()
     if not out.get("mailing_address"):
         out.update(_parse_caption_mailing(text))
-    if not out.get("petitioner_phone"):
-        phone = PHONE_RE.search(text[:4000])
-        if phone and _parse_caption_mailing(text):
-            out["petitioner_phone"] = re.sub(r"\s+", " ", phone.group("phone")).strip()
-    if not out.get("petitioner_email"):
-        email = EMAIL_RE.search(body or text[:4000])
-        if email and (body or _parse_caption_mailing(text)):
-            out["petitioner_email"] = email.group("email").strip()
     personal = PERSONAL_RE.search(text)
     if personal:
         out["estate_personal"] = personal.group("amt").replace(",", "")
@@ -699,27 +691,116 @@ DE147_CONTACT_RE = re.compile(
 BARE_PHONE_RE = re.compile(
     r"(?P<phone>\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})"
 )
+CAPTION_PHONE_RE = re.compile(
+    r"TELEPHONE NO\.\s*:?\s*(?P<phone>\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})",
+    re.I,
+)
+FAX_PHONE_RE = re.compile(
+    r"FAX NO[^0-9]{0,24}(?P<phone>\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})",
+    re.I,
+)
+
+
+def _normalize_phone(raw: str) -> str:
+    digits = re.sub(r"\D", "", raw or "")
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def _format_phone(raw: str) -> str:
+    digits = _normalize_phone(raw)
+    if len(digits) != 10:
+        return re.sub(r"\s+", " ", (raw or "")).strip()
+    return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+
+
+def _caption_phones(text: str) -> set[str]:
+    found: set[str] = set()
+    for rx in (CAPTION_PHONE_RE, FAX_PHONE_RE):
+        for match in rx.finditer(text or ""):
+            found.add(_normalize_phone(match.group("phone")))
+    head = (text or "")[:1800]
+    for match in BARE_PHONE_RE.finditer(head):
+        if "attorney" in head.lower() or "telephone no" in head.lower():
+            found.add(_normalize_phone(match.group("phone")))
+    return {item for item in found if item}
+
+
+def _contact_from_blob(body: str) -> dict:
+    out: dict = {}
+    blob = re.sub(r"\s+", " ", body or "").strip()
+    phone = BARE_PHONE_RE.search(blob)
+    rest = blob
+    if phone:
+        out["petitioner_phone"] = _format_phone(phone.group("phone"))
+        rest = (blob[: phone.start()] + blob[phone.end() :]).strip()
+    email = EMAIL_RE.search(rest)
+    if email:
+        out["petitioner_email"] = email.group("email").strip()
+        rest = rest.replace(email.group("email"), " ")
+    rest = re.sub(r"[\s;]+$", "", rest).strip(" ;,")
+    parsed = _parse_address(rest, prefix="mailing") if rest else {}
+    if parsed:
+        out.update(parsed)
+    return out
+
+
+def _petitioner_phone_from_text(text: str, skip: set[str] | None = None) -> str:
+    skip_n = set(skip or ())
+    windows: list[str] = []
+    for rx in (DE147_CONTACT_RE, ITEM3H_RE, ITEM8_RE, PERMANENT_ADDR_RE):
+        match = rx.search(text or "")
+        if match:
+            windows.append(match.group(0))
+    for label in (
+        "ACKNOWLEDGMENT OF RECEIPT",
+        "address and telephone number",
+        "permanent address",
+        "8. Name and relationship",
+    ):
+        idx = (text or "").lower().find(label.lower())
+        if idx >= 0:
+            windows.append(text[idx : idx + 800])
+    for window in windows:
+        for match in BARE_PHONE_RE.finditer(window):
+            digits = _normalize_phone(match.group("phone"))
+            if digits and digits not in skip_n:
+                return _format_phone(match.group("phone"))
+    return ""
+
+
+def merge_petitioner_contact(de111: dict, de147: dict) -> dict:
+    """Take address/phone/email from either form; prefer DE-147 for phone/email."""
+    left = de111 or {}
+    right = de147 or {}
+    out: dict = {}
+    for key in ("mailing_address", "mailing_city", "mailing_state", "mailing_zip"):
+        value = left.get(key) or right.get(key)
+        if value:
+            out[key] = value
+    for key in ("petitioner_phone", "petitioner_email"):
+        value = right.get(key) or left.get(key)
+        if value:
+            out[key] = value
+    return out
 
 
 def parse_de147_text(text: str) -> dict:
     text = _clean(text)
     out: dict = {}
     match = DE147_CONTACT_RE.search(text)
-    if not match:
-        return out
-    body = re.sub(r"\s+", " ", match.group("body")).strip()
-    phone = BARE_PHONE_RE.search(body)
-    if phone:
-        out["petitioner_phone"] = re.sub(r"\s+", " ", phone.group("phone")).strip()
-        body = body[: phone.start()] + body[phone.end() :]
-    email = EMAIL_RE.search(body)
-    if email:
-        out["petitioner_email"] = email.group("email").strip()
-        body = body.replace(email.group("email"), " ")
-    body = re.sub(r"[\s;]+$", "", body).strip(" ;,")
-    parsed = _parse_address(body, prefix="mailing")
-    if parsed:
-        out.update(parsed)
+    if match:
+        out.update(_contact_from_blob(match.group("body")))
+    if not out.get("mailing_address"):
+        idx = text.lower().find("address and telephone number")
+        if idx >= 0:
+            out.update(_contact_from_blob(text[idx : idx + 500]))
+    skip = _caption_phones(text)
+    phone = out.get("petitioner_phone") or ""
+    if not phone or _normalize_phone(phone) in skip:
+        out.pop("petitioner_phone", None)
+        phone = _petitioner_phone_from_text(text, skip=skip)
+        if phone:
+            out["petitioner_phone"] = phone
     return out
 
 

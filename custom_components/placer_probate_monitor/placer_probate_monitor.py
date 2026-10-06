@@ -481,6 +481,7 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
         from .petition_parse import (
             looks_like_duties_form,
             looks_like_probate_petition,
+            merge_petitioner_contact,
             parse_de111_pdf,
             parse_de147_pdf,
         )
@@ -489,6 +490,7 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
         from petition_parse import (
             looks_like_duties_form,
             looks_like_probate_petition,
+            merge_petitioner_contact,
             parse_de111_pdf,
             parse_de147_pdf,
         )
@@ -515,20 +517,23 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                     petition_item = item
                 if looks_like_duties_form(name) and duties_item is None:
                     duties_item = item
+            de111: dict = {}
+            de147: dict = {}
             if petition_item:
                 dest = case_dir / f"{safe}_DE-111.pdf"
                 try:
                     time.sleep(client.pause)
                     client.download(petition_item["url"], dest)
                     if dest.read_bytes()[:4] == b"%PDF":
-                        parsed = parse_de111_pdf(dest, petitioner=notice.petitioner)
-                        portal.update(parsed)
+                        de111 = parse_de111_pdf(dest, petitioner=notice.petitioner)
+                        portal.update(de111)
                         portal["petition_pdf"] = str(dest)
                         portal["petition_url"] = petition_item["url"]
                         print(
                             f"DE-111 {notice.case_number}: "
-                            f"mailing={parsed.get('mailing_address') or '(empty)'} "
-                            f"residence={parsed.get('decedent_residence') or '(empty)'}",
+                            f"mailing={de111.get('mailing_address') or '(empty)'} "
+                            f"phone={de111.get('petitioner_phone') or '(empty)'} "
+                            f"residence={de111.get('decedent_residence') or '(empty)'}",
                             flush=True,
                         )
                     else:
@@ -541,23 +546,30 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                     time.sleep(client.pause)
                     client.download(duties_item["url"], dest)
                     if dest.read_bytes()[:4] == b"%PDF":
-                        extra = parse_de147_pdf(dest)
-                        for key, value in extra.items():
-                            if value not in (None, "", [], {}) and not portal.get(key):
-                                portal[key] = value
+                        de147 = parse_de147_pdf(dest)
                         portal["duties_pdf"] = str(dest)
                         portal["duties_url"] = duties_item["url"]
                         print(
                             f"DE-147 {notice.case_number}: "
-                            f"mailing={extra.get('mailing_address') or portal.get('mailing_address') or '(empty)'} "
-                            f"phone={extra.get('petitioner_phone') or '(empty)'} "
-                            f"email={extra.get('petitioner_email') or '(empty)'}",
+                            f"mailing={de147.get('mailing_address') or '(empty)'} "
+                            f"phone={de147.get('petitioner_phone') or '(empty)'} "
+                            f"email={de147.get('petitioner_email') or '(empty)'}",
                             flush=True,
                         )
                     else:
                         portal["duties_parse_error"] = "download was not a PDF"
                 except Exception as exc:  # noqa: BLE001
                     portal["duties_parse_error"] = str(exc)
+            contact = merge_petitioner_contact(de111, de147)
+            if contact:
+                portal.update(contact)
+                print(
+                    f"contact {notice.case_number}: "
+                    f"mailing={contact.get('mailing_address') or '(empty)'} "
+                    f"phone={contact.get('petitioner_phone') or '(empty)'} "
+                    f"email={contact.get('petitioner_email') or '(empty)'}",
+                    flush=True,
+                )
         row = asdict(notice)
         merged = {k: v for k, v in portal.items() if v not in (None, "", [], {})}
         if "status" in merged and "court_status" not in merged:
