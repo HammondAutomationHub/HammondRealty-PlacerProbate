@@ -227,8 +227,6 @@ function ppmFieldAssociations(mapping, sourceId, catalogFields) {
   Object.keys(custom || {}).forEach((key) => add(custom[key], key));
   add("firstName", "petitioner_first");
   add("lastName", "petitioner_last");
-  add("addresses", "mailing_address");
-  add("address2", "decedent_residence");
   add("emails", "petitioner_email");
   add("phones", "petitioner_phone");
   add("assignedTo", "assignedTo");

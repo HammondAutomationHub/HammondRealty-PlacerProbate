@@ -169,18 +169,10 @@ def _split_person_source_keys(fields: dict) -> dict:
         out["petitioner_first"] = "firstName"
     if not out.get("petitioner_last"):
         out["petitioner_last"] = "lastName"
-    if not out.get("mailing_address") or str(out.get("mailing_address")).lower() in {
-        "address2",
-        "mailing",
-        "mailingaddress",
-    }:
-        out["mailing_address"] = "addresses"
     if not out.get("petitioner_email"):
         out["petitioner_email"] = "emails"
     if not out.get("petitioner_phone"):
         out["petitioner_phone"] = "phones"
-    if not out.get("decedent_residence"):
-        out["decedent_residence"] = "address2"
     return out
 
 
@@ -311,8 +303,8 @@ PROBATE_SOURCE_FIELDS = [
         "label": "Petitioner address",
         "group": "petitioner",
         "source": "DE-111 item 8 / 3h or DE-147 acknowledgment, whichever has it",
-        "notes": "FUB Address 1. Use any petitioner mailing found on either form. Not item 1 (publication), not item 3c (decedent), not attorney caption.",
-        "person": "addresses",
+        "notes": "Map this source field to Address 1 or Address 2 in the mapping UI. Not item 1 (publication) and not the attorney caption.",
+        "person": None,
         "custom": True,
     },
     {
@@ -320,8 +312,8 @@ PROBATE_SOURCE_FIELDS = [
         "label": "Petitioner city",
         "group": "petitioner",
         "source": "DE-111 or DE-147, whichever has it",
-        "notes": "Address 1 city. Filled from either form.",
-        "person": "addresses",
+        "notes": "City for the petitioner mailing line. Map the street line, not this row, to Address 1 or 2.",
+        "person": None,
         "custom": True,
     },
     {
@@ -329,8 +321,8 @@ PROBATE_SOURCE_FIELDS = [
         "label": "Petitioner state",
         "group": "petitioner",
         "source": "DE-111 or DE-147, whichever has it",
-        "notes": "Address 1 state. Do not default to CA when the form has another state.",
-        "person": "addresses",
+        "notes": "State for the petitioner mailing line. Map the street line, not this row, to Address 1 or 2.",
+        "person": None,
         "custom": True,
     },
     {
@@ -338,8 +330,8 @@ PROBATE_SOURCE_FIELDS = [
         "label": "Petitioner ZIP",
         "group": "petitioner",
         "source": "DE-111 or DE-147, whichever has it",
-        "notes": "Address 1 ZIP. Filled from either form.",
-        "person": "addresses",
+        "notes": "ZIP for the petitioner mailing line. Map the street line, not this row, to Address 1 or 2.",
+        "person": None,
         "custom": True,
     },
     {
@@ -395,8 +387,8 @@ PROBATE_SOURCE_FIELDS = [
         "label": "Last residence (DE-111 item 3c)",
         "group": "decedent",
         "source": "DE-111 item 3c",
-        "notes": "Street, city, county of residence at death. City is Lincoln, not Placer County. FUB Address 2.",
-        "person": "addresses",
+        "notes": "Street, city, county of residence at death. Map to Address 1 or Address 2 in the mapping UI. City is Lincoln, not Placer County.",
+        "person": None,
         "custom": True,
     },
     {
@@ -590,9 +582,13 @@ FUB_DESTINATIONS = [
     },
     {
         "id": "person.addresses",
-        "label": "Person addresses (subject property)",
+        "label": "Person Address 1",
         "group": "person",
-        "locked_to": "mailing_address",
+    },
+    {
+        "id": "person.address2",
+        "label": "Person Address 2",
+        "group": "person",
     },
     {
         "id": "person.emails",
@@ -639,8 +635,8 @@ FUB_BUILTIN_FIELDS = [
     {"name": "firstName", "label": "First name", "group": "Person", "type": "person"},
     {"name": "lastName", "label": "Last name", "group": "Person", "type": "person"},
     {"name": "assignedTo", "label": "Assigned to", "group": "Person", "type": "person"},
-    {"name": "addresses", "label": "Address 1 (petitioner)", "group": "Person", "type": "person"},
-    {"name": "address2", "label": "Address 2 (decedent)", "group": "Person", "type": "person"},
+    {"name": "addresses", "label": "Address 1", "group": "Person", "type": "person"},
+    {"name": "address2", "label": "Address 2", "group": "Person", "type": "person"},
     {"name": "stage", "label": "Stage", "group": "Person", "type": "person"},
     {"name": "source", "label": "Lead source", "group": "Person", "type": "person"},
     {"name": "tags", "label": "Tags", "group": "Person", "type": "person"},
@@ -678,16 +674,6 @@ SEND_TOGGLES = [
     {"key": "lastName", "label": "Send petitioner lastName", "editable": True},
     {"key": "emails", "label": "Send petitioner email", "editable": True},
     {"key": "phones", "label": "Send petitioner phone", "editable": True},
-    {
-        "key": "subject_property_address",
-        "label": "Send decedent last residence as Address 2 (FUB type mailing)",
-        "editable": True,
-    },
-    {
-        "key": "mailing_address",
-        "label": "Send petitioner address as Address 1",
-        "editable": True,
-    },
     {"key": "assignedTo", "label": "Send assignedTo from config", "editable": True},
     {"key": "source", "label": "Send event source from config", "editable": True},
     {"key": "message", "label": "Send event message/description", "editable": True},
@@ -711,8 +697,8 @@ SEND_TOGGLES = [
 
 GO_NO_GO = [
     "Petitioner is the FUB Person. Decedent is never firstName/lastName.",
-    "No go-case without petitioner address. Address 1 is petitioner mailing from DE-111 item 8 / 3h or DE-147 acknowledgment — whichever form has it. Item 1 is publication. Item 3c is decedent last residence, not Address 1. Attorney caption is not petitioner Address 1.",
-    "Never map attorney_phone onto person.phones. Attorney caption address is not petitioner Address 1.",
+    "No go-case without a petitioner mailing address on the extract. Map petitioner mailing and decedent last residence to Address 1 or Address 2 in the mapping UI. Item 1 is publication. Attorney caption is not petitioner mailing.",
+    "Never map attorney_phone onto person.phones. Attorney caption address is not petitioner mailing.",
     "Last residence is DE-111 text, not a verified APN.",
     "Notes gets the per-case eCourt Public URL, a unique DE-111 PDF link, and a DE-147 duties link. Petitioner phone and email come from either form when present, never from the attorney caption.",
     "Only NEW cases are created on a full run. Verify can update a person ID you enter, reuse the last test person, or create one if none exist.",
@@ -892,10 +878,8 @@ def mapping_catalog() -> dict:
         "default_custom_fields": {
             "petitioner_first": "firstName",
             "petitioner_last": "lastName",
-            "mailing_address": "addresses",
             "petitioner_email": "emails",
             "petitioner_phone": "phones",
-            "decedent_residence": "address2",
         },
     }
 
@@ -2064,28 +2048,6 @@ def build_person(
     if send.get("assignedTo", True) and settings.get("assigned_to"):
         person["assignedTo"] = settings["assigned_to"]
     values = probate_export_values(row, mapping)
-    if send.get("mailing_address", True):
-        city, state, code = _address_parts_from_source("mailing_address", values)
-        addr = _fub_address(
-            str(values.get("mailing_address") or row.get("mailing_address") or ""),
-            ADDRESS1_TYPE,
-            city=city,
-            state=state,
-            code=code,
-        )
-        if addr:
-            person["addresses"] = [addr]
-    if send.get("subject_property_address", True):
-        city, state, code = _address_parts_from_source("decedent_residence", values)
-        _set_address_slot(
-            person,
-            str(values.get("decedent_residence") or row.get("decedent_residence") or ""),
-            1,
-            ADDRESS2_TYPE,
-            city=city,
-            state=state,
-            code=code,
-        )
     if send.get("emails", True):
         email = str(values.get("petitioner_email") or "").strip()
         if email:
