@@ -15,6 +15,13 @@ NONRESIDENT_RE = re.compile(
     r"a nonresident of California and left an estate in the county named above",
     re.I,
 )
+ITEM3A2_RE = re.compile(
+    r"\(\s*2\s*\)\s*(?P<mark>.{0,16}?)\s*a\s*nonresident of California and left an estate"
+    r".*?located at(?:\s*\([^)]{0,160}\))?\s*:?\s*(?P<body>.+?)"
+    r"(?=\n\s*b\.|\n\s*c\.|Street address, city, and county of|"
+    r"Decedent was a citizen|Form Adopted)",
+    re.I | re.S,
+)
 ITEM3B_RE = re.compile(
     r"citizen of a country other than the United States\s*\(specify country\):\s*"
     r"(?P<country>[A-Za-z][A-Za-z .'-]{1,80})?",
@@ -512,6 +519,20 @@ def _item3h_address(text: str) -> dict:
     return _contact_from_blob(match.group("body")[:500])
 
 
+def _checkbox_marked(mark: str) -> bool:
+    blob = re.sub(r"\s+", "", mark or "")
+    if not blob or re.fullmatch(r"[\[\]Il1|_-]+", blob):
+        return False
+    return bool(re.search(r"[xX✓✔☒]", blob))
+
+
+def _item3a2_estate_address(text: str) -> dict:
+    match = ITEM3A2_RE.search(text or "")
+    if not match or not _checkbox_marked(match.group("mark") or ""):
+        return {}
+    return _parse_address(match.group("body")[:400], prefix="decedent")
+
+
 def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
     text = _clean(text)
     out: dict = {}
@@ -519,7 +540,13 @@ def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
     if died:
         out["decedent_died"] = died.group("date").strip()
         out["death_place"] = re.sub(r"\s+", " ", died.group("place")).strip(" .")
-    if NONRESIDENT_RE.search(text) and re.search(
+    item3a2 = _item3a2_estate_address(text)
+    item3a2_box = ITEM3A2_RE.search(text)
+    if item3a2 or (
+        item3a2_box and _checkbox_marked(item3a2_box.group("mark") or "")
+    ):
+        out["county_resident"] = False
+    elif NONRESIDENT_RE.search(text) and re.search(
         r"\[\s*[xX✓✔]\s*\][^\n]{0,80}nonresident of California", text
     ):
         out["county_resident"] = False
@@ -548,6 +575,8 @@ def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
         )
         if marker:
             out.update(_parse_address(text[marker.end() : marker.end() + 500], prefix="decedent"))
+    if item3a2.get("decedent_residence"):
+        out.update(item3a2)
     body = _item1_body(text)
     names = _item2_names(text) or petitioner_name
     if names:

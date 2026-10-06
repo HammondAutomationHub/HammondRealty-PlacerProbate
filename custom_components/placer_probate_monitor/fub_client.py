@@ -386,8 +386,8 @@ PROBATE_SOURCE_FIELDS = [
         "key": "decedent_residence",
         "label": "Last residence (DE-111 item 3c)",
         "group": "decedent",
-        "source": "DE-111 item 3c",
-        "notes": "Street, city, county of residence at death. Map to Address 1 or Address 2 in the mapping UI. City is Lincoln, not Placer County.",
+        "source": "DE-111 3a(2) county estate address when checked, else item 3c",
+        "notes": "If 3a(2) is marked, this is the California home listed for publication. Otherwise street, city, and county of residence at death from 3c.",
         "person": None,
         "custom": True,
     },
@@ -769,7 +769,7 @@ SOURCE_GO_NO_GO = {
             {
                 "key": "decedent_residence",
                 "label": "Decedent last residence",
-                "from": "DE-111 item 3c (street, city, county at death)",
+                "from": "DE-111 3a(2) estate location when checked, else item 3c",
                 "when": "Required only if “Require decedent residence” is on",
             },
             {
