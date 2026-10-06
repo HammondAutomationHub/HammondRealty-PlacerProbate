@@ -54,11 +54,38 @@ function ppmSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function ppmText(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Error) return value.message || "Error";
+  if (typeof value === "object") {
+    if (typeof value.message === "string" && value.message) return value.message;
+    if (typeof value.error === "string" && value.error) return value.error;
+    if (value.error && typeof value.error === "object") return ppmText(value.error);
+    if (typeof value.body === "string" && value.body) return value.body;
+    try {
+      const dumped = JSON.stringify(value);
+      return dumped && dumped !== "{}" ? dumped : "Request failed";
+    } catch (_exc) {
+      return "Request failed";
+    }
+  }
+  return String(value);
+}
+
 async function ppmRunJob(hass, action, extra) {
   const before = await hass.callApi("GET", "placer_probate_monitor/job");
   const beforeRun = before.last_run;
-  await hass.callApi("POST", "placer_probate_monitor/job", { action, ...(extra || {}) });
-  for (let i = 0; i < 120; i += 1) {
+  try {
+    await hass.callApi("POST", "placer_probate_monitor/job", { action, ...(extra || {}) });
+  } catch (err) {
+    const text = ppmText(err);
+    if (!before.running && !/already in progress|409/i.test(text)) {
+      throw new Error(text || "Could not start the job.");
+    }
+  }
+  for (let i = 0; i < 300; i += 1) {
     await ppmSleep(3000);
     const st = await hass.callApi("GET", "placer_probate_monitor/job");
     if (st.running) continue;
@@ -69,11 +96,11 @@ async function ppmRunJob(hass, action, extra) {
       return st;
     }
   }
-  return { last_result: "running", last_error: "Still running. Check the Status sensor." };
+  return { last_result: "running", last_error: "Still running after 15 minutes. Check Status or last_run.log." };
 }
 
 function ppmEsc(value) {
-  return String(value ?? "")
+  return ppmText(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -677,7 +704,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       this._renderList();
       this._renderBody();
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -697,7 +724,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       this._renderBody();
       this._flash("Placer import settings saved.", true);
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -710,11 +737,11 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       this._flash(
         ok
           ? `Placer job finished (${st.last_result || "ok"})${extra}`
-          : (st.last_error || "Placer job failed. Check last_run.log."),
+          : (ppmText(st.last_error) || "Placer job failed. Check last_run.log."),
         ok,
       );
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -731,11 +758,11 @@ class PlacerProbateSourcesPanel extends HTMLElement {
           ? (rec
             ? `Preview loaded ${rec.case_number}. Review pulled values below.`
             : (st.fub_verify_note || "Preview finished. No go-case in this window."))
-          : (st.last_error || "Preview failed."),
+          : (ppmText(st.last_error) || "Preview failed."),
         ok,
       );
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -760,7 +787,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       this._renderBody();
       this._flash("Follow Up Boss mapping saved.", true);
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -784,7 +811,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       this._renderBody();
       this._flash(`Loaded example FUB person ${this._fubPerson.person_id}.`, true);
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 }
@@ -1123,7 +1150,7 @@ class PlacerProbateFubPanel extends HTMLElement {
         this._flash(this._fubFields.length ? "Loaded FUB custom fields." : "No FUB fields loaded.", !!this._fubFields.length);
       }
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -1145,7 +1172,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       this._renderLiveClient();
       this._flash(`Loaded live FUB client ${this._fubPerson.person_id}.`, true);
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -1169,7 +1196,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       this._applySettings(data);
       this._flash("Follow Up Boss connection saved.", true);
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -1183,7 +1210,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       this._applyMapping(data);
       this._flash("FUB field mapping saved.", true);
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -1217,11 +1244,11 @@ class PlacerProbateFubPanel extends HTMLElement {
                 : `Verify posted ${rec.case_number} as FUB person ${rec.fub_person_id}.`)
               : `Verify mapped ${rec.case_number} but Follow Up Boss did not accept it. Record is shown below.`)
             : (st.fub_verify_note || "Verify finished. No go-case was mapped."))
-          : (st.last_error || "Verify failed."),
+          : (ppmText(st.last_error) || "Verify failed."),
         ok && !(rec && rec.fub_error),
       );
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 
@@ -1237,11 +1264,11 @@ class PlacerProbateFubPanel extends HTMLElement {
           ? (rec
             ? `Preview loaded ${rec.case_number} (not posted).`
             : (st.fub_verify_note || "Preview finished. No go-case in this window."))
-          : (st.last_error || "Preview failed."),
+          : (ppmText(st.last_error) || "Preview failed."),
         ok,
       );
     } catch (err) {
-      this._flash(String(err), false);
+      this._flash(ppmText(err), false);
     }
   }
 }
