@@ -707,6 +707,10 @@ PERSON_BUILTIN_TARGETS = {
 }
 
 ADDRESS_SLOT_TARGETS = {
+    "addresses": 0,
+    "address1": 0,
+    "address 1": 0,
+    "person.addresses": 0,
     "address2": 1,
     "address 2": 1,
     "mailingaddress": 1,
@@ -1849,18 +1853,15 @@ def _set_address_slot(
     addr = _fub_address(line, addr_type, city=city, state=state, code=code)
     if not addr:
         return
-    rows = [item for item in (person.get("addresses") or []) if isinstance(item, dict)]
-    if index <= 0:
-        person["addresses"] = [addr] + rows[1:]
-        return
-    if not rows:
-        person["addresses"] = [addr]
-        return
-    if len(rows) > index:
-        rows[index] = addr
-    else:
-        rows.append(addr)
-    person["addresses"] = rows
+    slots = person.setdefault("_addr_slots", {})
+    slots[max(0, int(index))] = addr
+    person["addresses"] = [slots[i] for i in sorted(slots)]
+
+
+def _flush_address_slots(person: dict) -> None:
+    slots = person.pop("_addr_slots", None)
+    if slots:
+        person["addresses"] = [slots[i] for i in sorted(slots)]
 
 
 def case_key(row: dict) -> str:
@@ -2159,7 +2160,7 @@ def build_person(
             if _is_notes_target(target):
                 continue
             if local_key in ADDRESS_COMPONENT_KEYS and (
-                target.lower() in ADDRESS_SLOT_TARGETS or target == "addresses"
+                target.lower() in ADDRESS_SLOT_TARGETS
             ):
                 continue
             city, state, code = _address_parts_from_source(local_key, values)
@@ -2170,17 +2171,6 @@ def build_person(
                     str(value),
                     slot,
                     ADDRESS2_TYPE if slot >= 1 else ADDRESS1_TYPE,
-                    city=city,
-                    state=state,
-                    code=code,
-                )
-                continue
-            if target == "addresses":
-                _set_address_slot(
-                    person,
-                    str(value),
-                    0,
-                    ADDRESS1_TYPE,
                     city=city,
                     state=state,
                     code=code,
@@ -2198,11 +2188,12 @@ def build_person(
     notes = combined_notes(row, mapping)
     if notes:
         person["background"] = notes
+    _flush_address_slots(person)
     return person
 
 
 def person_fingerprint(person: dict) -> str:
-    payload = {k: v for k, v in person.items() if k != "id"}
+    payload = {k: v for k, v in person.items() if k not in {"id", "_addr_slots"}}
     blob = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
@@ -2345,7 +2336,7 @@ def post_event(api_url: str, api_key: str, payload: dict, system: str) -> dict:
 
 
 def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system: str) -> dict | None:
-    body = {k: v for k, v in payload.items() if k != "id"}
+    body = {k: v for k, v in payload.items() if k not in {"id", "_addr_slots"}}
     url = f"{_api_root(api_url)}/people/{int(person_id)}"
     response = requests.put(
         url,
