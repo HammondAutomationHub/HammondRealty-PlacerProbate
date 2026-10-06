@@ -506,6 +506,12 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                 portal = client.enrich(notice.case_number, year=year)
             except requests.RequestException as exc:
                 portal = {"found": False, "error": str(exc), "case_number": notice.case_number}
+        if not isinstance(portal, dict):
+            portal = {
+                "found": False,
+                "case_number": notice.case_number,
+                "error": "empty_portal",
+            }
         if docs_dir and portal.get("found") and portal.get("error") != "ecourt_view_limit":
             case_dir = docs_dir / re.sub(r"[^\w\-]+", "_", notice.case_number)
             safe = re.sub(r"[^\w\-]+", "_", notice.case_number)

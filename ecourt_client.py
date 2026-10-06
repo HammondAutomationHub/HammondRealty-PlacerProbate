@@ -173,9 +173,7 @@ class ECourtClient:
                     "ecourt_view_limit": True,
                     "document_files": [],
                 }
-
-
-def parse_document_table(soup, base: str = PORTAL_HOME) -> list[dict]:
+        return {"found": True, **hit, **detail}
     docs: list[dict] = []
     for table in soup.find_all("table"):
         headers = [th.get_text(" ", strip=True).lower() for th in table.find_all("th")]
