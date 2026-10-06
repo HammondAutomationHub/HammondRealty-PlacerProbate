@@ -47,7 +47,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.53"
+PANEL_JS_VERSION = "1.3.54"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -420,6 +420,30 @@ class JobView(HomeAssistantView):
             return None
         payload = dict(store.get("status") or {})
         payload["running"] = bool(store.get("running"))
+        if payload["running"]:
+            payload["fub_posted"] = None
+            payload["fub_updated"] = None
+            payload["fub_skipped"] = None
+            payload["new_count"] = None
+            payload["notice_count"] = None
+        progress_file = Path(self.hass.config.path(DOMAIN)) / "job_progress.json"
+        try:
+            from .job_progress import read_progress
+        except ImportError:
+            from job_progress import read_progress
+
+        progress = read_progress(progress_file)
+        if progress:
+            payload["progress"] = progress
+            for key in (
+                "new_count",
+                "notice_count",
+                "fub_posted",
+                "fub_updated",
+                "fub_skipped",
+            ):
+                if payload.get("running") and progress.get(key) is not None:
+                    payload[key] = progress.get(key)
         last = _fub_last(self.hass)
         if last.get("verify_record"):
             payload[ATTR_FUB_VERIFY] = last.get("verify_record")

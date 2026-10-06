@@ -31,6 +31,7 @@ from .const import (
     ATTR_LAST_RESULT,
     ATTR_LAST_RUN,
     ATTR_NEW_COUNT,
+    ATTR_NOTICE_COUNT,
     ATTR_PDF,
     EVENT_ECOURT_VIEW_LIMIT,
     CONF_COUNTY,
@@ -157,6 +158,7 @@ def apply_env(
         os.environ["FUB_MAPPING_PATH"] = str(mapping_path)
     if hass is not None:
         data_dir = Path(hass.config.path(DOMAIN))
+        os.environ["PPM_PROGRESS_PATH"] = str(data_dir / "job_progress.json")
         os.environ["FUB_PETITION_DOCS_DIR"] = str(data_dir / "reports" / "docs")
         entry = hass.config_entries.async_entries(DOMAIN)
         if entry:
@@ -278,6 +280,13 @@ async def notify_ecourt_view_limit(hass: HomeAssistant, alert: dict) -> None:
 def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
     data_dir = Path(hass.config.path(DOMAIN))
     apply_env(settings, mapping_path=data_dir / "fub_mapping.yaml", hass=hass)
+    try:
+        from .job_progress import clear_progress, report_progress
+    except ImportError:
+        from job_progress import clear_progress, report_progress
+
+    clear_progress()
+    report_progress("start", "Starting Placer job…")
     reports = data_dir / "reports"
     reports.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -319,10 +328,14 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
     (data_dir / "last_run.log").write_text(log, encoding="utf-8")
     pdfs = sorted(reports.glob("*.pdf"), key=lambda path: path.stat().st_mtime, reverse=True)
     new_count = None
+    notice_count = None
     for line in reversed(log.splitlines()):
         if " new / " in line and "Placer probate notices" in line:
             try:
-                new_count = int(line.split("—")[-1].split("new")[0].strip())
+                tail = line.split("—")[-1]
+                new_count = int(tail.split("new")[0].strip())
+                if "/" in tail:
+                    notice_count = int(tail.split("/")[-1].split("unique")[0].strip())
             except ValueError:
                 pass
             break
@@ -370,6 +383,7 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
         ATTR_LAST_ERROR: None if ok else (log[-2000:] or f"exit {proc.returncode}"),
         ATTR_PDF: pdfs[0].name if pdfs else None,
         ATTR_NEW_COUNT: new_count,
+        ATTR_NOTICE_COUNT: notice_count,
         ATTR_FUB_POSTED: fub_posted,
         ATTR_FUB_UPDATED: fub_updated,
         ATTR_FUB_SKIPPED: fub_skipped,
@@ -399,6 +413,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ATTR_LAST_RESULT: None,
             ATTR_LAST_ERROR: None,
             ATTR_NEW_COUNT: None,
+            ATTR_NOTICE_COUNT: None,
             ATTR_PDF: None,
             ATTR_FUB_POSTED: None,
             ATTR_FUB_UPDATED: None,
@@ -432,6 +447,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ATTR_LAST_RESULT: result.get(ATTR_LAST_RESULT),
                 ATTR_LAST_ERROR: result.get(ATTR_LAST_ERROR),
                 ATTR_NEW_COUNT: result.get(ATTR_NEW_COUNT),
+                ATTR_NOTICE_COUNT: result.get(ATTR_NOTICE_COUNT),
                 ATTR_PDF: result.get(ATTR_PDF),
                 ATTR_FUB_POSTED: result.get(ATTR_FUB_POSTED),
                 ATTR_FUB_UPDATED: result.get(ATTR_FUB_UPDATED),

@@ -17,6 +17,27 @@ try:
 except ImportError:
     from petition_parse import STATE_ALT as _STATE_ALT
 
+
+def _progress_fub(summary: dict, action: str, key: str | None = None) -> None:
+    try:
+        from .job_progress import report_progress
+    except ImportError:
+        from job_progress import report_progress
+
+    posted = int(summary.get("posted") or 0)
+    updated = int(summary.get("updated") or 0)
+    skipped = int(summary.get("skipped") or 0)
+    case = key or ""
+    detail = f"{action} {case}".strip() if action else "importing"
+    report_progress(
+        "fub",
+        f"Follow Up Boss: {detail} · posted {posted}, updated {updated}, skipped {skipped}",
+        fub_posted=posted,
+        fub_updated=updated,
+        fub_skipped=skipped,
+        case_number=key,
+    )
+
 COURT_SEARCH_DEFAULT = "https://webportal.placerco.org/eCourtPublic/?q=node/48"
 CASE_PORTAL_TEMPLATE = "https://webportal.placerco.org/eCourtPublic/?q=node/45/{nid}"
 CASE_PORTAL_RE = re.compile(r"node/45/(\d+)", re.I)
@@ -2722,6 +2743,18 @@ def export_new_leads(
         "verify_note": None,
     }
     if not _env_bool("FUB_ENABLED"):
+        try:
+            from .job_progress import report_progress
+        except ImportError:
+            from job_progress import report_progress
+
+        report_progress(
+            "fub",
+            "Follow Up Boss import is off.",
+            fub_posted=0,
+            fub_updated=0,
+            fub_skipped=0,
+        )
         return summary
     api_key = os.environ.get("FUB_API_KEY", "").strip()
     if not api_key:
@@ -2772,6 +2805,7 @@ def export_new_leads(
             if key and key in cases:
                 cases[key]["fub_skip"] = reason
             print(f"FUB skip {key or '(no case)'}: {reason}")
+            _progress_fub(summary, "skipped", key)
             continue
         person = build_person(
             row,
@@ -2788,11 +2822,13 @@ def export_new_leads(
                     summary["skipped"] += 1
                     summary["skips"].append({"case": key, "reason": "verify_only_limit"})
                     print(f"FUB skip {key}: verify_only_limit")
+                    _progress_fub(summary, "verify-only skip", key)
                     continue
                 if not verify and record.get("fub_fingerprint") == fingerprint:
                     summary["skipped"] += 1
                     summary["skips"].append({"case": key, "reason": "unchanged"})
                     print(f"FUB skip {key}: unchanged person_id={existing_id}")
+                    _progress_fub(summary, "unchanged", key)
                     continue
                 record_view = verify_record_payload(
                     row, person, existing_id, settings, mapping
@@ -2846,6 +2882,7 @@ def export_new_leads(
                     record_view["fub_error"] = None
                     summary["verify_record"] = record_view
                     print(f"FUB updated {key} person_id={pid}")
+                    _progress_fub(summary, "updated", key)
                     if verify:
                         state["last_fub_verify_case"] = key
                         try:
@@ -2920,6 +2957,7 @@ def export_new_leads(
                 summary["skipped"] += 1
                 summary["skips"].append({"case": key, "reason": "verify_only_limit"})
                 print(f"FUB skip {key}: verify_only_limit")
+                _progress_fub(summary, "verify-only skip", key)
                 continue
             record_view = verify_record_payload(row, person, existing_id, settings, mapping)
             record_view["view_only"] = False
@@ -3007,6 +3045,7 @@ def export_new_leads(
             record_view["fub_error"] = None
             summary["verify_record"] = record_view
             print(f"FUB posted {key} person_id={pid}")
+            _progress_fub(summary, "posted", key)
             if verify:
                 state["last_fub_verify_case"] = key
                 break

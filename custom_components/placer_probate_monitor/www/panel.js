@@ -29,10 +29,11 @@ const PPM_CSS = `
   .ppm-wrap button.ghost.active, .ppm-tabs button.active { background: #b0893e; border-color: #b0893e; color: #fff; }
   .ppm-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .ppm-note { color: #6b645b; font-size: 12px; margin-top: 8px; }
-  .ppm-banner { padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; display: none; }
+  .ppm-banner { padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; display: none; white-space: pre-wrap; }
   .ppm-banner.show { display: block; }
   .ppm-banner.ok { background: #e7f4ec; color: #2d6a4f; }
   .ppm-banner.err { background: #f8e8e8; color: #8b2e2e; }
+  .ppm-banner.wait { background: #f3e3c3; color: #6b4f1a; }
   .ppm-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .ppm-wrap th, .ppm-wrap td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #ddd6cc; vertical-align: top; }
   .ppm-toggle { display: flex; gap: 8px; margin: 8px 0; align-items: flex-start; }
@@ -76,7 +77,7 @@ function ppmText(value) {
   return String(value);
 }
 
-async function ppmRunJob(hass, action, extra) {
+async function ppmRunJob(hass, action, extra, onTick) {
   const before = await hass.callApi("GET", "placer_probate_monitor/job");
   const beforeRun = before.last_run;
   try {
@@ -87,9 +88,10 @@ async function ppmRunJob(hass, action, extra) {
       throw new Error(text || "Could not start the job.");
     }
   }
-  for (let i = 0; i < 300; i += 1) {
+  for (let i = 0; i < 1200; i += 1) {
     await ppmSleep(3000);
     const st = await hass.callApi("GET", "placer_probate_monitor/job");
+    if (typeof onTick === "function") onTick(st);
     if (st.running) continue;
     if (st.last_run && st.last_run !== beforeRun) {
       return st;
@@ -98,7 +100,46 @@ async function ppmRunJob(hass, action, extra) {
       return st;
     }
   }
-  return { last_result: "running", last_error: "Still running after 15 minutes. Check Status or last_run.log." };
+  const last = await hass.callApi("GET", "placer_probate_monitor/job").catch(() => ({}));
+  const live = ppmJobLiveMessage(last);
+  return {
+    ...last,
+    last_result: "running",
+    last_error: live
+      ? `Still running: ${live}`
+      : "Still running after 60 minutes. The job keeps going in Home Assistant. Check Status or last_run.log.",
+  };
+}
+
+function ppmBannerKind(ok) {
+  if (ok === "wait" || ok === "running") return "wait";
+  return ok ? "ok" : "err";
+}
+
+function ppmJobLiveMessage(st) {
+  const p = (st && st.progress) || {};
+  if (p.message) return p.message;
+  if (st && st.running) return "Placer job is running…";
+  return "";
+}
+
+function ppmJobDoneMessage(st) {
+  if (!st) return "Job finished.";
+  if (st.last_result === "running") {
+    return ppmText(st.last_error) || "Still running. Check Status or last_run.log.";
+  }
+  const bits = [`Finished (${st.last_result || "ok"})`];
+  const notices = st.notice_count != null ? st.notice_count : (st.progress && st.progress.notice_count);
+  const neu = st.new_count != null ? st.new_count : (st.progress && st.progress.new_count);
+  if (notices != null) bits.push(`${notices} unique CNPA notices`);
+  if (neu != null) bits.push(`${neu} new`);
+  if (st.fub_posted != null || st.fub_updated != null) {
+    bits.push(
+      `FUB posted ${st.fub_posted ?? 0}, updated ${st.fub_updated ?? 0}, skipped ${st.fub_skipped ?? 0}`,
+    );
+  }
+  if (st.fub_error) bits.push(`FUB: ${ppmText(st.fub_error)}`);
+  return bits.join(" · ");
 }
 
 function ppmEsc(value) {
@@ -535,7 +576,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
   _flash(msg, ok) {
     const el = this._qs("#flash");
     el.textContent = msg;
-    el.className = "ppm-banner show " + (ok ? "ok" : "err");
+    el.className = "ppm-banner show " + ppmBannerKind(ok);
   }
 
   _renderShell() {
@@ -731,26 +772,24 @@ class PlacerProbateSourcesPanel extends HTMLElement {
   }
 
   async _run() {
-    this._flash("Placer job started. CNPA and eCourt can take several minutes…", true);
+    this._flash("Starting Placer job…", "wait");
     try {
-      const st = await ppmRunJob(this._hass, "run");
+      const st = await ppmRunJob(this._hass, "run", {}, (live) => {
+        this._flash(ppmJobLiveMessage(live) || "Placer job is running…", "wait");
+      });
       const ok = st.last_result !== "failed" && st.last_result !== "running";
-      const extra = st.new_count != null ? ` · ${st.new_count} new cases` : "";
-      this._flash(
-        ok
-          ? `Placer job finished (${st.last_result || "ok"})${extra}`
-          : (ppmText(st.last_error) || "Placer job failed. Check last_run.log."),
-        ok,
-      );
+      this._flash(ok ? ppmJobDoneMessage(st) : (ppmText(st.last_error) || "Placer job failed. Check last_run.log."), ok);
     } catch (err) {
       this._flash(ppmText(err), false);
     }
   }
 
   async _preview() {
-    this._flash("Preview started… pulling one live Placer go-case (view only).", true);
+    this._flash("Preview started… pulling one live Placer go-case (view only).", "wait");
     try {
-      const st = await ppmRunJob(this._hass, "preview");
+      const st = await ppmRunJob(this._hass, "preview", {}, (live) => {
+        this._flash(ppmJobLiveMessage(live) || "Preview is running…", "wait");
+      });
       this._jobSt = st;
       ppmRenderPreview(this._qs("#source-preview"), st);
       const ok = st.last_result !== "failed" && st.last_result !== "running";
@@ -852,7 +891,7 @@ class PlacerProbateFubPanel extends HTMLElement {
   _flash(msg, ok) {
     const el = this._qs("#flash");
     el.textContent = msg;
-    el.className = "ppm-banner show " + (ok ? "ok" : "err");
+    el.className = "ppm-banner show " + ppmBannerKind(ok);
   }
 
   _renderShell() {
@@ -1227,12 +1266,14 @@ class PlacerProbateFubPanel extends HTMLElement {
       useExisting
         ? `Verify started… updating FUB person ${personId}.`
         : "Verify started… scraping Placer, then importing one go-case.",
-      true,
+      "wait",
     );
     try {
       const st = await ppmRunJob(this._hass, "verify", {
         fub_verify_existing: useExisting,
         fub_verify_person_id: personId,
+      }, (live) => {
+        this._flash(ppmJobLiveMessage(live) || "Verify is running…", "wait");
       });
       const ok = st.last_result !== "failed" && st.last_result !== "running";
       this._renderVerify(st);
@@ -1255,9 +1296,11 @@ class PlacerProbateFubPanel extends HTMLElement {
   }
 
   async _preview() {
-    this._flash("Preview started… retrieving one live go-case (view only).", true);
+    this._flash("Preview started… retrieving one live go-case (view only).", "wait");
     try {
-      const st = await ppmRunJob(this._hass, "preview");
+      const st = await ppmRunJob(this._hass, "preview", {}, (live) => {
+        this._flash(ppmJobLiveMessage(live) || "Preview is running…", "wait");
+      });
       const ok = st.last_result !== "failed" && st.last_result !== "running";
       this._renderVerify(st);
       const rec = ppmPreviewRecord(st);
@@ -1307,7 +1350,7 @@ class PlacerProbateListingsPanel extends HTMLElement {
   _flash(msg, ok) {
     const el = this._qs("#flash");
     el.textContent = msg;
-    el.className = "ppm-banner show " + (ok ? "ok" : "err");
+    el.className = "ppm-banner show " + ppmBannerKind(ok);
   }
 
   _renderShell() {

@@ -30,6 +30,15 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 
+
+def _progress(step: str, message: str, **extra) -> None:
+    try:
+        from .job_progress import report_progress
+    except ImportError:
+        from job_progress import report_progress
+
+    report_progress(step, message, **extra)
+
 def get_tz():
     return ZoneInfo(os.environ.get("PROBATE_TZ", "America/Los_Angeles"))
 BASE_SEARCH = "https://www.capublicnotice.com/search/query"
@@ -276,6 +285,12 @@ def paginate(start: date, end: date, max_pages: int | None = None) -> tuple[list
     for page in range(max_pages):
         url = search_url(start, end, page=page)
         urls.append(url)
+        _progress(
+            "cnpa",
+            f"Searching CNPA notices (page {page + 1} of up to {max_pages})…",
+            cnpa_page=page + 1,
+            cnpa_max_pages=max_pages,
+        )
         html_text = fetch_page(url)
         batch = parse_html(html_text)
         collected.extend(batch)
@@ -582,7 +597,15 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
 
     client = ECourtClient(pause=float(os.environ.get("ECOURT_PAUSE", "1.2")))
     rows = []
-    for notice in notices:
+    total = len(notices)
+    for index, notice in enumerate(notices, 1):
+        _progress(
+            "ecourt",
+            f"eCourt {index}/{total}: {notice.case_number or 'no case number'}",
+            ecourt_index=index,
+            ecourt_total=total,
+            case_number=notice.case_number,
+        )
         portal = {"found": False}
         if notice.case_number:
             try:
@@ -833,6 +856,15 @@ def main() -> int:
     state = load_state(state_path)
     run_date = today_local().isoformat()
     unique = mark_new(unique, state, run_date)
+    os.environ.setdefault("PPM_PROGRESS_PATH", str(state_path.parent / "job_progress.json"))
+    new_count = sum(1 for n in unique if n.first_seen)
+    _progress(
+        "cnpa_done",
+        f"CNPA found {len(unique)} unique notices ({new_count} new in this window).",
+        notices=len(unique),
+        notice_count=len(unique),
+        new_count=new_count,
+    )
 
     text_body = build_text(unique, start, end, urls)
     html_body = build_html(unique, start, end, urls)
@@ -846,8 +878,15 @@ def main() -> int:
     rows = [asdict(n) for n in unique]
     if not args.skip_portal:
         print("Looking up each case on Placer eCourt Public…")
+        _progress(
+            "ecourt",
+            f"Looking up {len(unique)} cases on Placer eCourt Public…",
+            ecourt_total=len(unique),
+        )
         rows = enrich_notices(unique, year=start.year, docs_dir=out_dir / "docs")
         (out_dir / f"dossiers-{stamp}.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    else:
+        _progress("ecourt_skip", "Skipping eCourt lookups.")
     write_ecourt_alerts(state_path.parent / "ecourt_alerts.json", rows)
     merge_listings(state_path.parent / "listings.json", rows, run_date)
     if not args.no_pdf:
@@ -856,6 +895,7 @@ def main() -> int:
         except ImportError:
             from pdf_report import build_pdf
 
+        _progress("pdf", "Building the daily PDF…")
         build_pdf(rows, pdf_path, today_local(), start, end)
         print(f"Wrote PDF {pdf_path}")
     else:
@@ -874,6 +914,7 @@ def main() -> int:
         except ImportError:
             from fub_client import preview_one_record
 
+        _progress("preview", "Previewing one live extract (not posting to Follow Up Boss)…")
         preview = preview_one_record(
             rows, mapping_path=state_path.parent / "fub_mapping.yaml"
         )
@@ -893,6 +934,13 @@ def main() -> int:
             encoding="utf-8",
         )
         print("\nPreview only: Follow Up Boss not updated, seen-cases not updated.")
+        _progress(
+            "done",
+            "Preview finished (Follow Up Boss not updated).",
+            fub_posted=0,
+            fub_updated=0,
+            fub_skipped=len(preview.get("skips") or []),
+        )
         return 0
 
     if args.dry_run:
@@ -904,8 +952,19 @@ def main() -> int:
     except ImportError:
         from fub_client import export_new_leads
 
+    _progress("fub", "Importing go-cases into Follow Up Boss…")
     fub_summary = export_new_leads(
         rows, state, mapping_path=state_path.parent / "fub_mapping.yaml"
+    )
+    posted = int(fub_summary.get("posted") or 0)
+    updated = int(fub_summary.get("updated") or 0)
+    skipped = int(fub_summary.get("skipped") or 0)
+    _progress(
+        "fub_done",
+        f"Follow Up Boss: posted {posted}, updated {updated}, skipped {skipped}.",
+        fub_posted=posted,
+        fub_updated=updated,
+        fub_skipped=skipped,
     )
     save_state(state_path, state)
     (state_path.parent / "fub_last.json").write_text(
@@ -927,9 +986,24 @@ def main() -> int:
     )
     if args.no_email:
         print(f"\nSaved state to {state_path}. Email skipped.")
+        _progress(
+            "done",
+            f"Job finished. FUB posted {posted}, updated {updated}, skipped {skipped}.",
+            fub_posted=posted,
+            fub_updated=updated,
+            fub_skipped=skipped,
+        )
         return 0
+    _progress("email", "Sending the daily email…")
     send_email(subject, text_body, html_body, pdf_path=pdf_path)
     print("\nEmail sent.")
+    _progress(
+        "done",
+        f"Job finished. FUB posted {posted}, updated {updated}, skipped {skipped}.",
+        fub_posted=posted,
+        fub_updated=updated,
+        fub_skipped=skipped,
+    )
     return 0
 
 
