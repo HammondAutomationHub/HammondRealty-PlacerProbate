@@ -797,6 +797,11 @@ def parse_de111_pdf(path: Path, petitioner: str = "") -> dict:
 
 def looks_like_probate_petition(name: str) -> bool:
     low = (name or "").lower()
+    compact = low.replace(" ", "").replace("-", "")
+    if "de111" in compact:
+        return True
+    if "petition for probate" in low:
+        return True
     if not low.startswith("petition"):
         return False
     return any(

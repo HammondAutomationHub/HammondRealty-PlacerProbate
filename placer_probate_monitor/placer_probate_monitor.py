@@ -512,66 +512,74 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                 "case_number": notice.case_number,
                 "error": "empty_portal",
             }
-        if docs_dir and portal.get("found") and portal.get("error") != "ecourt_view_limit":
+        if docs_dir and notice.case_number:
             case_dir = docs_dir / re.sub(r"[^\w\-]+", "_", notice.case_number)
             safe = re.sub(r"[^\w\-]+", "_", notice.case_number)
+            skip_download = portal.get("error") == "ecourt_view_limit"
             petition_item = None
             duties_item = None
-            for item in portal.get("document_files") or []:
-                if not item.get("available"):
-                    continue
-                name = item.get("name") or ""
-                if looks_like_probate_petition(name) and petition_item is None:
-                    petition_item = item
-                if looks_like_duties_form(name) and duties_item is None:
-                    duties_item = item
+            if portal.get("found") and not skip_download:
+                for item in portal.get("document_files") or []:
+                    if not item.get("available"):
+                        continue
+                    name = item.get("name") or ""
+                    if looks_like_probate_petition(name) and petition_item is None:
+                        petition_item = item
+                    if looks_like_duties_form(name) and duties_item is None:
+                        duties_item = item
             de111: dict = {}
             de147: dict = {}
-            if petition_item:
-                dest = case_dir / f"{safe}_DE-111.pdf"
+            dest111 = case_dir / f"{safe}_DE-111.pdf"
+            if petition_item and not skip_download:
                 try:
                     time.sleep(client.pause)
-                    client.download(petition_item["url"], dest)
-                    if dest.read_bytes()[:4] == b"%PDF":
-                        de111 = parse_de111_pdf(dest, petitioner=notice.petitioner)
-                        if de111.get("petitioner_name"):
-                            portal["petitioner"] = de111["petitioner_name"]
-                        if de111.get("decedent_name") and not portal.get("decedent"):
-                            portal["decedent"] = de111["decedent_name"]
-                        portal.update(de111)
-                        portal["petition_pdf"] = str(dest)
-                        portal["petition_url"] = petition_item["url"]
-                        print(
-                            f"DE-111 {notice.case_number}: "
-                            f"mailing={de111.get('mailing_address') or '(empty)'} "
-                            f"phone={de111.get('petitioner_phone') or '(empty)'} "
-                            f"residence={de111.get('decedent_residence') or '(empty)'}",
-                            flush=True,
-                        )
-                    else:
-                        portal["petition_parse_error"] = "download was not a PDF"
+                    client.download(petition_item["url"], dest111)
+                    portal["petition_url"] = petition_item["url"]
                 except Exception as exc:  # noqa: BLE001
                     portal["petition_parse_error"] = str(exc)
-            if duties_item:
-                dest = case_dir / f"{safe}_DE-147.pdf"
+            if dest111.is_file() and dest111.stat().st_size > 4 and dest111.read_bytes()[:4] == b"%PDF":
+                try:
+                    de111 = parse_de111_pdf(dest111, petitioner=notice.petitioner)
+                    if de111.get("petitioner_name"):
+                        portal["petitioner"] = de111["petitioner_name"]
+                    if de111.get("decedent_name") and not portal.get("decedent"):
+                        portal["decedent"] = de111["decedent_name"]
+                    portal.update(de111)
+                    portal["petition_pdf"] = str(dest111)
+                    print(
+                        f"DE-111 {notice.case_number}: "
+                        f"mailing={de111.get('mailing_address') or '(empty)'} "
+                        f"phone={de111.get('petitioner_phone') or '(empty)'} "
+                        f"residence={de111.get('decedent_residence') or '(empty)'}",
+                        flush=True,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    portal["petition_parse_error"] = str(exc)
+            elif petition_item and dest111.is_file():
+                portal["petition_parse_error"] = "download was not a PDF"
+            dest147 = case_dir / f"{safe}_DE-147.pdf"
+            if duties_item and not skip_download:
                 try:
                     time.sleep(client.pause)
-                    client.download(duties_item["url"], dest)
-                    if dest.read_bytes()[:4] == b"%PDF":
-                        de147 = parse_de147_pdf(dest)
-                        portal["duties_pdf"] = str(dest)
-                        portal["duties_url"] = duties_item["url"]
-                        print(
-                            f"DE-147 {notice.case_number}: "
-                            f"mailing={de147.get('mailing_address') or '(empty)'} "
-                            f"phone={de147.get('petitioner_phone') or '(empty)'} "
-                            f"email={de147.get('petitioner_email') or '(empty)'}",
-                            flush=True,
-                        )
-                    else:
-                        portal["duties_parse_error"] = "download was not a PDF"
+                    client.download(duties_item["url"], dest147)
+                    portal["duties_url"] = duties_item["url"]
                 except Exception as exc:  # noqa: BLE001
                     portal["duties_parse_error"] = str(exc)
+            if dest147.is_file() and dest147.stat().st_size > 4 and dest147.read_bytes()[:4] == b"%PDF":
+                try:
+                    de147 = parse_de147_pdf(dest147)
+                    portal["duties_pdf"] = str(dest147)
+                    print(
+                        f"DE-147 {notice.case_number}: "
+                        f"mailing={de147.get('mailing_address') or '(empty)'} "
+                        f"phone={de147.get('petitioner_phone') or '(empty)'} "
+                        f"email={de147.get('petitioner_email') or '(empty)'}",
+                        flush=True,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    portal["duties_parse_error"] = str(exc)
+            elif duties_item and dest147.is_file():
+                portal["duties_parse_error"] = "download was not a PDF"
             portal["contact_de111"] = contact_fields(de111)
             portal["contact_de147"] = contact_fields(de147)
             contact = merge_petitioner_contact(de111, de147)

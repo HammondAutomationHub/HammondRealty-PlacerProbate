@@ -180,7 +180,8 @@ def parse_document_table(soup, base: str = PORTAL_HOME) -> list[dict]:
     docs: list[dict] = []
     for table in soup.find_all("table"):
         headers = [th.get_text(" ", strip=True).lower() for th in table.find_all("th")]
-        if headers[:3] != ["name", "date", "download"]:
+        joined = " ".join(headers)
+        if "name" not in headers or "download" not in joined:
             continue
         for tr in table.find_all("tr")[1:]:
             tds = tr.find_all("td")
