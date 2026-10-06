@@ -415,21 +415,28 @@ function ppmRenderPreview(el, st) {
       ? `${attach.file || "DE-111"} (Notes link${attach.uri ? `: ${attach.uri}` : ""})`
       : (attach.file ? `${attach.file} (${attach.reason || "attached"})` : (attach.reason || "attached")))
     : (attach.reason || (posted ? "not attached" : ""));
-  const heading = viewOnly
+  const noGo = rec.gate === "no-go";
+  const heading = noGo
+    ? "Last live extract (no-go)"
+    : (viewOnly
     ? "Last live extract (view only)"
-    : (posted ? (updated ? "Last verify record (updated)" : "Last verify record (posted)") : "Last verify record");
-  const blurb = viewOnly
+    : (posted ? (updated ? "Last verify record (updated)" : "Last verify record (posted)") : "Last verify record"));
+  const blurb = noGo
+    ? `This case was skipped (${ppmEsc(rec.gate_reason || "no-go")}). Follow Up Boss was not updated.`
+    : (viewOnly
     ? "This is one live go-case from Placer. Follow Up Boss was not updated."
     : (posted
       ? (updated
         ? "This existing Follow Up Boss person was updated with the current mapping, including the DE-111 on Files. Confirm Address 1/2, notes, name, and Files in FUB."
         : "This go-case was posted to Follow Up Boss, including the DE-111 on Files. Confirm it in FUB, then turn off Verify only.")
-      : "This is the go-case Verify tried to upload. Follow Up Boss did not accept it.");
-  const pill = viewOnly
+      : "This is the go-case Verify tried to upload. Follow Up Boss did not accept it."));
+  const pill = noGo
+    ? '<span class="ppm-pill off">NO-GO</span>'
+    : (viewOnly
     ? '<span class="ppm-pill wait">VIEW ONLY</span>'
     : (posted
       ? (updated ? '<span class="ppm-pill live">GO · UPDATED</span>' : '<span class="ppm-pill live">GO · POSTED</span>')
-      : '<span class="ppm-pill off">GO · NOT POSTED</span>');
+      : '<span class="ppm-pill off">GO · NOT POSTED</span>'));
   el.innerHTML = `
     <h2>${heading}</h2>
     <p class="ppm-note">${blurb}</p>

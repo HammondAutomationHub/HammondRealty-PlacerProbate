@@ -1890,6 +1890,7 @@ def preview_one_record(
     strict = _env_bool("FUB_STRICT_PROPERTY")
     skips: list[dict] = []
     blank_state: dict = {"cases": {}}
+    first_skip_record = None
     for row in rows:
         key = case_key(row)
         reason = gate_reason(
@@ -1901,7 +1902,29 @@ def preview_one_record(
             allow_seen_without_fub=True,
         )
         if reason:
+            print(
+                f"FUB skip {key}: {reason} "
+                f"mailing={row.get('mailing_address') or '(empty)'} "
+                f"residence={row.get('decedent_residence') or '(empty)'} "
+                f"pdf={Path(str(row.get('petition_pdf') or '')).name or 'none'}",
+                flush=True,
+            )
             skips.append({"case": key, "reason": reason})
+            if first_skip_record is None:
+                person = build_person(
+                    row,
+                    mapping,
+                    settings,
+                    person_id=None,
+                    allowed_custom=fub_custom_field_names(),
+                )
+                record = verify_record_payload(row, person, None, settings, mapping)
+                record["view_only"] = True
+                record["posted"] = False
+                record["gate"] = "no-go"
+                record["gate_reason"] = reason
+                record["skips"] = skips
+                first_skip_record = record
             continue
         person = build_person(
             row,
@@ -1931,7 +1954,7 @@ def preview_one_record(
     print(f"FUB preview: {note}", flush=True)
     return {
         "ok": False,
-        "verify_record": None,
+        "verify_record": first_skip_record,
         "verify_note": note,
         "skips": skips,
     }

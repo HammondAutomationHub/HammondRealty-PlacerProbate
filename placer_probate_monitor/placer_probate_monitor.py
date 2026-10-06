@@ -502,8 +502,15 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                     time.sleep(client.pause)
                     client.download(item["url"], dest)
                     if dest.read_bytes()[:4] == b"%PDF":
-                        portal.update(parse_de111_pdf(dest))
+                        parsed = parse_de111_pdf(dest, petitioner=notice.petitioner)
+                        portal.update(parsed)
                         portal["petition_pdf"] = str(dest)
+                        print(
+                            f"DE-111 {notice.case_number}: "
+                            f"mailing={parsed.get('mailing_address') or '(empty)'} "
+                            f"residence={parsed.get('decedent_residence') or '(empty)'}",
+                            flush=True,
+                        )
                     else:
                         portal["petition_parse_error"] = "download was not a PDF"
                 except Exception as exc:  # noqa: BLE001

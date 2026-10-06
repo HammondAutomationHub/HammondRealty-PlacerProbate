@@ -194,18 +194,30 @@ def extract_pdf_text(path: Path) -> str:
     parts = []
     for page in reader.pages:
         parts.append(page.extract_text() or "")
+    page_text = "\n".join(parts)
+    field_lines: list[str] = []
     try:
         fields = reader.get_fields() or {}
     except Exception:  # noqa: BLE001
         fields = {}
-    for field in fields.values():
-        if not isinstance(field, dict):
+    for key, field in fields.items():
+        value = _field_value(field) if isinstance(field, dict) else ""
+        if not value:
             continue
-        value = field.get("/V")
-        if value in (None, ""):
-            continue
-        parts.append(str(value))
-    return "\n".join(parts)
+        field_lines.append(f"{key}: {value}")
+    if not field_lines:
+        return page_text
+    blob = "\n".join(field_lines)
+    marker = re.search(r"8\.\s*Name and relationship to decedent", page_text, re.I)
+    if marker:
+        at = marker.end()
+        return page_text[:at] + "\n" + blob + "\n" + page_text[at:]
+    return (
+        page_text
+        + "\n8. Name and relationship to decedent Age Address\n"
+        + blob
+        + "\nI declare under penalty\n"
+    )
 
 
 def _address_from_groups(street: str, city: str, state: str, zipp: str, *, prefix: str) -> dict:
@@ -374,10 +386,19 @@ def _item8_petitioner_address(text: str, petitioner_name: str = "") -> dict:
         search_from = hit.end()
         if not parsed:
             continue
-        score = len(tokens & window_tokens) if tokens else 0
-        if tokens and score == 0:
-            continue
-        found.append((score, parsed))
+        overlap = tokens & window_tokens if tokens else set()
+        if tokens:
+            first = (petitioner_name.split() or [""])[0].lower()
+            if first and len(first) > 2 and first not in window_tokens:
+                search_from = hit.end()
+                continue
+            if len(tokens) >= 2 and len(overlap) < 2:
+                search_from = hit.end()
+                continue
+            if not overlap:
+                search_from = hit.end()
+                continue
+        found.append((len(overlap), parsed))
     if found:
         found.sort(key=lambda item: item[0], reverse=True)
         return found[0][1]
@@ -393,7 +414,7 @@ def _item3h_address(text: str) -> dict:
     return _first_parsed_address(match.group("body")[:500], prefix="mailing")
 
 
-def parse_de111_text(text: str) -> dict:
+def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
     text = _clean(text)
     out: dict = {}
     died = DIED_RE.search(text)
@@ -425,7 +446,7 @@ def parse_de111_text(text: str) -> dict:
         if marker:
             out.update(_parse_address(text[marker.end() : marker.end() + 500], prefix="decedent"))
     body = _item1_body(text)
-    names = _item2_names(text)
+    names = _item2_names(text) or petitioner_name
     mailing = _item8_petitioner_address(text, names)
     if not mailing:
         mailing = _item3h_address(text)
@@ -545,10 +566,101 @@ def _residence_from_form_fields(path: Path) -> dict:
     return _parse_address("\n".join(blobs), prefix="decedent")
 
 
-def parse_de111_pdf(path: Path) -> dict:
-    out = parse_de111_text(extract_pdf_text(path))
+def _pdf_field_pairs(path: Path) -> list[tuple[str, str]]:
+    from pypdf import PdfReader
+
+    try:
+        fields = PdfReader(str(path)).get_fields() or {}
+    except Exception:  # noqa: BLE001
+        return []
+    rows: list[tuple[str, str]] = []
+    for key, field in fields.items():
+        value = _field_value(field)
+        if value:
+            rows.append((str(key or ""), value))
+    return rows
+
+
+def _caption_street(text: str) -> str:
+    cap = CAPTION_ADDR_RE.search(text or "")
+    if not cap:
+        return ""
+    return re.sub(r"\s+", " ", cap.group("street")).strip().lower()
+
+
+def _is_skip_address_field(name: str) -> bool:
+    low = (name or "").lower()
+    return any(
+        bit in low
+        for bit in (
+            "atty",
+            "attorney",
+            "counsel",
+            "firm",
+            "lawyer",
+            "court",
+            "branch",
+            "forcourtuse",
+        )
+    )
+
+
+def _pick_mailing_from_fields(
+    path: Path,
+    petitioner_name: str,
+    page_text: str,
+) -> dict:
+    pairs = _pdf_field_pairs(path)
+    if not pairs:
+        return {}
+    tokens = _name_tokens(petitioner_name)
+    first = (petitioner_name.split() or [""])[0].lower()
+    attorney = _caption_street(page_text)
+    best: tuple[int, dict] | None = None
+    for idx, (name, value) in enumerate(pairs):
+        if _is_skip_address_field(name):
+            continue
+        chunk = value
+        if idx + 1 < len(pairs):
+            chunk = f"{value}, {pairs[idx + 1][1]}"
+        parsed = _first_parsed_address(value, prefix="mailing") or _first_parsed_address(
+            chunk, prefix="mailing"
+        )
+        if not parsed:
+            continue
+        line = str(parsed.get("mailing_address") or "").lower()
+        if attorney and attorney in line:
+            continue
+        if "101 maple" in line or "justice center" in line:
+            continue
+        neighbor = " ".join(
+            pairs[j][1] for j in range(max(0, idx - 3), min(len(pairs), idx + 4))
+        )
+        window = f"{name} {neighbor}"
+        window_tokens = _name_tokens(window)
+        overlap = tokens & window_tokens if tokens else set()
+        if first and len(first) > 2 and first not in window_tokens:
+            continue
+        score = len(overlap)
+        low_name = name.lower()
+        if any(bit in low_name for bit in ("item8", "att8", "heir", "interested")):
+            score += 3
+        if best is None or score > best[0]:
+            best = (score, parsed)
+    if not best:
+        return {}
+    if tokens and best[0] < 1:
+        return {}
+    return best[1]
+
+
+def parse_de111_pdf(path: Path, petitioner: str = "") -> dict:
+    text = extract_pdf_text(path)
+    out = parse_de111_text(text, petitioner_name=petitioner)
     if not out.get("mailing_address"):
         out.update(_mailing_from_form_fields(path))
+    if not out.get("mailing_address"):
+        out.update(_pick_mailing_from_fields(path, petitioner or _item2_names(text), text))
     if not out.get("decedent_residence"):
         out.update(_residence_from_form_fields(path))
     return out
