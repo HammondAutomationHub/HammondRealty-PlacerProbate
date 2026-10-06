@@ -59,6 +59,39 @@ def _yes_no(val) -> str:
     return "—"
 
 
+# ReportLab cannot split a table *cell*. One counsel/documents dump as a
+# single Paragraph will overflow the page (~713pt frame) and crash build_pdf.
+_MAX_CELL_CHARS = 420
+_MAX_FIELD_LINES = 28
+
+
+def _clip_cell_text(text: str) -> str:
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(text) <= _MAX_CELL_CHARS:
+        return text
+    return text[: _MAX_CELL_CHARS - 1].rstrip() + "…"
+
+
+def _fact_table_data(pairs: list[tuple[str, object]], styles: dict) -> list[list]:
+    """One table row per line so long counsel/docket lists can page-split."""
+    data: list[list] = []
+    for key, val in pairs:
+        items = val if isinstance(val, list) else [val]
+        lines = [_clip_cell_text(x) for x in items if x not in (None, "")]
+        if not lines:
+            lines = ["—"]
+        extra = len(lines) - _MAX_FIELD_LINES
+        if extra > 0:
+            lines = lines[:_MAX_FIELD_LINES] + [f"… +{extra} more"]
+        for i, line in enumerate(lines):
+            label = key if i == 0 else ""
+            data.append([
+                Paragraph(_esc(label), styles["label"]),
+                Paragraph(_esc(line), styles["td"]),
+            ])
+    return data
+
+
 def _petition_fact_pairs(row: dict) -> list[tuple[str, object]]:
     return [
         ("Last residence", row.get("decedent_residence") or "—"),
@@ -453,6 +486,8 @@ def _counsel_for_display(row: dict) -> list[str]:
         notice = re.sub(r"\bCa\b", "CA", notice)
         notice = re.sub(r"\bLlp\b", "LLP", notice)
         notice = re.sub(r"\bP\.C\.\b", "P.C.", notice)
+        if len(notice) > 500:
+            notice = notice[:497].rstrip() + "…"
         lines.append(f"Notice: {notice}")
     return lines or ["—"]
 
@@ -824,11 +859,7 @@ def build_pdf(rows: list[dict], out_path: Path, run_date: date, start: date, end
             ("Publication", _publication_line(r)),
             ("Fees paid", r.get("fees") or ["—"]),
         ]
-        data = [
-            [Paragraph(k, s["label"]), Paragraph(_esc(v), s["td"])]
-            for k, v in pairs
-        ]
-        body = Table(data, colWidths=[1.45 * inch, 5.95 * inch])
+        body = Table(_fact_table_data(pairs, s), colWidths=[1.45 * inch, 5.95 * inch])
         body.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("LEFTPADDING", (0, 0), (-1, -1), 2),
@@ -846,11 +877,11 @@ def build_pdf(rows: list[dict], out_path: Path, run_date: date, start: date, end
             Spacer(1, 3),
             Paragraph("<br/>".join(links), s["small"]),
             Spacer(1, 6),
-            body,
-            Spacer(1, 4),
-            Paragraph(_flags(r, run_date), s["flag"]),
-            Spacer(1, 12),
         ]))
+        story.append(body)
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(_flags(r, run_date), s["flag"]))
+        story.append(Spacer(1, 12))
 
     story.append(Paragraph(
         "Sources: California Public Notices (CNPA) search for NOTICE OF PETITION TO ADMINISTER ESTATE, "
