@@ -524,6 +524,7 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                         parsed = parse_de111_pdf(dest, petitioner=notice.petitioner)
                         portal.update(parsed)
                         portal["petition_pdf"] = str(dest)
+                        portal["petition_url"] = petition_item["url"]
                         print(
                             f"DE-111 {notice.case_number}: "
                             f"mailing={parsed.get('mailing_address') or '(empty)'} "
@@ -545,6 +546,7 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                             if value not in (None, "", [], {}) and not portal.get(key):
                                 portal[key] = value
                         portal["duties_pdf"] = str(dest)
+                        portal["duties_url"] = duties_item["url"]
                         print(
                             f"DE-147 {notice.case_number}: "
                             f"mailing={extra.get('mailing_address') or portal.get('mailing_address') or '(empty)'} "

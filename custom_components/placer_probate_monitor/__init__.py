@@ -167,8 +167,12 @@ def apply_env(
             os.environ["FUB_PETITION_BASE_URL"] = (
                 f"{base}/api/placer_probate_monitor/de111"
             )
+            os.environ["FUB_DUTIES_BASE_URL"] = (
+                f"{base}/api/placer_probate_monitor/de147"
+            )
         else:
             os.environ.pop("FUB_PETITION_BASE_URL", None)
+            os.environ.pop("FUB_DUTIES_BASE_URL", None)
 
 
 def should_run_now(settings: dict, now: datetime) -> bool:

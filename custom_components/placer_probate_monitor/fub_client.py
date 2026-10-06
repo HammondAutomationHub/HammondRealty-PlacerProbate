@@ -666,6 +666,11 @@ SEND_TOGGLES = [
         "editable": True,
     },
     {
+        "key": "de147_file",
+        "label": "Post DE-147 duties PDF link in Follow Up Boss Notes",
+        "editable": True,
+    },
+    {
         "key": "court_url_note",
         "label": "Post the per-case eCourt Public URL in Follow Up Boss Notes",
         "editable": True,
@@ -677,7 +682,7 @@ GO_NO_GO = [
     "No go-case without petitioner address. On current DE-111 that is item 8 (and item 3h if a nonresident personal representative). Item 1 is publication. Item 3c is decedent last residence, not Address 1. Attorney caption is not petitioner Address 1.",
     "Never map attorney_phone onto person.phones. Attorney caption address is not petitioner Address 1.",
     "Last residence is DE-111 text, not a verified APN.",
-    "Notes gets the per-case eCourt Public URL (node/45/…) plus a unique DE-111 PDF link. Files needs a registered FUB system key.",
+    "Notes gets the per-case eCourt Public URL, a unique DE-111 PDF link, and a DE-147 duties link. Petitioner phone comes from DE-147 acknowledgment, not the attorney caption.",
     "Only NEW cases are created on a full run. Verify can update a person ID you enter, reuse the last test person, or create one if none exist.",
 ]
 
@@ -1757,22 +1762,32 @@ def petition_safe_case(case: str) -> str:
     return re.sub(r"[^\w\-]+", "_", str(case or "").strip()) or "case"
 
 
-def petition_file_token(case: str, secret: str | None = None) -> str:
+def petition_file_token(case: str, secret: str | None = None, *, kind: str = "de111") -> str:
     raw = (secret or os.environ.get("FUB_PETITION_TOKEN_SECRET") or "placer-probate")
     return hmac.new(
         str(raw).encode(),
-        f"de111:{petition_safe_case(case)}".encode(),
+        f"{kind}:{petition_safe_case(case)}".encode(),
         hashlib.sha256,
     ).hexdigest()[:32]
 
 
 def petition_public_uri(case: str) -> str:
-    base = str(os.environ.get("FUB_PETITION_BASE_URL") or "").rstrip("/")
+    return form_public_uri(case, "de111")
+
+
+def duties_public_uri(case: str) -> str:
+    return form_public_uri(case, "de147")
+
+
+def form_public_uri(case: str, kind: str) -> str:
+    if kind == "de147":
+        base = str(os.environ.get("FUB_DUTIES_BASE_URL") or "").rstrip("/")
+    else:
+        base = str(os.environ.get("FUB_PETITION_BASE_URL") or "").rstrip("/")
     if not base:
         return ""
     safe = petition_safe_case(case)
-    slug = f"{safe}.pdf"
-    return f"{base}/{petition_file_token(case)}/{slug}"
+    return f"{base}/{petition_file_token(case, kind=kind)}/{safe}.pdf"
 
 
 def _petition_pdf_path(row: dict) -> Path | None:
@@ -1794,9 +1809,23 @@ def _petition_pdf_path(row: dict) -> Path | None:
             if path.is_file():
                 return path
         for path in sorted(folder.glob("*.pdf")):
-            if path.is_file():
+            if path.is_file() and "_DE-147" not in path.name.upper():
                 return path
     return None
+
+
+def _duties_pdf_path(row: dict) -> Path | None:
+    raw = str(row.get("duties_pdf") or "").strip()
+    if raw:
+        path = Path(raw)
+        if path.is_file() and path.stat().st_size > 4:
+            return path
+    case = petition_safe_case(case_key(row))
+    docs = Path(os.environ.get("FUB_PETITION_DOCS_DIR") or "")
+    if not docs.is_dir() or not case:
+        return None
+    named = docs / case / f"{case}_DE-147.pdf"
+    return named if named.is_file() else None
 
 
 def stored_person_id(state: dict, key: str) -> int | None:
@@ -2437,6 +2466,72 @@ def attach_de111_file(
     return note_result
 
 
+def _de147_note_payload(case: str, file_name: str, uri: str, court_url: str, phone: str) -> tuple[str, bool]:
+    safe_case = html.escape(case or "")
+    safe_name = html.escape(file_name or "DE-147.pdf")
+    bits = [f"<p>DE-147 duties / acknowledgment for {safe_case}</p>"]
+    if uri:
+        safe_uri = html.escape(uri, quote=True)
+        bits.append(f'<p><a href="{safe_uri}">{safe_name}</a></p>')
+        bits.append(f"<p>{safe_uri}</p>")
+    if court_url:
+        safe_court = html.escape(court_url, quote=True)
+        bits.append(
+            f'<p>eCourt file: <a href="{safe_court}">{html.escape(court_url)}</a></p>'
+        )
+    if phone:
+        bits.append(f"<p>Petitioner phone: {html.escape(phone)}</p>")
+    if len(bits) == 1:
+        return f"DE-147 duties for {case}: {file_name}", False
+    return "".join(bits), True
+
+
+def attach_de147_file(
+    row: dict,
+    person_id: int,
+    *,
+    mapping: dict,
+    api_url: str,
+    api_key: str,
+    system: str,
+    cases: dict,
+    key: str,
+    force: bool = False,
+) -> dict:
+    send = mapping.get("send") or {}
+    if not send.get("de147_file", True):
+        print(f"FUB DE-147 skip {key}: de147_file toggle off", flush=True)
+        return {"ok": False, "reason": "disabled"}
+    path = _duties_pdf_path(row)
+    if not path:
+        print(f"FUB DE-147 skip {key}: no DE-147 PDF", flush=True)
+        return {"ok": False, "reason": "no_pdf"}
+    case = case_key(row)
+    file_name = f"{petition_safe_case(case)}_DE-147.pdf"
+    uri = duties_public_uri(case)
+    court_url = str(row.get("duties_url") or "").strip()
+    phone = str(row.get("petitioner_phone") or "").strip()
+    record = cases.get(key) or {}
+    if key not in cases:
+        cases[key] = {}
+    fingerprint = f"{uri}|{court_url}|{phone}"
+    if record.get("fub_de147_note_fp") == fingerprint and not force:
+        return {"ok": True, "reason": "already", "uri": uri or court_url, "file": file_name}
+    body, is_html = _de147_note_payload(case, file_name, uri, court_url, phone)
+    post_note(
+        api_url,
+        api_key,
+        person_id,
+        body,
+        system,
+        subject="DE-147 duties",
+        is_html=is_html,
+    )
+    cases[key]["fub_de147_note_fp"] = fingerprint
+    print(f"FUB notes posted DE-147 {key} person_id={person_id} {uri or court_url}", flush=True)
+    return {"ok": True, "reason": "notes_link", "uri": uri or court_url, "file": file_name}
+
+
 def _court_portal_note_payload(case: str, url: str) -> str:
     safe_case = html.escape(case or "")
     safe_url = html.escape(url, quote=True)
@@ -2681,6 +2776,24 @@ def export_new_leads(
                     record_view["de111_attach"] = {"ok": False, "reason": str(file_exc)[:300]}
                     summary["verify_record"] = record_view
                     print(f"FUB files error {key}: {file_exc}", flush=True)
+                try:
+                    duties = attach_de147_file(
+                        row,
+                        pid,
+                        mapping=mapping,
+                        api_url=settings["api_url"],
+                        api_key=api_key,
+                        system=system,
+                        cases=cases,
+                        key=key,
+                        force=verify,
+                    )
+                    record_view["de147_attach"] = duties
+                    summary["verify_record"] = record_view
+                except Exception as duties_exc:  # noqa: BLE001
+                    record_view["de147_attach"] = {"ok": False, "reason": str(duties_exc)[:300]}
+                    summary["verify_record"] = record_view
+                    print(f"FUB DE-147 notes error {key}: {duties_exc}", flush=True)
                 if verify:
                     break
                 continue
@@ -2751,6 +2864,22 @@ def export_new_leads(
             except Exception as file_exc:  # noqa: BLE001
                 record_view["de111_attach"] = {"ok": False, "reason": str(file_exc)[:300]}
                 print(f"FUB files error {key}: {file_exc}", flush=True)
+            try:
+                duties = attach_de147_file(
+                    row,
+                    pid,
+                    mapping=mapping,
+                    api_url=settings["api_url"],
+                    api_key=api_key,
+                    system=system,
+                    cases=cases,
+                    key=key,
+                    force=verify,
+                )
+                record_view["de147_attach"] = duties
+            except Exception as duties_exc:  # noqa: BLE001
+                record_view["de147_attach"] = {"ok": False, "reason": str(duties_exc)[:300]}
+                print(f"FUB DE-147 notes error {key}: {duties_exc}", flush=True)
             summary["posted"] += 1
             posted_case = key
             posted_pid = pid

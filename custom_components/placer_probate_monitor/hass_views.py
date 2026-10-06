@@ -45,7 +45,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.35"
+PANEL_JS_VERSION = "1.3.36"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -361,6 +361,46 @@ class PetitionPdfView(HomeAssistantView):
         )
 
 
+class DutiesPdfView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/de147/{token}/{slug}"
+    name = "api:placer_probate_monitor:de147"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request, token, slug):
+        import hmac as hmac_mod
+
+        name = Path(str(slug or "")).name
+        if not name.lower().endswith(".pdf"):
+            return self.json({"error": "not found"}, status_code=404)
+        safe = petition_safe_case(Path(name).stem)
+        entry = _entry(self.hass)
+        expected = petition_file_token(
+            safe, secret=entry.entry_id if entry else None, kind="de147"
+        )
+        if not hmac_mod.compare_digest(str(token or ""), expected):
+            return self.json({"error": "not found"}, status_code=404)
+        docs = (Path(self.hass.config.path(DOMAIN)) / "reports" / "docs").resolve()
+        folder = (docs / safe).resolve()
+        try:
+            folder.relative_to(docs)
+        except ValueError:
+            return self.json({"error": "not found"}, status_code=404)
+        path = folder / f"{safe}_DE-147.pdf"
+        if not path.is_file():
+            return self.json({"error": "not found"}, status_code=404)
+        filename = f"{safe}_DE-147.pdf"
+        return FileResponse(
+            path,
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Disposition": f'inline; filename="{filename}"',
+            },
+        )
+
+
 class JobView(HomeAssistantView):
     url = "/api/placer_probate_monitor/job"
     name = "api:placer_probate_monitor:job"
@@ -504,6 +544,7 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SourcesView(hass))
     hass.http.register_view(FubSettingsView(hass))
     hass.http.register_view(PetitionPdfView(hass))
+    hass.http.register_view(DutiesPdfView(hass))
     hass.http.register_view(JobView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 
