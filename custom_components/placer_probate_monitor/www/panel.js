@@ -443,7 +443,7 @@ function ppmRenderPreview(el, st) {
       { label: "Petitioner last name", source: "Split from petitioner", value: rec.lastName || rec.petitioner_last, empty: !(rec.lastName || rec.petitioner_last) },
       { label: "Petitioner full name", source: "eCourt parties", value: rec.petitioner, empty: !rec.petitioner },
       { label: "Decedent", source: "CNPA / eCourt", value: rec.decedent, empty: !rec.decedent },
-      { label: "Last residence", source: "DE-111 item 3c", value: rec.decedent_residence, empty: !rec.decedent_residence },
+      { label: "Estate location", source: "DE-111 item 3.a.(2)", value: rec.decedent_residence, empty: !rec.decedent_residence },
       { label: "Petitioner address", source: "DE-111 item 8 / 3h + DE-147", value: rec.mailing_address, empty: !rec.mailing_address },
       { label: "Petitioner email", source: "DE-111 + DE-147", value: rec.petitioner_email, empty: !rec.petitioner_email },
       { label: "Petitioner phone", source: "DE-111 + DE-147", value: rec.petitioner_phone, empty: !rec.petitioner_phone },
@@ -1359,7 +1359,7 @@ class PlacerProbateListingsPanel extends HTMLElement {
       <div class="ppm-wrap">
         <header>
           <h1>Probate listings</h1>
-          <p>Collected Placer cases. Date is the newspaper notice date. Source is the county import. Decedent address is DE-111 item 3c or 3a(2).</p>
+          <p>Collected Placer cases. Date is the newspaper notice date. Source is the county import. Decedent address is DE-111 item 3.a.(2) when marked, else 3c. Not the “at (place)” death location.</p>
         </header>
         <main class="ppm-listings">
           <div id="flash" class="ppm-banner"></div>

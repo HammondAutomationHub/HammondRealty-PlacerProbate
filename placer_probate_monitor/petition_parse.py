@@ -533,14 +533,38 @@ def _checkbox_marked(mark: str) -> bool:
     )
 
 
+def _looks_like_place_of_death(line: str, death_place: str = "") -> bool:
+    """True when a value is item 3 'at (place)', not a street in 3.a.(2) or 3c."""
+    text = re.sub(r"\s+", " ", (line or "")).strip().lower()
+    if not text:
+        return False
+    if not re.search(r"\d{1,6}\s+\S+", text):
+        return True
+    place = re.sub(r"\s+", " ", (death_place or "")).strip().lower()
+    return bool(place and text == place)
+
+
 def _item3a2_estate_address(text: str) -> dict:
+    bodies: list[str] = []
     match = ITEM3A2_RE.search(text or "")
-    if not match:
-        return {}
-    parsed = _parse_address(match.group("body")[:400], prefix="decedent")
-    marked = _checkbox_marked(match.group("mark") or "")
-    # Unchecked 3a(2) is blank. A filled location line means the box was marked
-    # even when pypdf turns the X into U+FFFD or drops it.
+    marked = bool(match and _checkbox_marked(match.group("mark") or ""))
+    if match:
+        bodies.append(match.group("body") or "")
+    fallback = re.search(
+        r"left an estate in the county named above.{0,240}?located at"
+        r"(?:\s*\([^)]{0,200}\))?\s*:?\s*(?P<body>.+?)"
+        r"(?=c\.?\s*Street address|Street address, city, and county of|"
+        r"decedent'?s?\s+residence at time of death|Form Adopted)",
+        text or "",
+        re.I | re.S,
+    )
+    if fallback:
+        bodies.append(fallback.group("body") or "")
+    parsed: dict = {}
+    for body in bodies:
+        parsed = _parse_address(body[:400], prefix="decedent")
+        if parsed.get("decedent_residence"):
+            break
     if marked or parsed.get("decedent_residence"):
         return parsed
     return {}
@@ -577,19 +601,50 @@ def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
             and "street address" not in country.lower()
         ):
             out["decedent_citizenship"] = country
-    res = RESIDENCE_RE.search(text)
-    if res:
-        out.update(_parse_address(res.group("body")))
-    if not out.get("decedent_residence"):
-        marker = re.search(
-            r"residence at time of\s*death\s*\(specify\):",
-            text,
-            re.I,
-        )
-        if marker:
-            out.update(_parse_address(text[marker.end() : marker.end() + 500], prefix="decedent"))
-    if item3a2.get("decedent_residence"):
+    if item3a2.get("decedent_residence") and not _looks_like_place_of_death(
+        item3a2.get("decedent_residence") or "",
+        out.get("death_place") or "",
+    ):
         out.update(item3a2)
+        out["decedent_address_source"] = "3a2"
+    else:
+        res = RESIDENCE_RE.search(text)
+        if res:
+            parsed_3c = _parse_address(res.group("body"))
+            if parsed_3c.get("decedent_residence") and not _looks_like_place_of_death(
+                parsed_3c.get("decedent_residence") or "",
+                out.get("death_place") or "",
+            ):
+                out.update(parsed_3c)
+                out["decedent_address_source"] = "3c"
+        if not out.get("decedent_residence"):
+            marker = re.search(
+                r"residence at time of\s*death\s*\(specify\):",
+                text,
+                re.I,
+            )
+            if marker:
+                parsed_3c = _parse_address(
+                    text[marker.end() : marker.end() + 500], prefix="decedent"
+                )
+                if parsed_3c.get("decedent_residence") and not _looks_like_place_of_death(
+                    parsed_3c.get("decedent_residence") or "",
+                    out.get("death_place") or "",
+                ):
+                    out.update(parsed_3c)
+                    out["decedent_address_source"] = "3c"
+    if out.get("decedent_residence") and _looks_like_place_of_death(
+        out.get("decedent_residence") or "",
+        out.get("death_place") or "",
+    ):
+        for key in (
+            "decedent_residence",
+            "decedent_city",
+            "decedent_state",
+            "decedent_zip",
+            "decedent_address_source",
+        ):
+            out.pop(key, None)
     body = _item1_body(text)
     names = _item2_names(text) or petitioner_name
     if names:
@@ -803,8 +858,13 @@ def parse_de111_pdf(path: Path, petitioner: str = "") -> dict:
         out.update(_mailing_from_form_fields(path))
     if not out.get("mailing_address"):
         out.update(_pick_mailing_from_fields(path, petitioner or _item2_names(text), text))
-    if not out.get("decedent_residence"):
-        out.update(_residence_from_form_fields(path))
+    if out.get("decedent_address_source") != "3a2" and not out.get("decedent_residence"):
+        extra = _residence_from_form_fields(path)
+        if extra.get("decedent_residence") and not _looks_like_place_of_death(
+            extra.get("decedent_residence") or "",
+            out.get("death_place") or "",
+        ):
+            out.update(extra)
     return out
 
 

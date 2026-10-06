@@ -94,7 +94,7 @@ def _fact_table_data(pairs: list[tuple[str, object]], styles: dict) -> list[list
 
 def _petition_fact_pairs(row: dict) -> list[tuple[str, object]]:
     return [
-        ("Last residence", row.get("decedent_residence") or "—"),
+        ("Estate location", row.get("decedent_residence") or "—"),
         ("City", row.get("decedent_city") or "—"),
         ("ZIP", row.get("decedent_zip") or "—"),
         ("Date of death", row.get("decedent_died") or "—"),
@@ -617,7 +617,7 @@ def _flags(row: dict, run_date: date) -> str:
     if "waiver: bond" in blob:
         bits.append("Bond waivers filed.")
     if row.get("decedent_residence"):
-        bits.append(f"Last residence (DE-111 §3c): {row['decedent_residence']}.")
+        bits.append(f"Estate location (DE-111 §3.a.(2)): {row['decedent_residence']}.")
     real = row.get("estate_real")
     try:
         real_n = float(str(real).replace(",", "")) if real not in (None, "") else None

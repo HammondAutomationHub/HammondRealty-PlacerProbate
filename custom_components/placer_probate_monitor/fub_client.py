@@ -405,10 +405,10 @@ PROBATE_SOURCE_FIELDS = [
     },
     {
         "key": "decedent_residence",
-        "label": "Last residence (DE-111 item 3c)",
+        "label": "Estate location (DE-111 3.a.(2))",
         "group": "decedent",
-        "source": "DE-111 3a(2) county estate address when checked, else item 3c",
-        "notes": "If 3a(2) is marked, this is the California home listed for publication. Otherwise street, city, and county of residence at death from 3c.",
+        "source": "DE-111 item 3.a.(2) when that box is marked; otherwise item 3c",
+        "notes": "The street in 3.a.(2) (estate in the county named above). Never the 'at (place)' death location.",
         "person": None,
         "custom": True,
     },
@@ -443,8 +443,8 @@ PROBATE_SOURCE_FIELDS = [
         "key": "death_place",
         "label": "Place of death",
         "group": "decedent",
-        "source": "Petition PDF",
-        "notes": "",
+        "source": "DE-111 item 3 'at (place)'",
+        "notes": "County/state of death only. Do not map this to Address 1 or 2.",
         "person": None,
         "custom": True,
     },
@@ -789,8 +789,8 @@ SOURCE_GO_NO_GO = {
             },
             {
                 "key": "decedent_residence",
-                "label": "Decedent last residence",
-                "from": "DE-111 3a(2) estate location when checked, else item 3c",
+                "label": "Estate location (3.a.(2))",
+                "from": "DE-111 item 3.a.(2) street; never 'at (place)'",
                 "when": "Required only if “Require decedent residence” is on",
             },
             {
@@ -2300,7 +2300,7 @@ def build_event(
     if send.get("message", True):
         event["message"] = message
         event["description"] = (
-            f"Last residence (DE-111, not verified APN): "
+            f"Estate location (DE-111 3.a.(2), not place of death): "
             f"{row.get('decedent_residence') or '—'}. "
             f"Hearing: {row.get('next_event') or row.get('hearing') or '—'}. "
             f"eCourt: {case_portal_url(row) or court_note}."
