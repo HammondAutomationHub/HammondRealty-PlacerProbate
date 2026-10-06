@@ -1993,8 +1993,6 @@ def gate_reason(
     key = case_key(row)
     if not key:
         return "missing_case_number"
-    if existing_id is None and not is_new_row(row) and not allow_seen_without_fub:
-        return "not_new"
     petitioner = portal_petitioner(row)
     first, last = split_person_name(petitioner)
     if not first or not last:
