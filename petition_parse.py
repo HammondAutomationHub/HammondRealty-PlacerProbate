@@ -84,9 +84,12 @@ ITEM8_RE = re.compile(
     re.I | re.S,
 )
 ITEM3H_RE = re.compile(
-    r"nonresident of California\s*\(specify permanent address\):\s*(?P<body>.+?)"
-    r"(?:resident of the United States|nonresident of the United States|"
-    r"4\.\s|DE-111|Form Adopted)",
+    r"nonresident of California\s*\(specify permanent address\):\s*(?P<body>.{0,400}?)"
+    r"(?=resident of the United|nonresident of the United|4\.\s|8\.\s|DE-111|Form Adopted)",
+    re.I | re.S,
+)
+PERMANENT_ADDR_RE = re.compile(
+    r"permanent address\)\s*:\s*(?P<body>.{0,200})",
     re.I | re.S,
 )
 CAPTION_ADDR_RE = re.compile(
@@ -408,7 +411,7 @@ def _item8_petitioner_address(text: str, petitioner_name: str = "") -> dict:
 
 
 def _item3h_address(text: str) -> dict:
-    match = ITEM3H_RE.search(text)
+    match = ITEM3H_RE.search(text) or PERMANENT_ADDR_RE.search(text)
     if not match:
         return {}
     return _first_parsed_address(match.group("body")[:500], prefix="mailing")
@@ -447,9 +450,9 @@ def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
             out.update(_parse_address(text[marker.end() : marker.end() + 500], prefix="decedent"))
     body = _item1_body(text)
     names = _item2_names(text) or petitioner_name
-    mailing = _item8_petitioner_address(text, names)
+    mailing = _item3h_address(text)
     if not mailing:
-        mailing = _item3h_address(text)
+        mailing = _item8_petitioner_address(text, names)
     if not mailing and body:
         mailing = _parse_address(body, prefix="mailing")
         cap = CAPTION_ADDR_RE.search(text)
