@@ -45,13 +45,13 @@ DOWNLOAD_CASE_RE = re.compile(r"downloadFile/\d+/(\d+)", re.I)
 MAPPING_PATH = Path(__file__).resolve().parent / "fub_mapping.yaml"
 ADDR_RE = re.compile(
     rf"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*"
-    rf"(?P<state>{_STATE_ALT})"
+    rf"(?P<state>{_STATE_ALT})\b"
     rf"\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?$",
     re.I,
 )
 ADDR_FLEX_RE = re.compile(
     rf"^(?P<street>.+?),\s*(?P<city>[A-Za-z .'-]+?)(?:\s*,\s*|\s+)"
-    rf"(?P<state>{_STATE_ALT})"
+    rf"(?P<state>{_STATE_ALT})\b"
     rf"\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?\s*$",
     re.I,
 )

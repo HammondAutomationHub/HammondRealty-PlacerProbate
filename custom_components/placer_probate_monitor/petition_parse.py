@@ -95,6 +95,7 @@ STATE_ALT = "|".join(
     sorted(US_STATE_NAMES.values(), key=len, reverse=True)
     + sorted(US_STATE_NAMES.keys(), key=len, reverse=True)
 )
+# Require a word break so FL/PA/OR do not match Flathead/Placer/Oregon.
 ROAD = (
     r"(?:County\s+Rout[e]?|Route|Rte|Rout|"
     r"Road|Rd|Lane|Ln|Drive|Dr|Street|St|Way|Court|Ct|Avenue|Ave|"
@@ -104,7 +105,7 @@ UNIT = r"(?:\s*,?\s*(?:Suite|Ste\.?|Unit|Apt\.?|#)\s*[A-Z0-9\-]+)"
 _ADDR_TAIL = (
     rf"(?P<city>(?!Placer(?:\s+County)?\b)[A-Za-z][A-Za-z .'-]+?)\s*,\s*"
     rf"(?:(?P<county>[A-Za-z][A-Za-z .'-]+?)\s+County\s*,\s*)?"
-    rf"(?P<state>{STATE_ALT})\.?\s*"
+    rf"(?P<state>{STATE_ALT})\b\.?\s*"
     rf"(?P<zip>\d{{5}}(?:-\d{{4}})?)?"
 )
 ITEM3C_ADDR_RE = re.compile(
@@ -172,20 +173,20 @@ ADDR_PATTERNS = [
     re.compile(
         rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD}{UNIT}?)"
         rf"\s*,?\s*(?P<city>[A-Za-z][A-Za-z .'-]+?),\s*"
-        rf"(?P<state>{STATE_ALT})\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
+        rf"(?P<state>{STATE_ALT})\b\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
         re.I,
     ),
     re.compile(
         rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD}{UNIT}?)"
         rf"\s+(?P<city>[A-Za-z][A-Za-z .'-]+?)"
-        rf"\s+(?:Placer(?:\s+County)?\s+)?(?P<state>{STATE_ALT})\s+"
+        rf"\s+(?:Placer(?:\s+County)?\s+)?(?P<state>{STATE_ALT})\b\s+"
         rf"(?P<zip>\d{{5}}(?:-\d{{4}})?)(?:\s*\(Placer County\))?",
         re.I,
     ),
     re.compile(
         rf"(?P<street>\d{{1,6}}\s+[^\n]+?{ROAD}{UNIT}?)\s+"
         r"(?P<city>[A-Za-z][A-Za-z .'-]+),\s*"
-        rf"(?P<state>{STATE_ALT})\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
+        rf"(?P<state>{STATE_ALT})\b\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
         re.I,
     ),
 ]
