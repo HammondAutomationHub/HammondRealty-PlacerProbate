@@ -13,6 +13,9 @@ from pathlib import Path
 import requests
 
 COURT_SEARCH_DEFAULT = "https://webportal.placerco.org/eCourtPublic/?q=node/48"
+CASE_PORTAL_TEMPLATE = "https://webportal.placerco.org/eCourtPublic/?q=node/45/{nid}"
+CASE_PORTAL_RE = re.compile(r"node/45/(\d+)", re.I)
+DOWNLOAD_CASE_RE = re.compile(r"downloadFile/\d+/(\d+)", re.I)
 MAPPING_PATH = Path(__file__).resolve().parent / "fub_mapping.yaml"
 ADDR_RE = re.compile(
     r"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{5}(?:-\d{4})?)?$",
@@ -33,6 +36,30 @@ ADDRESS_COMPONENT_KEYS = {
 }
 ADDRESS1_TYPE = "home"
 ADDRESS2_TYPE = "mailing"
+
+
+def case_portal_url(row: dict) -> str:
+    """Per-case eCourt Public page, e.g. ?q=node/45/1322377."""
+    candidates = [
+        row.get("court_url"),
+        row.get("url"),
+        row.get("portal_url"),
+        row.get("court_search"),
+    ]
+    for doc in row.get("document_files") or []:
+        if isinstance(doc, dict):
+            candidates.append(doc.get("url"))
+    for raw in candidates:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        match = CASE_PORTAL_RE.search(text)
+        if match:
+            return CASE_PORTAL_TEMPLATE.format(nid=match.group(1))
+        match = DOWNLOAD_CASE_RE.search(text)
+        if match:
+            return CASE_PORTAL_TEMPLATE.format(nid=match.group(1))
+    return ""
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -411,12 +438,13 @@ PROBATE_SOURCE_FIELDS = [
     },
     {
         "key": "court_search",
-        "label": "Court search URL + paste hint",
+        "label": "eCourt Public case URL",
         "group": "other",
-        "source": "Derived",
-        "notes": "Case Summary deep links 404 unless you search first.",
+        "source": "eCourt search hit (node/45/…)",
+        "notes": "Per-case portal page. Posted to Follow Up Boss Notes.",
         "person": None,
         "custom": True,
+        "notes_label": "Court",
     },
     {
         "key": "notice_url",
@@ -633,14 +661,19 @@ SEND_TOGGLES = [
         "label": "Post DE-111 PDF link in Follow Up Boss Notes",
         "editable": True,
     },
+    {
+        "key": "court_url_note",
+        "label": "Post the per-case eCourt Public URL in Follow Up Boss Notes",
+        "editable": True,
+    },
 ]
 
 GO_NO_GO = [
     "Petitioner is the FUB Person. Decedent is never firstName/lastName.",
     "No go-case without petitioner address from DE-111 item 1. Email and phone also come from item 1 when present.",
     "Never map attorney_phone onto person.phones. Attorney caption address is not petitioner Address 1.",
-    "Last residence is DE-111 text, not a verified APN. Case Summary URLs 404 unless you search first.",
-    "DE-111 is hosted on Home Assistant; Notes gets a unique PDF link. Files needs a registered FUB system key.",
+    "Last residence is DE-111 text, not a verified APN.",
+    "Notes gets the per-case eCourt Public URL (node/45/…) plus a unique DE-111 PDF link. Files needs a registered FUB system key.",
     "Only NEW cases are created on a full run. Verify can update a person ID you enter, reuse the last test person, or create one if none exist.",
 ]
 
@@ -684,6 +717,12 @@ SOURCE_GO_NO_GO = {
                 "label": "Decedent last residence",
                 "from": "DE-111 §3c",
                 "when": "Required only if “Require decedent residence” is on",
+            },
+            {
+                "key": "court_url",
+                "label": "eCourt Public case URL",
+                "from": "Search hit ?q=node/45/…",
+                "when": "Posted to Follow Up Boss Notes when present",
             },
         ],
         "rules": GO_NO_GO,
@@ -1082,6 +1121,7 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
         "estate_personal": _stringify_field(row.get("estate_personal")),
         "hearing": _stringify_field(row.get("next_event") or row.get("hearing")),
         "court_search": court_note,
+        "court_url": case_portal_url(row) or court_note,
         "notice_url": _stringify_field(row.get("notice_url")),
         "petition_pdf": petition_name,
         "filed": _stringify_field(row.get("filed") or row.get("filed_from_docket")),
@@ -1188,6 +1228,9 @@ def combined_notes(row: dict, mapping: dict) -> str:
         if value in (None, ""):
             continue
         parts.append(f"{_notes_field_label(key)}: {value}")
+    portal = case_portal_url(row)
+    if portal and not any(portal in part for part in parts):
+        parts.append(f"Court: {portal}")
     return "\n".join(parts)
 
 
@@ -1877,9 +1920,12 @@ def preview_one_record(
 
 
 def _court_search_note(row: dict, mapping: dict) -> str:
+    portal = case_portal_url(row)
+    if portal:
+        return portal
     url = mapping.get("court_search_url") or COURT_SEARCH_DEFAULT
     case = case_key(row)
-    return f"{url} (paste {case} — Case Summary URLs 404 unless you search first)"
+    return f"{url} (paste {case} if the case page is missing)"
 
 
 def build_person(
@@ -2047,6 +2093,7 @@ def verify_record_payload(
         "hearing": values.get("hearing"),
         "notice_url": values.get("notice_url"),
         "court_search": values.get("court_search"),
+        "court_url": values.get("court_url") or values.get("court_search"),
         "de111_file": (
             str(_petition_pdf_path(row) or "")
             if (mapping.get("send") or {}).get("de111_file", True)
@@ -2095,7 +2142,7 @@ def build_event(
             f"Last residence (DE-111, not verified APN): "
             f"{row.get('decedent_residence') or '—'}. "
             f"Hearing: {row.get('next_event') or row.get('hearing') or '—'}. "
-            f"Do not use Case Summary deep links without searching first."
+            f"eCourt: {case_portal_url(row) or court_note}."
         )
     return event
 
@@ -2349,6 +2396,56 @@ def attach_de111_file(
     return note_result
 
 
+def _court_portal_note_payload(case: str, url: str) -> str:
+    safe_case = html.escape(case or "")
+    safe_url = html.escape(url, quote=True)
+    return (
+        f"<p>Placer eCourt Public case {safe_case}</p>"
+        f'<p><a href="{safe_url}">Open case in eCourt Public</a></p>'
+        f"<p>{html.escape(url)}</p>"
+    )
+
+
+def post_court_portal_note(
+    row: dict,
+    person_id: int,
+    *,
+    mapping: dict,
+    api_url: str,
+    api_key: str,
+    system: str,
+    cases: dict,
+    key: str,
+    force: bool = False,
+) -> dict:
+    send = mapping.get("send") or {}
+    if not send.get("court_url_note", True):
+        print(f"FUB court URL skip {key}: court_url_note toggle off", flush=True)
+        return {"ok": False, "reason": "disabled"}
+    url = case_portal_url(row)
+    if not url:
+        print(f"FUB court URL skip {key}: no eCourt case page", flush=True)
+        return {"ok": False, "reason": "no_court_url"}
+    record = cases.get(key) or {}
+    if key not in cases:
+        cases[key] = {}
+    if record.get("fub_court_note_url") == url and not force:
+        print(f"FUB court URL already noted {key}: {url}", flush=True)
+        return {"ok": True, "reason": "already", "uri": url}
+    post_note(
+        api_url,
+        api_key,
+        person_id,
+        _court_portal_note_payload(case_key(row), url),
+        system,
+        subject="eCourt Public case",
+        is_html=True,
+    )
+    cases[key]["fub_court_note_url"] = url
+    print(f"FUB notes posted court URL {key} person_id={person_id} {url}", flush=True)
+    return {"ok": True, "reason": "notes_link", "uri": url}
+
+
 def person_id_from_response(body: dict) -> int | None:
     if not isinstance(body, dict):
         return None
@@ -2507,6 +2604,25 @@ def export_new_leads(
                     except Exception as note_exc:  # noqa: BLE001
                         print(f"FUB notes error {key}: {note_exc}", flush=True)
                 try:
+                    court_note = post_court_portal_note(
+                        row,
+                        pid,
+                        mapping=mapping,
+                        api_url=settings["api_url"],
+                        api_key=api_key,
+                        system=system,
+                        cases=cases,
+                        key=key,
+                        force=verify,
+                    )
+                    record_view["court_url_note"] = court_note
+                except Exception as court_exc:  # noqa: BLE001
+                    record_view["court_url_note"] = {
+                        "ok": False,
+                        "reason": str(court_exc)[:300],
+                    }
+                    print(f"FUB court URL notes error {key}: {court_exc}", flush=True)
+                try:
                     attached = attach_de111_file(
                         row,
                         pid,
@@ -2559,6 +2675,25 @@ def export_new_leads(
                 )
             except Exception as note_exc:  # noqa: BLE001
                 print(f"FUB notes error {key}: {note_exc}", flush=True)
+            try:
+                court_note = post_court_portal_note(
+                    row,
+                    pid,
+                    mapping=mapping,
+                    api_url=settings["api_url"],
+                    api_key=api_key,
+                    system=system,
+                    cases=cases,
+                    key=key,
+                    force=verify,
+                )
+                record_view["court_url_note"] = court_note
+            except Exception as court_exc:  # noqa: BLE001
+                record_view["court_url_note"] = {
+                    "ok": False,
+                    "reason": str(court_exc)[:300],
+                }
+                print(f"FUB court URL notes error {key}: {court_exc}", flush=True)
             try:
                 attached = attach_de111_file(
                     row,

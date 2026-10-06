@@ -381,7 +381,7 @@ function ppmRenderPreview(el, st) {
       { label: "Petitioner phone", source: "DE-111 item 1", value: rec.petitioner_phone, empty: !rec.petitioner_phone },
       { label: "Hearing", source: "eCourt", value: rec.hearing, empty: !rec.hearing },
       { label: "Notice URL", source: "CNPA", value: rec.notice_url, empty: !rec.notice_url },
-      { label: "Court search", source: "Derived", value: rec.court_search, empty: !rec.court_search },
+      { label: "Court case URL", source: "eCourt Public node/45", value: rec.court_url || rec.court_search, empty: !(rec.court_url || rec.court_search) },
     ];
   }
   const mapped = rec.mapped || {};
@@ -456,6 +456,7 @@ function ppmRenderPreview(el, st) {
             <tr><th>lead source</th><td>${ppmCell(mapped.lead_source || rec.lead_source)}</td></tr>
             <tr><th>system</th><td>${ppmCell(mapped.system)}</td></tr>
             ${attachLine && !viewOnly ? `<tr><th>Files</th><td>${ppmCell(attachLine)}</td></tr>` : ""}
+            ${(rec.court_url || rec.court_search) ? `<tr><th>eCourt Public</th><td>${ppmCell((rec.court_url_note && rec.court_url_note.uri) || rec.court_url || rec.court_search)}</td></tr>` : ""}
           </tbody>
         </table>
         ${mapped.message ? `<label>Event message</label><p class="ppm-pre">${ppmCell(mapped.message)}</p>` : ""}
