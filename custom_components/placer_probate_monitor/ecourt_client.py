@@ -125,6 +125,8 @@ class ECourtClient:
             return {"raw_text": "", "error": "case summary 404"}
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text("\n", strip=True)
+        if "case view limit" in text.lower():
+            return {"raw_text": text, "error": "ecourt_view_limit"}
         detail = parse_summary(text)
         files = parse_document_table(soup)
         if files:
@@ -156,6 +158,9 @@ class ECourtClient:
         if hit.get("court_url"):
             time.sleep(self.pause)
             detail = self.fetch_summary(hit["court_url"])
+            if detail.get("error") == "ecourt_view_limit":
+                time.sleep(max(self.pause * 5, 6.0))
+                detail = self.fetch_summary(hit["court_url"])
         return {"found": True, **hit, **detail}
 
 

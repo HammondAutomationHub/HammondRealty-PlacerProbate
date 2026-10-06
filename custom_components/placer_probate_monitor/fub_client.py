@@ -1129,7 +1129,11 @@ def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) 
 def probate_export_values(row: dict, mapping: dict) -> dict:
     petitioner = portal_petitioner(row)
     first, last = split_person_name(petitioner)
-    decedent = str(row.get("decedent") or "").strip()
+    decedent = (
+        str(row.get("decedent") or "").strip()
+        or portal_party_name(row, "decedent")
+        or str(row.get("decedent_name") or "").strip()
+    )
     dec_first, dec_last = split_person_name(decedent.split(",")[0] if decedent else "")
     case = case_key(row)
     court_note = _court_search_note(row, mapping)
@@ -1630,18 +1634,27 @@ def split_person_name(name: str) -> tuple[str, str]:
     return " ".join(parts[:-1]).title(), parts[-1].title()
 
 
-def portal_petitioner(row: dict) -> str:
+def portal_party_name(row: dict, role: str) -> str:
+    want = (role or "").strip().lower()
     for party in row.get("parties") or []:
         text = str(party)
         if "—" in text:
-            role, _, name = text.partition("—")
+            listed, _, name = text.partition("—")
         elif " - " in text:
-            role, _, name = text.partition(" - ")
+            listed, _, name = text.partition(" - ")
         else:
             continue
-        if role.strip().lower() == "petitioner":
+        if listed.strip().lower() == want:
             return name.strip()
-    return str(row.get("petitioner") or "").strip()
+    return ""
+
+
+def portal_petitioner(row: dict) -> str:
+    for role in ("petitioner", "administrator", "personal representative"):
+        name = portal_party_name(row, role)
+        if name:
+            return name
+    return str(row.get("petitioner") or row.get("petitioner_name") or "").strip()
 
 
 def _strip_county_noise(text: str) -> str:

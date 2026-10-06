@@ -405,6 +405,21 @@ def _item2_names(text: str) -> str:
     return names
 
 
+def _estate_of_name(text: str) -> str:
+    match = re.search(
+        r"ESTATE\s+OF\s*\(\s*name\s*\)\s*:?\s*(?P<name>[^\n]{3,90})",
+        text or "",
+        re.I,
+    )
+    if not match:
+        return ""
+    name = re.sub(r"\s+", " ", match.group("name")).strip(" :.")
+    name = re.split(r"\bAKA\b", name, maxsplit=1, flags=re.I)[0].strip(" :.")
+    if len(name) < 3 or re.search(r"\d{3,}", name):
+        return ""
+    return name
+
+
 def _first_parsed_address(body: str, *, prefix: str) -> dict:
     split = split_de111_address(body)
     if split:
@@ -535,6 +550,11 @@ def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
             out.update(_parse_address(text[marker.end() : marker.end() + 500], prefix="decedent"))
     body = _item1_body(text)
     names = _item2_names(text) or petitioner_name
+    if names:
+        out["petitioner_name"] = names
+    estate = _estate_of_name(text)
+    if estate:
+        out["decedent_name"] = estate
     mailing = _item3h_address(text)
     if not mailing:
         mailing = _item8_petitioner_address(text, names)

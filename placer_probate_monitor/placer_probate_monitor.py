@@ -528,6 +528,10 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                     client.download(petition_item["url"], dest)
                     if dest.read_bytes()[:4] == b"%PDF":
                         de111 = parse_de111_pdf(dest, petitioner=notice.petitioner)
+                        if de111.get("petitioner_name"):
+                            portal["petitioner"] = de111["petitioner_name"]
+                        if de111.get("decedent_name") and not portal.get("decedent"):
+                            portal["decedent"] = de111["decedent_name"]
                         portal.update(de111)
                         portal["petition_pdf"] = str(dest)
                         portal["petition_url"] = petition_item["url"]
