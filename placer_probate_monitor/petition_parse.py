@@ -6,7 +6,8 @@ import re
 from pathlib import Path
 
 DIED_RE = re.compile(
-    r"Decedent died on \(date\):\s*(?P<date>\d{1,2}/\d{1,2}/\d{2,4})"
+    r"Decedent died on \(date\):\s*(?P<date>"
+    r"\d{1,2}/\d{1,2}/\d{2,4}|[A-Za-z]+ \d{1,2}, \d{4})"
     r"\s+at \(place\):\s*(?P<place>.+?)(?:\s*\(\s*1\s*\)|\s*a resident|\s*\[\s*_)",
     re.I | re.S,
 )
@@ -247,7 +248,7 @@ REAL_RE = re.compile(
 
 
 def _clean(text: str) -> str:
-    text = text.replace("\xa0", " ").replace("\u2019", "'").replace("\ufffd", "")
+    text = text.replace("\xa0", " ").replace("\u2019", "'")
     return re.sub(r"[ \t]+", " ", text)
 
 
@@ -524,14 +525,25 @@ def _checkbox_marked(mark: str) -> bool:
     blob = re.sub(r"\s+", "", mark or "")
     if not blob or re.fullmatch(r"[\[\]Il1|_-]+", blob):
         return False
-    return bool(re.search(r"[xX✓✔☒]", blob))
+    return bool(
+        re.search(
+            r"[xX✓✔☒☑√×✗■●▪◼◆•*]|\ufffd|\u25a0|\u2713|\u2714|\u2611",
+            blob,
+        )
+    )
 
 
 def _item3a2_estate_address(text: str) -> dict:
     match = ITEM3A2_RE.search(text or "")
-    if not match or not _checkbox_marked(match.group("mark") or ""):
+    if not match:
         return {}
-    return _parse_address(match.group("body")[:400], prefix="decedent")
+    parsed = _parse_address(match.group("body")[:400], prefix="decedent")
+    marked = _checkbox_marked(match.group("mark") or "")
+    # Unchecked 3a(2) is blank. A filled location line means the box was marked
+    # even when pypdf turns the X into U+FFFD or drops it.
+    if marked or parsed.get("decedent_residence"):
+        return parsed
+    return {}
 
 
 def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
