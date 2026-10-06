@@ -18,11 +18,15 @@ CASE_PORTAL_RE = re.compile(r"node/45/(\d+)", re.I)
 DOWNLOAD_CASE_RE = re.compile(r"downloadFile/\d+/(\d+)", re.I)
 MAPPING_PATH = Path(__file__).resolve().parent / "fub_mapping.yaml"
 ADDR_RE = re.compile(
-    r"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{5}(?:-\d{4})?)?$",
+    r"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*"
+    r"(?P<state>California|Washington|Oregon|Nevada|Arizona|Idaho|CA|WA|OR|NV|AZ|ID)"
+    r"\s*(?P<zip>\d{5}(?:-\d{4})?)?$",
     re.I,
 )
 ADDR_FLEX_RE = re.compile(
-    r"^(?P<street>.+?),\s*(?P<city>[A-Za-z .'-]+?)(?:\s*,\s*|\s+)(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{5}(?:-\d{4})?)?\s*$",
+    r"^(?P<street>.+?),\s*(?P<city>[A-Za-z .'-]+?)(?:\s*,\s*|\s+)"
+    r"(?P<state>California|Washington|Oregon|Nevada|Arizona|Idaho|CA|WA|OR|NV|AZ|ID)"
+    r"\s*(?P<zip>\d{5}(?:-\d{4})?)?\s*$",
     re.I,
 )
 COUNTY_NOISE_RE = re.compile(r",?\s*Placer(?:\s+County)?\b,?", re.I)
@@ -356,10 +360,10 @@ PROBATE_SOURCE_FIELDS = [
     },
     {
         "key": "decedent_residence",
-        "label": "Last residence (DE-111)",
+        "label": "Last residence (DE-111 item 3c)",
         "group": "decedent",
-        "source": "Petition PDF",
-        "notes": "FUB Address 2 (decedent). Line 2 is left empty. Not a verified APN.",
+        "source": "DE-111 item 3c",
+        "notes": "Street, city, county of residence at death. City is Lincoln, not Placer County. FUB Address 2.",
         "person": "addresses",
         "custom": True,
     },
@@ -715,7 +719,7 @@ SOURCE_GO_NO_GO = {
             {
                 "key": "decedent_residence",
                 "label": "Decedent last residence",
-                "from": "DE-111 §3c",
+                "from": "DE-111 item 3c (street, city, county at death)",
                 "when": "Required only if “Require decedent residence” is on",
             },
             {
@@ -1108,6 +1112,7 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
         "case_number": case,
         "decedent_residence": _stringify_field(row.get("decedent_residence")),
         "decedent_city": _stringify_field(row.get("decedent_city")),
+        "decedent_state": _stringify_field(row.get("decedent_state")),
         "decedent_zip": _stringify_field(row.get("decedent_zip")),
         "mailing_address": _stringify_field(row.get("mailing_address")),
         "mailing_city": _stringify_field(row.get("mailing_city")),
@@ -1618,6 +1623,19 @@ def _usable_city(city: str) -> str:
 
 
 def split_address(line: str) -> dict | None:
+    try:
+        from .petition_parse import split_de111_address, _state_code
+    except ImportError:
+        from petition_parse import split_de111_address, _state_code
+
+    parsed = split_de111_address(line)
+    if parsed:
+        return {
+            "street": parsed["street"],
+            "city": parsed["city"],
+            "state": parsed["state"],
+            "code": parsed.get("zip") or "",
+        }
     text = _strip_county_noise(re.sub(r"\s+", " ", (line or "").strip()))
     if not text:
         return None
@@ -1627,7 +1645,7 @@ def split_address(line: str) -> dict | None:
     return {
         "street": match.group("street").strip(" ,"),
         "city": _usable_city(match.group("city")),
-        "state": match.group("state").upper(),
+        "state": _state_code(match.group("state")),
         "code": (match.group("zip") or "").strip(),
     }
 
@@ -1698,7 +1716,7 @@ def _address_parts_from_source(local_key: str, values: dict) -> tuple[str, str, 
     }:
         return (
             _usable_city(str(values.get("decedent_city") or "")),
-            "CA",
+            str(values.get("decedent_state") or "CA").strip() or "CA",
             str(values.get("decedent_zip") or "").strip(),
         )
     return "", "", ""

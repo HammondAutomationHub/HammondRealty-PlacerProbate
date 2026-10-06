@@ -11,10 +11,46 @@ DIED_RE = re.compile(
     re.I | re.S,
 )
 RESIDENT_RE = re.compile(r"\(\s*1\s*\)\s*a resident of the county named above", re.I)
+NONRESIDENT_RE = re.compile(
+    r"a nonresident of California and left an estate in the county named above",
+    re.I,
+)
+ITEM3B_RE = re.compile(
+    r"citizen of a country other than the United States\s*\(specify country\):\s*"
+    r"(?P<country>[A-Za-z][A-Za-z .'-]{1,80})?",
+    re.I,
+)
 RESIDENCE_RE = re.compile(
-    r"residence at time of\s*death\s*\(specify\):\s*(?P<body>.+?)"
-    r"(?:Form Adopted|Fonn |Character and estimated value|3\.\s*d\.|PETITION FOR PROBATE)",
+    r"(?:c\.\s*)?(?:Street address,\s*city,\s*and\s*county of\s+)?"
+    r"decedent'?s?\s+residence at time of\s*death\s*\(specify\):\s*(?P<body>.+?)"
+    r"(?:Form Adopted|Fonn |Character and estimated value|3\.\s*d\.|"
+    r"4\.\s|Publication of Notice|PETITION FOR PROBATE)",
     re.I | re.S,
+)
+STATE_ALT = (
+    r"California|Washington|Oregon|Nevada|Arizona|Idaho|CA|WA|OR|NV|AZ|ID"
+)
+STATE_ALIAS = {
+    "ca": "CA",
+    "california": "CA",
+    "wa": "WA",
+    "washington": "WA",
+    "or": "OR",
+    "oregon": "OR",
+    "nv": "NV",
+    "nevada": "NV",
+    "az": "AZ",
+    "arizona": "AZ",
+    "id": "ID",
+    "idaho": "ID",
+}
+ITEM3C_ADDR_RE = re.compile(
+    rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+)\s*,\s*"
+    rf"(?P<city>(?!Placer(?:\s+County)?\b)[A-Za-z][A-Za-z .'-]+?)\s*,\s*"
+    rf"(?:(?P<county>[A-Za-z][A-Za-z .'-]+?)\s+County\s*,\s*)?"
+    rf"(?P<state>{STATE_ALT})\.?\s*"
+    rf"(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
+    re.I,
 )
 PHONE_RE = re.compile(
     r"(?:Telephone(?:\s+no\.?)?|Phone(?:\s+no\.?)?|Tel\.?)\s*:?\s*"
@@ -91,6 +127,38 @@ def _usable_city(city: str) -> str:
     return (city or "").strip()
 
 
+def _state_code(raw: str) -> str:
+    key = re.sub(r"\s+", " ", (raw or "").strip().lower())
+    if key in STATE_ALIAS:
+        return STATE_ALIAS[key]
+    return (raw or "").strip().upper()[:2]
+
+
+def split_de111_address(line: str) -> dict:
+    """Parse DE-111 §3c lines like '1728 6th Street, Lincoln, Placer County, California 95648'."""
+    text = re.sub(r"[ \t]+", " ", (line or "").replace("\n", " ")).strip(" .")
+    text = re.sub(r"\s+,", ",", text)
+    if not text:
+        return {}
+    match = ITEM3C_ADDR_RE.search(text)
+    if not match:
+        stripped = _strip_county_noise(text)
+        match = ITEM3C_ADDR_RE.search(stripped)
+    if not match:
+        return {}
+    city = _usable_city(match.group("city"))
+    street = re.sub(r"\s+", " ", match.group("street")).strip(" ,.")
+    if not street or not city:
+        return {}
+    return {
+        "street": street,
+        "city": city,
+        "county": re.sub(r"\s+", " ", (match.group("county") or "")).strip(),
+        "state": _state_code(match.group("state")),
+        "zip": (match.group("zip") or "").strip(),
+    }
+
+
 PERSONAL_RE = re.compile(r"Personal property:\s*\$?\s*(?P<amt>[0-9,]+(?:\.\d{2})?)", re.I)
 REAL_RE = re.compile(
     r"Gross fair market value of real property:\s*\$?\s*(?P<amt>[0-9,]+(?:\.\d{2})?)",
@@ -129,7 +197,7 @@ def _address_from_groups(street: str, city: str, state: str, zipp: str, *, prefi
     city = _usable_city(city)
     if not street or not city or city.lower() in {"road", "street", "lane", "drive", "way", "court"}:
         return {}
-    state = (state or "CA").upper()
+    state = _state_code(state or "CA") or "CA"
     zipp = zipp or ""
     line = f"{street}, {city}"
     if state:
@@ -146,6 +214,7 @@ def _address_from_groups(street: str, city: str, state: str, zipp: str, *, prefi
     return {
         "decedent_residence": line,
         "decedent_city": city,
+        "decedent_state": state,
         "decedent_zip": zipp,
     }
 
@@ -159,9 +228,18 @@ def _parse_address(body: str, *, prefix: str = "decedent") -> dict:
         body,
         flags=re.I,
     )
-    body = _strip_county_noise(body)
+    split = split_de111_address(body)
+    if split:
+        return _address_from_groups(
+            split["street"],
+            split["city"],
+            split.get("state") or "CA",
+            split.get("zip") or "",
+            prefix=prefix,
+        )
+    stripped = _strip_county_noise(body)
     for pattern in ADDR_PATTERNS:
-        addr = pattern.search(body)
+        addr = pattern.search(stripped)
         if not addr:
             continue
         parsed = _address_from_groups(
@@ -218,13 +296,30 @@ def parse_de111_text(text: str) -> dict:
     if died:
         out["decedent_died"] = died.group("date").strip()
         out["death_place"] = re.sub(r"\s+", " ", died.group("place")).strip(" .")
-    if RESIDENT_RE.search(text) and not re.search(
-        r"\[\s*[xX]\s*[_\]]\s*[^.\n]{0,40}nonresident of California", text
+    if NONRESIDENT_RE.search(text) and re.search(
+        r"\[\s*[xX✓✔]\s*\][^\n]{0,80}nonresident of California", text
+    ):
+        out["county_resident"] = False
+    elif RESIDENT_RE.search(text) or re.search(
+        r"\[\s*[xX✓✔]\s*\][^\n]{0,80}a resident of the county named above", text
     ):
         out["county_resident"] = True
+    citizen = ITEM3B_RE.search(text)
+    if citizen:
+        country = re.sub(r"\s+", " ", (citizen.group("country") or "")).strip(" .")
+        if country and country.lower() not in {"specify country", "street address"}:
+            out["decedent_citizenship"] = country
     res = RESIDENCE_RE.search(text)
     if res:
         out.update(_parse_address(res.group("body")))
+    if not out.get("decedent_residence"):
+        marker = re.search(
+            r"residence at time of\s*death\s*\(specify\):",
+            text,
+            re.I,
+        )
+        if marker:
+            out.update(_parse_address(text[marker.end() : marker.end() + 500], prefix="decedent"))
     body = _item1_body(text)
     if body:
         mailing = _parse_address(body, prefix="mailing")
@@ -297,10 +392,44 @@ def _mailing_from_form_fields(path: Path) -> dict:
     return _parse_address("\n".join(blobs), prefix="mailing")
 
 
+def _residence_from_form_fields(path: Path) -> dict:
+    from pypdf import PdfReader
+
+    try:
+        fields = PdfReader(str(path)).get_fields() or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    blobs: list[str] = []
+    for key, field in fields.items():
+        name = str(key or "").lower()
+        if any(bit in name for bit in ("atty", "attorney", "counsel", "firm", "petitioner")):
+            continue
+        if any(
+            bit in name
+            for bit in (
+                "residence",
+                "3c",
+                "item3c",
+                "decedentaddr",
+                "decedent_addr",
+                "lastaddress",
+                "streetaddresscityandcounty",
+            )
+        ):
+            value = _field_value(field)
+            if value:
+                blobs.append(value)
+    if not blobs:
+        return {}
+    return _parse_address("\n".join(blobs), prefix="decedent")
+
+
 def parse_de111_pdf(path: Path) -> dict:
     out = parse_de111_text(extract_pdf_text(path))
     if not out.get("mailing_address"):
         out.update(_mailing_from_form_fields(path))
+    if not out.get("decedent_residence"):
+        out.update(_residence_from_form_fields(path))
     return out
 
 

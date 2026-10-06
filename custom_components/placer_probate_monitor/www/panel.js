@@ -375,7 +375,7 @@ function ppmRenderPreview(el, st) {
       { label: "Petitioner last name", source: "Split from petitioner", value: rec.lastName || rec.petitioner_last, empty: !(rec.lastName || rec.petitioner_last) },
       { label: "Petitioner full name", source: "eCourt parties", value: rec.petitioner, empty: !rec.petitioner },
       { label: "Decedent", source: "CNPA / eCourt", value: rec.decedent, empty: !rec.decedent },
-      { label: "Last residence", source: "Petition PDF", value: rec.decedent_residence, empty: !rec.decedent_residence },
+      { label: "Last residence", source: "DE-111 item 3c", value: rec.decedent_residence, empty: !rec.decedent_residence },
       { label: "Petitioner address", source: "DE-111 item 1", value: rec.mailing_address, empty: !rec.mailing_address },
       { label: "Petitioner email", source: "DE-111 item 1", value: rec.petitioner_email, empty: !rec.petitioner_email },
       { label: "Petitioner phone", source: "DE-111 item 1", value: rec.petitioner_phone, empty: !rec.petitioner_phone },
