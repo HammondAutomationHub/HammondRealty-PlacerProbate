@@ -50,6 +50,17 @@ c. Street address, city, and county of decedent's residence at time of death (sp
 1728 6th Street, Lincoln, Placer County, California 95648
 """
 
+BRAFFORD_3C = """
+3. Decedent died on (date): 8/3/2025
+at (place): Roseville, California
+(1) X a resident of the county named above.
+(2)   a nonresident of California and left an estate in the county named above located at (specify location permitting
+publication in the newspaper named in item 1):
+c. Street address, city, and county of decedent's residence at time of death (specify):
+1206 Donahue Way, Roseville, Placer
+Form Adopted for Mandatory Use PETITION FOR PROBATE
+"""
+
 
 class De111AddressContract(unittest.TestCase):
     def test_3a2_beats_place_of_death_and_3c(self):
@@ -69,6 +80,13 @@ class De111AddressContract(unittest.TestCase):
     def test_3c_when_3a2_empty(self):
         out = parse_de111_text(KIM_3C)
         self.assertEqual(out.get("decedent_residence"), "1728 6th Street, Lincoln, CA 95648")
+        self.assertEqual(out.get("decedent_address_source"), "3c")
+
+    def test_3c_city_placer_without_state_or_zip(self):
+        out = parse_de111_text(BRAFFORD_3C)
+        self.assertEqual(out.get("death_place"), "Roseville, California")
+        self.assertEqual(out.get("decedent_residence"), "1206 Donahue Way, Roseville, CA")
+        self.assertEqual(out.get("decedent_city"), "Roseville")
         self.assertEqual(out.get("decedent_address_source"), "3c")
 
     def test_flathead_is_not_florida(self):
@@ -119,6 +137,16 @@ class De111PdfGoldens(unittest.TestCase):
         out = parse_de111_pdf(path)
         self.assertIn("8300 Country Club Lane", out.get("decedent_residence") or "")
         self.assertEqual(out.get("decedent_address_source"), "3a2")
+
+    def test_14204_3c_donahue_way(self):
+        path = self._pdf("S-PR-0014204_DE-111.pdf")
+        if not path:
+            self.skipTest("debug PDF not present")
+        out = parse_de111_pdf(path)
+        self.assertIn("1206 Donahue Way", out.get("decedent_residence") or "")
+        self.assertIn("Roseville", out.get("decedent_residence") or "")
+        self.assertEqual(out.get("decedent_address_source"), "3c")
+        self.assertEqual(out.get("death_place"), "Roseville, California")
 
 
 if __name__ == "__main__":

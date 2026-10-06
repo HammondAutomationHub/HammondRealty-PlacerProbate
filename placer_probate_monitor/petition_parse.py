@@ -124,6 +124,13 @@ ITEM3C_ADDR_RE = re.compile(
     rf"{_ADDR_TAIL}",
     re.I,
 )
+# "1206 Donahue Way, Roseville, Placer" — county with no CA/ZIP.
+PLACER_CITY_RE = re.compile(
+    rf"(?P<street>\d{{1,6}}\s+(?!\d+\s)(?:[A-Za-z0-9.'#\-]+\s+)*{ROAD}{UNIT}?)\s*,\s*"
+    rf"(?P<city>(?!Placer(?:\s+County)?\b)[A-Za-z][A-Za-z .'-]+?)\s*,\s*"
+    rf"Placer(?:\s+County)?\b",
+    re.I,
+)
 US_LINE_RE = re.compile(
     rf"(?P<street>\d{{1,6}}\s+(?!\d+\s)[^,\n]{{2,60}}?)\s*,\s*"
     rf"{_ADDR_TAIL}",
@@ -178,7 +185,7 @@ IN_PRO_PER_RE = re.compile(
 ADDR_PATTERNS = [
     re.compile(
         rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD}{UNIT}?)"
-        rf"\s*,?\s*(?P<city>[A-Za-z][A-Za-z .'-]+?)\s*,\s*Placer County",
+        rf"\s*,?\s*(?P<city>[A-Za-z][A-Za-z .'-]+?)\s*,\s*Placer(?:\s+County)?\b",
         re.I,
     ),
     re.compile(
@@ -236,6 +243,18 @@ def split_de111_address(line: str) -> dict:
         stripped = _strip_county_noise(text)
         match = ITEM3C_ADDR_RE.search(stripped) or US_LINE_RE.search(stripped)
     if not match:
+        placer = PLACER_CITY_RE.search(text)
+        if placer:
+            city = _usable_city(placer.group("city"))
+            street = re.sub(r"\s+", " ", placer.group("street")).strip(" ,.")
+            if street and city:
+                return {
+                    "street": street,
+                    "city": city,
+                    "county": "Placer",
+                    "state": "CA",
+                    "zip": "",
+                }
         return {}
     city = _usable_city(match.group("city"))
     street = re.sub(r"\s+", " ", match.group("street")).strip(" ,.")
