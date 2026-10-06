@@ -442,7 +442,7 @@ PROBATE_SOURCE_FIELDS = [
         "label": "Real property GMV",
         "group": "other",
         "source": "Petition PDF",
-        "notes": "Gross fair market value from DE-111. $0 is still a value.",
+        "notes": "Gross fair market value from DE-111, shown as $370,000.00. $0.00 is still a value.",
         "person": None,
         "custom": True,
     },
@@ -1026,6 +1026,17 @@ def _stringify_field(value) -> str:
     return str(value).strip()
 
 
+def _money_field(value) -> str:
+    raw = _stringify_field(value)
+    if not raw:
+        return ""
+    cleaned = raw.replace("$", "").replace(",", "").strip()
+    try:
+        return f"${float(cleaned):,.2f}"
+    except ValueError:
+        return raw
+
+
 def _row_contact(row: dict) -> dict:
     try:
         from .petition_parse import merge_petitioner_contact
@@ -1189,8 +1200,8 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
         "petitioner_phone": _stringify_field(contact.get("petitioner_phone") or row.get("petitioner_phone")),
         "decedent_died": _stringify_field(row.get("decedent_died")),
         "death_place": _stringify_field(row.get("death_place")),
-        "estate_real": _stringify_field(row.get("estate_real")),
-        "estate_personal": _stringify_field(row.get("estate_personal")),
+        "estate_real": _money_field(row.get("estate_real")),
+        "estate_personal": _money_field(row.get("estate_personal")),
         "hearing": _stringify_field(row.get("next_event") or row.get("hearing")),
         "court_search": court_note,
         "court_url": case_portal_url(row) or court_note,
