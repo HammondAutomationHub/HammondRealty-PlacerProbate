@@ -488,7 +488,27 @@ PROBATE_SOURCE_FIELDS = [
         "label": "Petition PDF filename",
         "group": "other",
         "source": "Downloaded DE-111",
-        "notes": "Saved locally and attached to the FUB person Files tab after create/update.",
+        "notes": "Local filename only. Map DE-111 PDF URL below for the download link.",
+        "person": None,
+        "custom": True,
+    },
+    {
+        "key": "de111_url",
+        "label": "DE-111 PDF URL",
+        "group": "other",
+        "notes_label": "DE-111",
+        "source": "Home Assistant API URL for the stored DE-111",
+        "notes": "Signed download URL. Map to Notes to include DE-111: {url}.",
+        "person": None,
+        "custom": True,
+    },
+    {
+        "key": "de147_url",
+        "label": "DE-147 PDF URL",
+        "group": "other",
+        "notes_label": "DE-147",
+        "source": "Home Assistant API URL for the stored DE-147",
+        "notes": "Signed download URL. Map to Notes to include DE-147: {url}.",
         "person": None,
         "custom": True,
     },
@@ -1176,6 +1196,8 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
         "court_url": case_portal_url(row) or court_note,
         "notice_url": _stringify_field(row.get("notice_url")),
         "petition_pdf": petition_name,
+        "de111_url": petition_public_uri(case) if case else "",
+        "de147_url": duties_public_uri(case) if case else "",
         "filed": _stringify_field(row.get("filed") or row.get("filed_from_docket")),
         "caption": _stringify_field(row.get("caption")),
         "attorney": _stringify_field(row.get("attorney")),
@@ -1199,6 +1221,11 @@ def _fub_target_name(api_name: str) -> str:
 
 def _is_notes_target(api_name: str) -> bool:
     return _fub_target_name(api_name).lower() in NOTES_TARGETS
+
+
+def _source_mapped_to_notes(mapping: dict, key: str) -> bool:
+    fields = mapping.get("custom_fields") or {}
+    return _is_notes_target(str(fields.get(key) or ""))
 
 
 def _notes_field_label(key: str) -> str:
@@ -2196,6 +2223,8 @@ def verify_record_payload(
         "notice_url": values.get("notice_url"),
         "court_search": values.get("court_search"),
         "court_url": values.get("court_url") or values.get("court_search"),
+        "de111_url": values.get("de111_url") or "",
+        "de147_url": values.get("de147_url") or "",
         "de111_file": (
             str(_petition_pdf_path(row) or "")
             if (mapping.get("send") or {}).get("de111_file", True)
@@ -2449,7 +2478,10 @@ def attach_de111_file(
             f"PDF is at {path}",
             flush=True,
         )
-    if record.get("fub_de111_note_uri") == uri and uri and not force:
+    if _source_mapped_to_notes(mapping, "de111_url"):
+        print(f"FUB DE-111 notes skip {key}: URL mapped into Notes", flush=True)
+        note_result = {"ok": True, "reason": "mapped_notes", "file": file_name, "uri": uri}
+    elif record.get("fub_de111_note_uri") == uri and uri and not force:
         note_result = {"ok": True, "reason": "notes_link", "file": file_name, "uri": uri}
     else:
         body, is_html = _de111_note_payload(case, file_name, uri, path)
@@ -2534,6 +2566,14 @@ def attach_de147_file(
     if not send.get("de147_file", True):
         print(f"FUB DE-147 skip {key}: de147_file toggle off", flush=True)
         return {"ok": False, "reason": "disabled"}
+    if _source_mapped_to_notes(mapping, "de147_url"):
+        print(f"FUB DE-147 notes skip {key}: URL mapped into Notes", flush=True)
+        return {
+            "ok": True,
+            "reason": "mapped_notes",
+            "uri": duties_public_uri(case_key(row)),
+            "file": f"{petition_safe_case(case_key(row))}_DE-147.pdf",
+        }
     path = _duties_pdf_path(row)
     if not path:
         print(f"FUB DE-147 skip {key}: no DE-147 PDF", flush=True)
