@@ -16,12 +16,6 @@ RESIDENCE_RE = re.compile(
     r"(?:Form Adopted|Fonn |Character and estimated value|3\.\s*d\.|PETITION FOR PROBATE)",
     re.I | re.S,
 )
-PETITIONER_ITEM_RE = re.compile(
-    r"1\.?\s*Petitioner\s*\([^)]*name[^)]*\)\s*:?\s*(?P<body>.+?)"
-    r"(?=2\.?\s*Petitioner\s+is\b|3\.\s*Decedent|"
-    r"Publication of Notice|Character and estimated value)",
-    re.I | re.S,
-)
 PHONE_RE = re.compile(
     r"(?:Telephone(?:\s+no\.?)?|Phone(?:\s+no\.?)?|Tel\.?)\s*:?\s*"
     r"(?P<phone>\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})",
@@ -36,27 +30,45 @@ ROAD = (
     r"(?:Road|Rd|Lane|Ln|Drive|Dr|Street|St|Way|Court|Ct|Avenue|Ave|"
     r"Place|Pl|Circle|Cir|Boulevard|Blvd|Highway|Hwy)\.?"
 )
+UNIT = r"(?:\s*,?\s*(?:Suite|Ste\.?|Unit|Apt\.?|#)\s*[A-Z0-9\-]+)"
+PETITIONER_ITEM_RE = re.compile(
+    r"1\.?\s*Petitioner\s*(?:\([^)]*name[^)]*\))?\s*:?\s*(?P<body>.+?)"
+    r"(?=2\.?\s*Petitioner\s+is\b|2\.?\s*Jurisdiction|"
+    r"3\.\s*Decedent|Publication of Notice|Character and estimated value)",
+    re.I | re.S,
+)
+CAPTION_ADDR_RE = re.compile(
+    r"STREET ADDRESS:\s*(?P<street>[^\n]+?)\s+"
+    r"CITY:\s*(?P<city>[A-Za-z .'-]+)\s+"
+    r"STATE:\s*(?P<state>CA|WA|OR|NV|AZ|ID)\s+"
+    r"ZIP(?:\s*CODE)?:\s*(?P<zip>\d{5}(?:-\d{4})?)",
+    re.I,
+)
+IN_PRO_PER_RE = re.compile(
+    r"ATTORNEY FOR \(name\):\s*(?P<who>[^\n]{0,80})",
+    re.I,
+)
 ADDR_PATTERNS = [
     re.compile(
-        rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD})"
+        rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD}{UNIT}?)"
         rf"\s*,?\s*(?P<city>[A-Za-z][A-Za-z .'-]+?)\s*,\s*Placer County",
         re.I,
     ),
     re.compile(
-        rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD})"
-        rf"\s+,?\s*(?P<city>[A-Za-z][A-Za-z .'-]+?),\s*"
+        rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD}{UNIT}?)"
+        rf"\s*,?\s*(?P<city>[A-Za-z][A-Za-z .'-]+?),\s*"
         rf"(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
         re.I,
     ),
     re.compile(
-        rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD})"
+        rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD}{UNIT}?)"
         rf"\s+(?P<city>[A-Za-z][A-Za-z .'-]+?)"
         rf"\s+(?:Placer(?:\s+County)?\s+)?(?P<state>CA|WA|OR|NV)\s+"
         rf"(?P<zip>\d{{5}}(?:-\d{{4}})?)(?:\s*\(Placer County\))?",
         re.I,
     ),
     re.compile(
-        r"(?P<street>\d{1,6}\s+[^\n]+?)\s+"
+        rf"(?P<street>\d{{1,6}}\s+[^\n]+?{ROAD}{UNIT}?)\s+"
         r"(?P<city>[A-Za-z][A-Za-z .'-]+),\s*"
         r"(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{5}(?:-\d{4})?)?",
         re.I,
@@ -98,7 +110,44 @@ def extract_pdf_text(path: Path) -> str:
     parts = []
     for page in reader.pages:
         parts.append(page.extract_text() or "")
+    try:
+        fields = reader.get_fields() or {}
+    except Exception:  # noqa: BLE001
+        fields = {}
+    for field in fields.values():
+        if not isinstance(field, dict):
+            continue
+        value = field.get("/V")
+        if value in (None, ""):
+            continue
+        parts.append(str(value))
     return "\n".join(parts)
+
+
+def _address_from_groups(street: str, city: str, state: str, zipp: str, *, prefix: str) -> dict:
+    street = re.sub(r"\s+", " ", street).strip(" ,.")
+    city = _usable_city(city)
+    if not street or not city or city.lower() in {"road", "street", "lane", "drive", "way", "court"}:
+        return {}
+    state = (state or "CA").upper()
+    zipp = zipp or ""
+    line = f"{street}, {city}"
+    if state:
+        line += f", {state}"
+    if zipp:
+        line += f" {zipp}"
+    if prefix == "mailing":
+        return {
+            "mailing_address": line,
+            "mailing_city": city,
+            "mailing_state": state,
+            "mailing_zip": zipp,
+        }
+    return {
+        "decedent_residence": line,
+        "decedent_city": city,
+        "decedent_zip": zipp,
+    }
 
 
 def _parse_address(body: str, *, prefix: str = "decedent") -> dict:
@@ -115,30 +164,51 @@ def _parse_address(body: str, *, prefix: str = "decedent") -> dict:
         addr = pattern.search(body)
         if not addr:
             continue
-        street = re.sub(r"\s+", " ", addr.group("street")).strip(" ,.")
-        city = _usable_city(addr.group("city"))
-        if not city or city.lower() in {"road", "street", "lane", "drive", "way", "court"}:
-            continue
-        state = (addr.groupdict().get("state") or "CA").upper()
-        zipp = addr.groupdict().get("zip") or ""
-        line = f"{street}, {city}"
-        if state:
-            line += f", {state}"
-        if zipp:
-            line += f" {zipp}"
-        if prefix == "mailing":
-            return {
-                "mailing_address": line,
-                "mailing_city": city,
-                "mailing_state": state,
-                "mailing_zip": zipp,
-            }
-        return {
-            "decedent_residence": line,
-            "decedent_city": city,
-            "decedent_zip": zipp,
-        }
+        parsed = _address_from_groups(
+            addr.group("street"),
+            addr.group("city"),
+            addr.groupdict().get("state") or "CA",
+            addr.groupdict().get("zip") or "",
+            prefix=prefix,
+        )
+        if parsed:
+            return parsed
     return {}
+
+
+def _parse_caption_mailing(text: str) -> dict:
+    who = ""
+    listed = IN_PRO_PER_RE.search(text)
+    if listed:
+        who = listed.group("who").strip().lower()
+    in_pro_per = any(
+        token in who
+        for token in ("pro per", "propria", "self-represented", "in pro per")
+    )
+    if not in_pro_per:
+        return {}
+    cap = CAPTION_ADDR_RE.search(text)
+    if not cap:
+        return {}
+    return _address_from_groups(
+        cap.group("street"),
+        cap.group("city"),
+        cap.group("state"),
+        cap.group("zip") or "",
+        prefix="mailing",
+    )
+
+
+def _item1_body(text: str) -> str:
+    pet = PETITIONER_ITEM_RE.search(text)
+    if pet:
+        return pet.group("body")
+    fallback = re.search(
+        r"1\.?\s*Petitioner\b(.{0,3000}?)(?:\n\s*2\.|\n\s*3\.\s*Decedent)",
+        text,
+        re.I | re.S,
+    )
+    return fallback.group(1) if fallback else ""
 
 
 def parse_de111_text(text: str) -> dict:
@@ -155,15 +225,34 @@ def parse_de111_text(text: str) -> dict:
     res = RESIDENCE_RE.search(text)
     if res:
         out.update(_parse_address(res.group("body")))
-    pet = PETITIONER_ITEM_RE.search(text)
-    if pet:
-        body = pet.group("body")
-        out.update(_parse_address(body, prefix="mailing"))
+    body = _item1_body(text)
+    if body:
+        mailing = _parse_address(body, prefix="mailing")
+        cap = CAPTION_ADDR_RE.search(text)
+        cap_street = (cap.group("street").strip().lower() if cap else "")
+        if (
+            mailing
+            and cap_street
+            and cap_street in str(mailing.get("mailing_address") or "").lower()
+            and not _parse_caption_mailing(text)
+        ):
+            mailing = {}
+        out.update(mailing)
         phone = PHONE_RE.search(body)
         if phone:
             out["petitioner_phone"] = re.sub(r"\s+", " ", phone.group("phone")).strip()
         email = EMAIL_RE.search(body)
         if email:
+            out["petitioner_email"] = email.group("email").strip()
+    if not out.get("mailing_address"):
+        out.update(_parse_caption_mailing(text))
+    if not out.get("petitioner_phone"):
+        phone = PHONE_RE.search(text[:4000])
+        if phone and _parse_caption_mailing(text):
+            out["petitioner_phone"] = re.sub(r"\s+", " ", phone.group("phone")).strip()
+    if not out.get("petitioner_email"):
+        email = EMAIL_RE.search(body or text[:4000])
+        if email and (body or _parse_caption_mailing(text)):
             out["petitioner_email"] = email.group("email").strip()
     personal = PERSONAL_RE.search(text)
     if personal:

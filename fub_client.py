@@ -2380,6 +2380,11 @@ def export_new_leads(
                 record_view["updated"] = False
                 summary["verify_record"] = record_view
                 print(
+                    f"FUB petitioner address {key}: "
+                    f"{row.get('mailing_address') or '(empty)'}",
+                    flush=True,
+                )
+                print(
                     f"FUB last residence {key}: "
                     f"{row.get('decedent_residence') or '(empty)'}",
                     flush=True,
