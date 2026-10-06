@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import json
 import os
 import re
@@ -629,7 +630,7 @@ SEND_TOGGLES = [
     {"key": "custom_fields", "label": "Send custom fields below", "editable": True},
     {
         "key": "de111_file",
-        "label": "Upload DE-111 PDF to Follow Up Boss Files",
+        "label": "Post DE-111 PDF link in Follow Up Boss Notes",
         "editable": True,
     },
 ]
@@ -2075,6 +2076,7 @@ def post_note(
     system: str,
     *,
     subject: str = "Placer probate",
+    is_html: bool = False,
 ) -> dict:
     text = (body or "").strip()
     if not text:
@@ -2085,7 +2087,7 @@ def post_note(
             "personId": int(person_id),
             "subject": subject or "Placer probate",
             "body": text,
-            "isHtml": False,
+            "isHtml": bool(is_html),
         },
         auth=(api_key, ""),
         headers=_fub_headers(system),
@@ -2160,6 +2162,24 @@ def post_person_attachment(
     raise RuntimeError("FUB files " + " | ".join(errors))
 
 
+def _de111_note_payload(case: str, file_name: str, uri: str, path: Path) -> tuple[str, bool]:
+    safe_case = html.escape(case or "")
+    safe_name = html.escape(file_name or "DE-111.pdf")
+    if uri:
+        safe_uri = html.escape(uri, quote=True)
+        body = (
+            f"<p>DE-111 petition for {safe_case}</p>"
+            f'<p><a href="{safe_uri}">{safe_name}</a></p>'
+            f"<p>{safe_uri}</p>"
+        )
+        return body, True
+    return (
+        f"DE-111 petition for {case}: {file_name}\n"
+        f"Saved on Home Assistant: {path}",
+        False,
+    )
+
+
 def attach_de111_file(
     row: dict,
     person_id: int,
@@ -2177,8 +2197,6 @@ def attach_de111_file(
         print(f"FUB files skip {key}: de111_file toggle off", flush=True)
         return {"ok": False, "reason": "disabled"}
     record = cases.get(key) or {}
-    if record.get("fub_attachment_id") and not force:
-        return {"ok": True, "reason": "already_attached", "id": record.get("fub_attachment_id")}
     path = _petition_pdf_path(row)
     if not path:
         print(f"FUB files skip {key}: no DE-111 PDF", flush=True)
@@ -2188,8 +2206,38 @@ def attach_de111_file(
     uri = petition_public_uri(case)
     if key not in cases:
         cases[key] = {}
+    if uri:
+        print(f"FUB DE-111 URL {key}: {uri}", flush=True)
+    else:
+        print(
+            f"FUB DE-111 URL {key}: missing Home Assistant external URL; "
+            f"PDF is at {path}",
+            flush=True,
+        )
+    if record.get("fub_de111_note_uri") == uri and uri and not force:
+        note_result = {"ok": True, "reason": "notes_link", "file": file_name, "uri": uri}
+    else:
+        body, is_html = _de111_note_payload(case, file_name, uri, path)
+        post_note(
+            api_url,
+            api_key,
+            person_id,
+            body,
+            system,
+            subject="DE-111 petition",
+            is_html=is_html,
+        )
+        cases[key]["fub_de111_note"] = True
+        cases[key]["fub_de111_note_uri"] = uri
+        print(f"FUB notes posted DE-111 link {key} person_id={person_id}", flush=True)
+        note_result = {"ok": True, "reason": "notes_link", "file": file_name, "uri": uri}
+    if not str(os.environ.get("FUB_SYSTEM_KEY") or "").strip():
+        return note_result
+    if record.get("fub_attachment_id") and not force:
+        note_result["id"] = record.get("fub_attachment_id")
+        return note_result
     try:
-        body = post_person_attachment(
+        attached = post_person_attachment(
             api_url,
             api_key,
             person_id,
@@ -2199,53 +2247,20 @@ def attach_de111_file(
             system=system,
         )
     except Exception as exc:  # noqa: BLE001
-        note = f"DE-111 petition: {file_name}"
-        if uri:
-            note += f"\n{uri}"
-        else:
-            note += f"\nSaved on Home Assistant: {path}"
-        try:
-            post_note(
-                api_url,
-                api_key,
-                person_id,
-                note,
-                system,
-                subject="DE-111 petition",
-            )
-            cases[key]["fub_de111_note"] = True
-            print(
-                f"FUB Files API denied for {key} (registered systems only). "
-                f"Posted DE-111 link in Notes instead.",
-                flush=True,
-            )
-            return {
-                "ok": True,
-                "reason": "notes_link",
-                "file": file_name,
-                "uri": uri,
-                "error": str(exc)[:200],
-            }
-        except Exception as note_exc:  # noqa: BLE001
-            print(
-                f"FUB files error {key}: {exc}; notes fallback failed: {note_exc}",
-                flush=True,
-            )
-            return {"ok": False, "reason": str(exc)[:300]}
-    attachment_id = body.get("id")
+        print(f"FUB Files API skipped for {key}: {exc}", flush=True)
+        note_result["error"] = str(exc)[:200]
+        return note_result
+    attachment_id = attached.get("id")
     if attachment_id:
         cases[key]["fub_attachment_id"] = attachment_id
-    print(
-        f"FUB files attached DE-111 {key} person_id={person_id} "
-        f"attachment_id={attachment_id or 'ok'}",
-        flush=True,
-    )
-    return {
-        "ok": True,
-        "reason": "attached",
-        "id": attachment_id,
-        "file": file_name,
-    }
+        note_result["id"] = attachment_id
+        note_result["reason"] = "attached"
+        print(
+            f"FUB files attached DE-111 {key} person_id={person_id} "
+            f"attachment_id={attachment_id}",
+            flush=True,
+        )
+    return note_result
 
 
 def person_id_from_response(body: dict) -> int | None:

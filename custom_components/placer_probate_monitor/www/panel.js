@@ -366,7 +366,7 @@ function ppmRenderPreview(el, st) {
   const attach = rec.de111_attach || {};
   const attachLine = attach.ok
     ? (attach.reason === "notes_link"
-      ? `${attach.file || "DE-111"} (Files API blocked; link posted in Notes)`
+      ? `${attach.file || "DE-111"} (Notes link${attach.uri ? `: ${attach.uri}` : ""})`
       : (attach.file ? `${attach.file} (${attach.reason || "attached"})` : (attach.reason || "attached")))
     : (attach.reason || (posted ? "not attached" : ""));
   const heading = viewOnly

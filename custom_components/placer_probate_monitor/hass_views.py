@@ -45,7 +45,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.25"
+PANEL_JS_VERSION = "1.3.26"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -351,7 +351,14 @@ class PetitionPdfView(HomeAssistantView):
             path = matches[0] if matches else None
         if not path or not path.is_file():
             return self.json({"error": "not found"}, status_code=404)
-        return FileResponse(path)
+        filename = f"{safe}_DE-111.pdf"
+        return FileResponse(
+            path,
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Disposition": f'inline; filename="{filename}"',
+            },
+        )
 
 
 class JobView(HomeAssistantView):
