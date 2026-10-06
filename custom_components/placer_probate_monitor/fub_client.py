@@ -640,9 +640,84 @@ GO_NO_GO = [
     "No go-case without petitioner address from DE-111 item 1. Email and phone also come from item 1 when present.",
     "Never map attorney_phone onto person.phones. Attorney caption address is not petitioner Address 1.",
     "Last residence is DE-111 text, not a verified APN. Case Summary URLs 404 unless you search first.",
-    "DE-111 is downloaded from eCourt and attached to the person Files tab on Verify and on a full import. Preview does not upload.",
+    "DE-111 is hosted on Home Assistant; Notes gets a unique PDF link. Files needs a registered FUB system key.",
     "Only NEW cases are created on a full run. Verify can update a person ID you enter, reuse the last test person, or create one if none exist.",
 ]
+
+SOURCE_GO_NO_GO = {
+    "placer": {
+        "required": [
+            {
+                "key": "case_number",
+                "label": "Case number",
+                "from": "CNPA notice / eCourt",
+            },
+            {
+                "key": "petitioner_first",
+                "label": "Petitioner first name",
+                "from": "eCourt petitioner",
+            },
+            {
+                "key": "petitioner_last",
+                "label": "Petitioner last name",
+                "from": "eCourt petitioner",
+            },
+            {
+                "key": "mailing_address",
+                "label": "Petitioner address",
+                "from": "DE-111 item 1",
+            },
+        ],
+        "optional": [
+            {
+                "key": "petitioner_email",
+                "label": "Petitioner email",
+                "from": "DE-111 item 1",
+            },
+            {
+                "key": "petitioner_phone",
+                "label": "Petitioner phone",
+                "from": "DE-111 item 1",
+            },
+            {
+                "key": "decedent_residence",
+                "label": "Decedent last residence",
+                "from": "DE-111 §3c",
+                "when": "Required only if “Require decedent residence” is on",
+            },
+        ],
+        "rules": GO_NO_GO,
+    },
+    "sacramento": {
+        "required": [],
+        "optional": [],
+        "rules": [
+            "Sacramento import is not live. Go/no-go data requirements will be listed here when this county is wired.",
+        ],
+    },
+    "nevada": {
+        "required": [],
+        "optional": [],
+        "rules": [
+            "Nevada County import is not live. Go/no-go data requirements will be listed here when this county is wired.",
+        ],
+    },
+}
+
+
+def go_no_go_for_source(source_id: str) -> dict:
+    key = str(source_id or "placer")
+    spec = SOURCE_GO_NO_GO.get(key) or {
+        "required": [],
+        "optional": [],
+        "rules": ["Go/no-go is not defined for this source yet."],
+    }
+    return {
+        "source_id": key,
+        "required": list(spec.get("required") or []),
+        "optional": list(spec.get("optional") or []),
+        "rules": list(spec.get("rules") or []),
+    }
 
 
 DATA_SOURCES = [
@@ -717,6 +792,9 @@ def sources_payload(settings: dict | None = None) -> dict:
         "placer": placer,
         "fields": source_field_catalog("placer"),
         "source_fields": {item["id"]: source_field_catalog(item["id"]) for item in DATA_SOURCES},
+        "source_go_no_go": {
+            item["id"]: go_no_go_for_source(item["id"]) for item in DATA_SOURCES
+        },
     }
 
 
@@ -728,6 +806,9 @@ def mapping_catalog() -> dict:
         "fub_destinations": FUB_DESTINATIONS,
         "send_toggles": SEND_TOGGLES,
         "go_no_go": GO_NO_GO,
+        "source_go_no_go": {
+            item["id"]: go_no_go_for_source(item["id"]) for item in DATA_SOURCES
+        },
         "default_custom_fields": {
             "petitioner_first": "firstName",
             "petitioner_last": "lastName",
@@ -1435,6 +1516,9 @@ def mapping_payload(path: Path | None = None, *, fetch_fub: bool = True, source_
         "data_sources": DATA_SOURCES,
         "source_id": source_id,
         "source_fields": source_fields,
+        "source_go_no_go": {
+            item["id"]: go_no_go_for_source(item["id"]) for item in DATA_SOURCES
+        },
         "source_custom_fields": custom_fields_for_source(mapping, source_id),
         "fub_custom_fields": live.get("fields") or [],
         "fub_builtin_fields": FUB_BUILTIN_FIELDS,

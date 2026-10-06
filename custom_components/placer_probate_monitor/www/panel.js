@@ -106,6 +106,52 @@ function ppmFubFieldSelect(key, selected, fubFields, builtins) {
   </select>`;
 }
 
+function ppmSourceGoNoGo(data, mapData, sourceId) {
+  return (data && data.source_go_no_go && data.source_go_no_go[sourceId])
+    || (mapData && mapData.source_go_no_go && mapData.source_go_no_go[sourceId])
+    || (mapData && mapData.catalog && mapData.catalog.source_go_no_go && mapData.catalog.source_go_no_go[sourceId])
+    || {};
+}
+
+function ppmGoNoGoInner(spec, sourceName) {
+  const data = spec || {};
+  const required = data.required || [];
+  const optional = data.optional || [];
+  const rules = data.rules || [];
+  const reqRows = required.map((item) => `
+    <tr>
+      <td><span class="ppm-pill off">Required</span></td>
+      <td><b>${ppmEsc(item.label)}</b><div class="ppm-note">${ppmEsc(item.key || "")}</div></td>
+      <td>${ppmEsc(item.from || "")}</td>
+    </tr>`).join("");
+  const optRows = optional.map((item) => `
+    <tr>
+      <td><span class="ppm-pill wait">Optional</span></td>
+      <td><b>${ppmEsc(item.label)}</b><div class="ppm-note">${ppmEsc(item.key || "")}</div></td>
+      <td>${ppmEsc(item.from || "")}${item.when ? `<div class="ppm-note">${ppmEsc(item.when)}</div>` : ""}</td>
+    </tr>`).join("");
+  const rows = (reqRows + optRows)
+    || `<tr><td colspan="3">No field checklist yet for ${ppmEsc(sourceName || "this source")}.</td></tr>`;
+  const ruleList = rules.length
+    ? `<ul>${rules.map((line) => `<li>${ppmEsc(line)}</li>`).join("")}</ul>`
+    : "";
+  return `
+    <p class="ppm-note">${ppmEsc(sourceName || "This source")} only becomes a go-case when every required field is present. Missing required data is skipped, not sent as a partial Follow Up Boss person.</p>
+    <table>
+      <thead><tr><th></th><th>Field</th><th>From</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${ruleList}`;
+}
+
+function ppmGoNoGoCard(spec, sourceName) {
+  return `
+    <section class="ppm-card">
+      <h2>Go / no-go data requirements</h2>
+      ${ppmGoNoGoInner(spec, sourceName)}
+    </section>`;
+}
+
 function ppmMappingRows(fields, custom, fubFields, person, builtins, defaults) {
   const titles = { petitioner: "Petitioner", decedent: "Decedent", other: "Case and other fields" };
   let lastGroup = "";
@@ -512,6 +558,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
           <p>${ppmEsc(src.description)}</p>
           <p class="ppm-note">Import is not live yet. You can still map this source’s future fields to Follow Up Boss custom fields.</p>
         </section>
+        ${ppmGoNoGoCard(ppmSourceGoNoGo(this._data, this._mapData, src.id), src.name)}
         <section class="ppm-card">
           <h2>Follow Up Boss mapping</h2>
           <p class="ppm-note">${fubFields.length
@@ -569,6 +616,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
         <h2>Last live extract</h2>
         <p class="ppm-note">Run Preview one extract to see pulled values and the Follow Up Boss mapping for one case.</p>
       </section>
+      ${ppmGoNoGoCard(ppmSourceGoNoGo(this._data, this._mapData, "placer"), "Placer County")}
       <section class="ppm-card">
         <h2>Follow Up Boss mapping</h2>
         <p class="ppm-note">${(this._mapData.fub_custom_fields || []).length
@@ -822,9 +870,9 @@ class PlacerProbateFubPanel extends HTMLElement {
             <p class="ppm-note">Run Verify one FUB import to show the go-case that was posted.</p>
           </section>
           <div id="tab-mapping" class="ppm-hide">
-            <section class="ppm-card">
-              <h2>Go / no-go</h2>
-              <ul id="rules"></ul>
+            <section class="ppm-card" id="go-no-go">
+              <h2>Go / no-go data requirements</h2>
+              <div id="go-no-go-body"></div>
               <p class="ppm-note" id="path-line"></p>
             </section>
             <section class="ppm-card">
@@ -927,8 +975,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     this._mapSource = data.source_id || this._mapSource || "placer";
     const mapping = data.mapping || {};
     const send = mapping.send || {};
-    this._qs("#rules").innerHTML = (this._catalog.go_no_go || [])
-      .map((line) => `<li>${ppmEsc(line)}</li>`).join("");
+    this._renderGoNoGo();
     const sources = data.data_sources || [];
     this._qs("#map-sources").innerHTML = sources.map((src) => {
       const active = src.id === this._mapSource ? "active" : "";
@@ -938,6 +985,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     this.querySelectorAll("[data-map-source]").forEach((btn) => {
       btn.addEventListener("click", () => {
         this._mapSource = btn.dataset.mapSource;
+        this._renderGoNoGo();
         this._renderMatrix();
         this._renderLiveClient();
         this.querySelectorAll("[data-map-source]").forEach((el) => {
@@ -969,6 +1017,19 @@ class PlacerProbateFubPanel extends HTMLElement {
         ? `Loaded ${this._fubFields.length} custom fields plus built-in person fields as dropdown options.`
         : "No custom fields came back from Follow Up Boss. Create them in FUB, then reload.");
     this._renderLiveClient();
+  }
+
+  _renderGoNoGo() {
+    const el = this._qs("#go-no-go-body");
+    if (!el) return;
+    const data = this._mapData || {};
+    const sources = data.data_sources || [];
+    const sourceName = (sources.find((item) => item.id === this._mapSource) || {}).name
+      || this._catalog.data_source_name
+      || this._mapSource
+      || "this source";
+    const spec = ppmSourceGoNoGo(data, data, this._mapSource || "placer");
+    el.innerHTML = ppmGoNoGoInner(spec, sourceName);
   }
 
   _renderMatrix() {
