@@ -2198,33 +2198,40 @@ def attach_de111_file(
             file_name=file_name,
             system=system,
         )
-    except RuntimeError as exc:
+    except Exception as exc:  # noqa: BLE001
         note = f"DE-111 petition: {file_name}"
         if uri:
             note += f"\n{uri}"
         else:
             note += f"\nSaved on Home Assistant: {path}"
-        post_note(
-            api_url,
-            api_key,
-            person_id,
-            note,
-            system,
-            subject="DE-111 petition",
-        )
-        cases[key]["fub_de111_note"] = True
-        print(
-            f"FUB Files API denied for {key} (registered systems only). "
-            f"Posted DE-111 link in Notes instead.",
-            flush=True,
-        )
-        return {
-            "ok": True,
-            "reason": "notes_link",
-            "file": file_name,
-            "uri": uri,
-            "error": str(exc)[:200],
-        }
+        try:
+            post_note(
+                api_url,
+                api_key,
+                person_id,
+                note,
+                system,
+                subject="DE-111 petition",
+            )
+            cases[key]["fub_de111_note"] = True
+            print(
+                f"FUB Files API denied for {key} (registered systems only). "
+                f"Posted DE-111 link in Notes instead.",
+                flush=True,
+            )
+            return {
+                "ok": True,
+                "reason": "notes_link",
+                "file": file_name,
+                "uri": uri,
+                "error": str(exc)[:200],
+            }
+        except Exception as note_exc:  # noqa: BLE001
+            print(
+                f"FUB files error {key}: {exc}; notes fallback failed: {note_exc}",
+                flush=True,
+            )
+            return {"ok": False, "reason": str(exc)[:300]}
     attachment_id = body.get("id")
     if attachment_id:
         cases[key]["fub_attachment_id"] = attachment_id
@@ -2357,6 +2364,16 @@ def export_new_leads(
                 record_view["posted"] = False
                 record_view["updated"] = False
                 summary["verify_record"] = record_view
+                print(
+                    f"FUB last residence {key}: "
+                    f"{row.get('decedent_residence') or '(empty)'}",
+                    flush=True,
+                )
+                print(
+                    f"FUB sending {len(person.get('addresses') or [])} "
+                    f"address(es) {key}: {person.get('addresses')}",
+                    flush=True,
+                )
                 body = put_person(
                     settings["api_url"], api_key, existing_id, person, system
                 )
