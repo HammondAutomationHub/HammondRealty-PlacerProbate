@@ -339,6 +339,89 @@ def save_state(path: Path, state: dict) -> None:
     tmp.replace(path)
 
 
+def listing_from_row(row: dict, run_date: str) -> dict:
+    case = str(row.get("case_number") or row.get("advert_id") or "").strip()
+    petitioner = (
+        str(row.get("petitioner") or "").strip()
+        or str(row.get("petitioner_name") or "").strip()
+    )
+    decedent = (
+        str(row.get("decedent") or "").strip()
+        or str(row.get("decedent_name") or "").strip()
+    )
+    return {
+        "case_number": case,
+        "date": str(row.get("post_date") or row.get("filed") or "").strip(),
+        "filed": str(row.get("filed") or row.get("filed_from_docket") or "").strip(),
+        "source": "Placer County",
+        "source_id": "placer",
+        "petitioner": petitioner,
+        "decedent": decedent,
+        "decedent_address": str(row.get("decedent_residence") or "").strip(),
+        "petitioner_address": str(
+            row.get("mailing_address") or ""
+        ).strip(),
+        "hearing": str(row.get("next_event") or row.get("hearing") or "").strip(),
+        "newspaper": str(row.get("newspaper") or "").strip(),
+        "notice_url": str(row.get("notice_url") or "").strip(),
+        "court_url": str(row.get("court_url") or "").strip(),
+        "status": str(row.get("status") or "").strip(),
+        "last_collected": run_date,
+    }
+
+
+def _read_listings_catalog(path: Path) -> dict[str, dict]:
+    catalog: dict[str, dict] = {}
+    if not path.exists():
+        return catalog
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return catalog
+    items = payload.get("listings") if isinstance(payload, dict) else payload
+    if not isinstance(items, list):
+        return catalog
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("case_number") or "").strip()
+        if key:
+            catalog[key] = item
+    return catalog
+
+
+def merge_listings(path: Path, rows: list[dict], run_date: str) -> None:
+    catalog = _read_listings_catalog(path)
+    for row in rows:
+        rec = listing_from_row(row, run_date)
+        key = rec.get("case_number")
+        if not key:
+            continue
+        prev = catalog.get(key) or {}
+        merged = dict(prev)
+        for field, value in rec.items():
+            if value not in (None, "", [], {}):
+                merged[field] = value
+            elif field not in merged:
+                merged[field] = value
+        merged["first_collected"] = prev.get("first_collected") or run_date
+        merged["last_collected"] = run_date
+        catalog[key] = merged
+    listings = sorted(
+        catalog.values(),
+        key=lambda item: (
+            str(item.get("date") or ""),
+            str(item.get("case_number") or ""),
+        ),
+        reverse=True,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"updated": run_date, "count": len(listings), "listings": listings}, indent=2),
+        encoding="utf-8",
+    )
+
+
 def mark_new(notices: list[Notice], state: dict, run_date: str) -> list[Notice]:
     cases = state.setdefault("cases", {})
     for notice in notices:
@@ -766,6 +849,7 @@ def main() -> int:
         rows = enrich_notices(unique, year=start.year, docs_dir=out_dir / "docs")
         (out_dir / f"dossiers-{stamp}.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
     write_ecourt_alerts(state_path.parent / "ecourt_alerts.json", rows)
+    merge_listings(state_path.parent / "listings.json", rows, run_date)
     if not args.no_pdf:
         try:
             from .pdf_report import build_pdf

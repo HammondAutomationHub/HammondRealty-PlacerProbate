@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from aiohttp import web
@@ -46,13 +47,14 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.51"
+PANEL_JS_VERSION = "1.3.52"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
 PANEL_JS = WWW / "panel.js"
 PANEL_FUB_PATH = "placer-probate-fub"
 PANEL_SOURCES_PATH = "placer-probate-sources"
+PANEL_LISTINGS_PATH = "placer-probate-listings"
 
 SOURCE_KEYS = {
     CONF_LOOKBACK_DAYS,
@@ -510,6 +512,56 @@ class JobView(HomeAssistantView):
         return self.json({"ok": True, "started": True, "action": action})
 
 
+class ListingsView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/listings"
+    name = "api:placer_probate_monitor:listings"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        payload = await self.hass.async_add_executor_job(_listings_payload, self.hass)
+        return self.json(payload)
+
+
+def _listings_payload(hass: HomeAssistant) -> dict:
+    from .placer_probate_monitor import (
+        _read_listings_catalog,
+        merge_listings,
+    )
+
+    data_dir = Path(hass.config.path(DOMAIN))
+    path = data_dir / "listings.json"
+    catalog = _read_listings_catalog(path)
+    reports = data_dir / "reports"
+    if not catalog and reports.is_dir():
+        rows: list[dict] = []
+        for dossier in sorted(reports.glob("dossiers-*.json")):
+            try:
+                payload = json.loads(dossier.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, list):
+                rows.extend(item for item in payload if isinstance(item, dict))
+        if rows:
+            stamp = max(
+                (str(item.get("post_date") or item.get("filed") or "") for item in rows),
+                default="",
+            ) or datetime.now().date().isoformat()
+            merge_listings(path, rows, stamp)
+            catalog = _read_listings_catalog(path)
+    listings = sorted(
+        catalog.values(),
+        key=lambda item: (
+            str(item.get("date") or ""),
+            str(item.get("case_number") or ""),
+        ),
+        reverse=True,
+    )
+    return {"count": len(listings), "listings": listings}
+
+
 def _register_panel(hass: HomeAssistant, url_path: str, title: str, icon: str, element: str) -> None:
     config = {
         "_panel_custom": {
@@ -549,11 +601,19 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(PetitionPdfView(hass))
     hass.http.register_view(DutiesPdfView(hass))
     hass.http.register_view(JobView(hass))
+    hass.http.register_view(ListingsView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 
 
 def async_setup_mapping_ui(hass: HomeAssistant) -> None:
     async_setup_mapping_views(hass)
+    _register_panel(
+        hass,
+        PANEL_LISTINGS_PATH,
+        "Probate listings",
+        "mdi:format-list-bulleted-square",
+        "placer-probate-listings-panel",
+    )
     _register_panel(
         hass,
         PANEL_SOURCES_PATH,
@@ -571,7 +631,7 @@ def async_setup_mapping_ui(hass: HomeAssistant) -> None:
 
 
 def async_unload_mapping_ui(hass: HomeAssistant) -> None:
-    for path in (PANEL_FUB_PATH, PANEL_SOURCES_PATH):
+    for path in (PANEL_FUB_PATH, PANEL_SOURCES_PATH, PANEL_LISTINGS_PATH):
         try:
             frontend.async_remove_panel(hass, path)
         except Exception:  # noqa: BLE001

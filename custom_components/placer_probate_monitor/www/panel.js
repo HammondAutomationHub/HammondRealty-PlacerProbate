@@ -48,6 +48,8 @@ const PPM_CSS = `
   @media (max-width: 900px) { .ppm-compare { grid-template-columns: 1fr; } }
   .ppm-wrap td a { color: #1b2a4a; word-break: break-all; }
   .ppm-pre { white-space: pre-wrap; font: 12px/1.4 ui-monospace, Consolas, monospace; margin: 0; }
+  .ppm-table-wrap { overflow-x: auto; }
+  .ppm-wrap main.ppm-listings { max-width: 1440px; }
 `;
 
 function ppmSleep(ms) {
@@ -1275,3 +1277,137 @@ class PlacerProbateFubPanel extends HTMLElement {
 
 customElements.define("placer-probate-sources-panel", PlacerProbateSourcesPanel);
 customElements.define("placer-probate-fub-panel", PlacerProbateFubPanel);
+
+class PlacerProbateListingsPanel extends HTMLElement {
+  constructor() {
+    super();
+    this._hass = null;
+    this._ready = false;
+    this._rows = [];
+    this._query = "";
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._ready) {
+      this._ready = true;
+      this._renderShell();
+      this._load();
+    }
+  }
+
+  get hass() {
+    return this._hass;
+  }
+
+  _qs(sel) {
+    return this.querySelector(sel);
+  }
+
+  _flash(msg, ok) {
+    const el = this._qs("#flash");
+    el.textContent = msg;
+    el.className = "ppm-banner show " + (ok ? "ok" : "err");
+  }
+
+  _renderShell() {
+    this.innerHTML = `
+      <style>${PPM_CSS}</style>
+      <div class="ppm-wrap">
+        <header>
+          <h1>Probate listings</h1>
+          <p>Collected Placer cases. Date is the newspaper notice date. Source is the county import. Decedent address is DE-111 item 3c or 3a(2).</p>
+        </header>
+        <main class="ppm-listings">
+          <div id="flash" class="ppm-banner"></div>
+          <section class="ppm-card">
+            <div class="ppm-row">
+              <div>
+                <label>Filter</label>
+                <input id="listing-q" placeholder="Case, petitioner, decedent, address" />
+              </div>
+              <div>
+                <label>&nbsp;</label>
+                <div class="ppm-actions" style="margin-top:0;">
+                  <button type="button" id="listing-reload">Reload</button>
+                </div>
+              </div>
+            </div>
+            <p class="ppm-note" id="listing-count"></p>
+            <div class="ppm-table-wrap" id="listing-table"></div>
+          </section>
+        </main>
+      </div>
+    `;
+    this._qs("#listing-reload").addEventListener("click", () => this._load());
+    this._qs("#listing-q").addEventListener("input", (ev) => {
+      this._query = ev.target.value || "";
+      this._renderTable();
+    });
+  }
+
+  _filtered() {
+    const q = this._query.trim().toLowerCase();
+    if (!q) return this._rows;
+    return this._rows.filter((row) => {
+      const blob = [
+        row.case_number, row.date, row.source, row.petitioner, row.decedent,
+        row.decedent_address, row.petitioner_address, row.newspaper, row.filed,
+      ].map((item) => String(item || "").toLowerCase()).join(" ");
+      return blob.includes(q);
+    });
+  }
+
+  _renderTable() {
+    const rows = this._filtered();
+    this._qs("#listing-count").textContent = rows.length
+      ? `${rows.length} listing${rows.length === 1 ? "" : "s"}`
+      : "No collected listings yet. Run a Placer import or Preview one extract.";
+    if (!rows.length) {
+      this._qs("#listing-table").innerHTML = "";
+      return;
+    }
+    const body = rows.map((row) => {
+      const caseCell = row.notice_url
+        ? `<a href="${ppmEsc(row.notice_url)}" target="_blank" rel="noopener">${ppmEsc(row.case_number)}</a>`
+        : ppmEsc(row.case_number);
+      return `<tr>
+        <td>${ppmEsc(row.date || row.filed || "—")}</td>
+        <td>${ppmEsc(row.source || "Placer County")}</td>
+        <td>${caseCell}</td>
+        <td>${ppmEsc(row.petitioner || "—")}<div class="ppm-note">${ppmEsc(row.petitioner_address || "")}</div></td>
+        <td>${ppmEsc(row.decedent || "—")}</td>
+        <td>${ppmEsc(row.decedent_address || "—")}</td>
+      </tr>`;
+    }).join("");
+    this._qs("#listing-table").innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Source</th>
+            <th>Case</th>
+            <th>Petitioner</th>
+            <th>Decedent</th>
+            <th>Decedent address</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    `;
+  }
+
+  async _load() {
+    this._flash("Loading collected listings…", true);
+    try {
+      const data = await this._hass.callApi("GET", "placer_probate_monitor/listings");
+      this._rows = data.listings || [];
+      this._renderTable();
+      this._flash(`Loaded ${this._rows.length} collected listing${this._rows.length === 1 ? "" : "s"}.`, true);
+    } catch (err) {
+      this._flash(ppmText(err), false);
+    }
+  }
+}
+
+customElements.define("placer-probate-listings-panel", PlacerProbateListingsPanel);
