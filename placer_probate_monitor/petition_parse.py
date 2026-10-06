@@ -768,19 +768,39 @@ def _petitioner_phone_from_text(text: str, skip: set[str] | None = None) -> str:
     return ""
 
 
-def merge_petitioner_contact(de111: dict, de147: dict) -> dict:
-    """Take address/phone/email from either form; prefer DE-147 for phone/email."""
-    left = de111 or {}
-    right = de147 or {}
+CONTACT_KEYS = (
+    "mailing_address",
+    "mailing_city",
+    "mailing_state",
+    "mailing_zip",
+    "petitioner_phone",
+    "petitioner_email",
+)
+
+
+def contact_fields(data: dict | None) -> dict:
+    out: dict = {}
+    for key in CONTACT_KEYS:
+        value = (data or {}).get(key)
+        if value not in (None, "", [], {}):
+            out[key] = value
+    return out
+
+
+def merge_petitioner_contact(*parts: dict) -> dict:
+    """Use any petitioner address/phone/email found on DE-111, DE-147, or the row."""
+    filled = [contact_fields(part) for part in parts]
     out: dict = {}
     for key in ("mailing_address", "mailing_city", "mailing_state", "mailing_zip"):
-        value = left.get(key) or right.get(key)
-        if value:
-            out[key] = value
+        for part in filled:
+            if key in part:
+                out[key] = part[key]
+                break
     for key in ("petitioner_phone", "petitioner_email"):
-        value = right.get(key) or left.get(key)
-        if value:
-            out[key] = value
+        for part in reversed(filled):
+            if key in part:
+                out[key] = part[key]
+                break
     return out
 
 

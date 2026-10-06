@@ -305,8 +305,35 @@ PROBATE_SOURCE_FIELDS = [
         "key": "mailing_address",
         "label": "Petitioner address",
         "group": "petitioner",
-        "source": "DE-111 item 8 (interested persons) / item 3h / in-pro-per caption",
-        "notes": "FUB Address 1. Not item 1 (publication) and not item 3c (decedent).",
+        "source": "DE-111 item 8 / 3h or DE-147 acknowledgment, whichever has it",
+        "notes": "FUB Address 1. Use any petitioner mailing found on either form. Not item 1 (publication), not item 3c (decedent), not attorney caption.",
+        "person": "addresses",
+        "custom": True,
+    },
+    {
+        "key": "mailing_city",
+        "label": "Petitioner city",
+        "group": "petitioner",
+        "source": "DE-111 or DE-147, whichever has it",
+        "notes": "Address 1 city. Filled from either form.",
+        "person": "addresses",
+        "custom": True,
+    },
+    {
+        "key": "mailing_state",
+        "label": "Petitioner state",
+        "group": "petitioner",
+        "source": "DE-111 or DE-147, whichever has it",
+        "notes": "Address 1 state. Do not default to CA when the form has another state.",
+        "person": "addresses",
+        "custom": True,
+    },
+    {
+        "key": "mailing_zip",
+        "label": "Petitioner ZIP",
+        "group": "petitioner",
+        "source": "DE-111 or DE-147, whichever has it",
+        "notes": "Address 1 ZIP. Filled from either form.",
         "person": "addresses",
         "custom": True,
     },
@@ -314,7 +341,7 @@ PROBATE_SOURCE_FIELDS = [
         "key": "petitioner_email",
         "label": "Petitioner email",
         "group": "petitioner",
-        "source": "DE-147 acknowledgment",
+        "source": "DE-111 or DE-147, whichever has it",
         "notes": "Never use attorney caption email.",
         "person": "emails",
         "custom": True,
@@ -323,7 +350,7 @@ PROBATE_SOURCE_FIELDS = [
         "key": "petitioner_phone",
         "label": "Petitioner phone",
         "group": "petitioner",
-        "source": "DE-147 acknowledgment",
+        "source": "DE-111 or DE-147, whichever has it",
         "notes": "Never map attorney_phone onto person.phones.",
         "person": "phones",
         "custom": True,
@@ -679,10 +706,10 @@ SEND_TOGGLES = [
 
 GO_NO_GO = [
     "Petitioner is the FUB Person. Decedent is never firstName/lastName.",
-    "No go-case without petitioner address. On current DE-111 that is item 8 (and item 3h if a nonresident personal representative). Item 1 is publication. Item 3c is decedent last residence, not Address 1. Attorney caption is not petitioner Address 1.",
+    "No go-case without petitioner address. Address 1 is petitioner mailing from DE-111 item 8 / 3h or DE-147 acknowledgment — whichever form has it. Item 1 is publication. Item 3c is decedent last residence, not Address 1. Attorney caption is not petitioner Address 1.",
     "Never map attorney_phone onto person.phones. Attorney caption address is not petitioner Address 1.",
     "Last residence is DE-111 text, not a verified APN.",
-    "Notes gets the per-case eCourt Public URL, a unique DE-111 PDF link, and a DE-147 duties link. Petitioner phone comes from DE-147 acknowledgment, not the attorney caption.",
+    "Notes gets the per-case eCourt Public URL, a unique DE-111 PDF link, and a DE-147 duties link. Petitioner phone and email come from either form when present, never from the attorney caption.",
     "Only NEW cases are created on a full run. Verify can update a person ID you enter, reuse the last test person, or create one if none exist.",
 ]
 
@@ -707,19 +734,19 @@ SOURCE_GO_NO_GO = {
             {
                 "key": "mailing_address",
                 "label": "Petitioner address",
-                "from": "DE-111 item 8 / 3h / in-pro-per caption",
+                "from": "DE-111 item 8 / 3h or DE-147, whichever has it",
             },
         ],
         "optional": [
             {
                 "key": "petitioner_email",
                 "label": "Petitioner email",
-                "from": "DE-147 acknowledgment",
+                "from": "DE-111 or DE-147, whichever has it",
             },
             {
                 "key": "petitioner_phone",
                 "label": "Petitioner phone",
-                "from": "DE-147 acknowledgment",
+                "from": "DE-111 or DE-147, whichever has it",
             },
             {
                 "key": "decedent_residence",
@@ -983,6 +1010,19 @@ def _stringify_field(value) -> str:
     return str(value).strip()
 
 
+def _row_contact(row: dict) -> dict:
+    try:
+        from .petition_parse import merge_petitioner_contact
+    except ImportError:
+        from petition_parse import merge_petitioner_contact
+
+    return merge_petitioner_contact(
+        row,
+        row.get("contact_de111") or {},
+        row.get("contact_de147") or {},
+    )
+
+
 def source_extract_rows(row: dict, mapping: dict) -> list[dict]:
     values = probate_export_values(row, mapping)
     seen: set[str] = set()
@@ -1107,6 +1147,7 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
     petition_name = (
         Path(str(row.get("petition_pdf") or "")).name if row.get("petition_pdf") else ""
     )
+    contact = _row_contact(row)
     return {
         "petitioner": petitioner,
         "petitioner_first": first,
@@ -1119,12 +1160,12 @@ def probate_export_values(row: dict, mapping: dict) -> dict:
         "decedent_city": _stringify_field(row.get("decedent_city")),
         "decedent_state": _stringify_field(row.get("decedent_state")),
         "decedent_zip": _stringify_field(row.get("decedent_zip")),
-        "mailing_address": _stringify_field(row.get("mailing_address")),
-        "mailing_city": _stringify_field(row.get("mailing_city")),
-        "mailing_state": _stringify_field(row.get("mailing_state")),
-        "mailing_zip": _stringify_field(row.get("mailing_zip")),
-        "petitioner_email": _stringify_field(row.get("petitioner_email")),
-        "petitioner_phone": _stringify_field(row.get("petitioner_phone")),
+        "mailing_address": _stringify_field(contact.get("mailing_address") or row.get("mailing_address")),
+        "mailing_city": _stringify_field(contact.get("mailing_city") or row.get("mailing_city")),
+        "mailing_state": _stringify_field(contact.get("mailing_state") or row.get("mailing_state")),
+        "mailing_zip": _stringify_field(contact.get("mailing_zip") or row.get("mailing_zip")),
+        "petitioner_email": _stringify_field(contact.get("petitioner_email") or row.get("petitioner_email")),
+        "petitioner_phone": _stringify_field(contact.get("petitioner_phone") or row.get("petitioner_phone")),
         "decedent_died": _stringify_field(row.get("decedent_died")),
         "death_place": _stringify_field(row.get("death_place")),
         "estate_real": _stringify_field(row.get("estate_real")),
@@ -1663,10 +1704,8 @@ def _fub_address(
     state: str = "",
     code: str = "",
 ) -> dict | None:
-    parsed = split_address(line)
-    if not parsed:
-        return None
-    street = str(parsed.get("street") or "").strip()
+    parsed = split_address(line) or {}
+    street = str(parsed.get("street") or line or "").strip(" ,")
     city = _usable_city(parsed.get("city") or "") or _usable_city(city)
     state = str(parsed.get("state") or state or "").strip().upper()
     zip_code = str(parsed.get("code") or code or "").strip()
@@ -1706,11 +1745,12 @@ def _address_parts_from_source(local_key: str, values: dict) -> tuple[str, str, 
     if local_key in {
         "mailing_address",
         "mailing_city",
+        "mailing_state",
         "mailing_zip",
     }:
         return (
             _usable_city(str(values.get("mailing_city") or "")),
-            str(values.get("mailing_state") or "CA").strip() or "CA",
+            str(values.get("mailing_state") or "").strip(),
             str(values.get("mailing_zip") or "").strip(),
         )
     if local_key in {
@@ -1894,7 +1934,7 @@ def gate_reason(
     low = petitioner.lower()
     if any(bit in low for bit in skip_bits if bit):
         return "petitioner_skipped"
-    if not str(row.get("mailing_address") or "").strip():
+    if not str(_row_contact(row).get("mailing_address") or row.get("mailing_address") or "").strip():
         return "missing_petitioner_address"
     if (
         existing_id is None
@@ -2510,7 +2550,7 @@ def attach_de147_file(
     file_name = f"{petition_safe_case(case)}_DE-147.pdf"
     uri = duties_public_uri(case)
     court_url = str(row.get("duties_url") or "").strip()
-    phone = str(row.get("petitioner_phone") or "").strip()
+    phone = str(_row_contact(row).get("petitioner_phone") or row.get("petitioner_phone") or "").strip()
     record = cases.get(key) or {}
     if key not in cases:
         cases[key] = {}

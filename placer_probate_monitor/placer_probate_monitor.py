@@ -479,6 +479,7 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
     try:
         from .ecourt_client import ECourtClient
         from .petition_parse import (
+            contact_fields,
             looks_like_duties_form,
             looks_like_probate_petition,
             merge_petitioner_contact,
@@ -488,6 +489,7 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
     except ImportError:
         from ecourt_client import ECourtClient
         from petition_parse import (
+            contact_fields,
             looks_like_duties_form,
             looks_like_probate_petition,
             merge_petitioner_contact,
@@ -560,6 +562,8 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                         portal["duties_parse_error"] = "download was not a PDF"
                 except Exception as exc:  # noqa: BLE001
                     portal["duties_parse_error"] = str(exc)
+            portal["contact_de111"] = contact_fields(de111)
+            portal["contact_de147"] = contact_fields(de147)
             contact = merge_petitioner_contact(de111, de147)
             if contact:
                 portal.update(contact)
