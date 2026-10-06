@@ -1,4 +1,14 @@
-"""Parse California DE-111 Petition for Probate text (pypdf extract)."""
+"""Parse California DE-111 Petition for Probate text (pypdf extract).
+
+Decedent street address is chosen in this order and never mixed:
+
+1. Item 3.a.(2) estate location (nonresident, left an estate in this county).
+2. Item 3c last residence at death, only if 3.a.(2) has no street.
+3. Never item 3 "at (place)" (place of death). That stays in death_place.
+
+Regression cases live in tests/test_de111_address.py. Add a fixture there
+before changing this module, or the next PDF will undo the last fix.
+"""
 
 from __future__ import annotations
 
