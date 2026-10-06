@@ -12,21 +12,26 @@ from pathlib import Path
 
 import requests
 
+try:
+    from .petition_parse import STATE_ALT as _STATE_ALT
+except ImportError:
+    from petition_parse import STATE_ALT as _STATE_ALT
+
 COURT_SEARCH_DEFAULT = "https://webportal.placerco.org/eCourtPublic/?q=node/48"
 CASE_PORTAL_TEMPLATE = "https://webportal.placerco.org/eCourtPublic/?q=node/45/{nid}"
 CASE_PORTAL_RE = re.compile(r"node/45/(\d+)", re.I)
 DOWNLOAD_CASE_RE = re.compile(r"downloadFile/\d+/(\d+)", re.I)
 MAPPING_PATH = Path(__file__).resolve().parent / "fub_mapping.yaml"
 ADDR_RE = re.compile(
-    r"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*"
-    r"(?P<state>California|Washington|Oregon|Nevada|Arizona|Idaho|CA|WA|OR|NV|AZ|ID)"
-    r"\s*(?P<zip>\d{5}(?:-\d{4})?)?$",
+    rf"^(?P<street>.+?),\s*(?P<city>[^,]+),\s*"
+    rf"(?P<state>{_STATE_ALT})"
+    rf"\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?$",
     re.I,
 )
 ADDR_FLEX_RE = re.compile(
-    r"^(?P<street>.+?),\s*(?P<city>[A-Za-z .'-]+?)(?:\s*,\s*|\s+)"
-    r"(?P<state>California|Washington|Oregon|Nevada|Arizona|Idaho|CA|WA|OR|NV|AZ|ID)"
-    r"\s*(?P<zip>\d{5}(?:-\d{4})?)?\s*$",
+    rf"^(?P<street>.+?),\s*(?P<city>[A-Za-z .'-]+?)(?:\s*,\s*|\s+)"
+    rf"(?P<state>{_STATE_ALT})"
+    rf"\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?\s*$",
     re.I,
 )
 COUNTY_NOISE_RE = re.compile(r",?\s*Placer(?:\s+County)?\b,?", re.I)
@@ -1761,7 +1766,7 @@ def _address_parts_from_source(local_key: str, values: dict) -> tuple[str, str, 
     }:
         return (
             _usable_city(str(values.get("decedent_city") or "")),
-            str(values.get("decedent_state") or "CA").strip() or "CA",
+            str(values.get("decedent_state") or "").strip(),
             str(values.get("decedent_zip") or "").strip(),
         )
     return "", "", ""

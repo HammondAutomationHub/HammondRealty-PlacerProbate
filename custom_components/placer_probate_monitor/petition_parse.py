@@ -27,34 +27,87 @@ RESIDENCE_RE = re.compile(
     r"4\.\s|Publication of Notice|PETITION FOR PROBATE)",
     re.I | re.S,
 )
-STATE_ALT = (
-    r"California|Washington|Oregon|Nevada|Arizona|Idaho|CA|WA|OR|NV|AZ|ID"
-)
-STATE_ALIAS = {
-    "ca": "CA",
-    "california": "CA",
-    "wa": "WA",
-    "washington": "WA",
-    "or": "OR",
-    "oregon": "OR",
-    "nv": "NV",
-    "nevada": "NV",
-    "az": "AZ",
-    "arizona": "AZ",
-    "id": "ID",
-    "idaho": "ID",
+US_STATE_NAMES = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "DC": "District of Columbia",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
 }
+STATE_ALIAS = {}
+for _code, _name in US_STATE_NAMES.items():
+    STATE_ALIAS[_code.lower()] = _code
+    STATE_ALIAS[_name.lower()] = _code
+STATE_ALT = "|".join(
+    sorted(US_STATE_NAMES.values(), key=len, reverse=True)
+    + sorted(US_STATE_NAMES.keys(), key=len, reverse=True)
+)
 ROAD = (
-    r"(?:Road|Rd|Lane|Ln|Drive|Dr|Street|St|Way|Court|Ct|Avenue|Ave|"
+    r"(?:County\s+Rout[e]?|Route|Rte|Rout|"
+    r"Road|Rd|Lane|Ln|Drive|Dr|Street|St|Way|Court|Ct|Avenue|Ave|"
     r"Place|Pl|Circle|Cir|Boulevard|Blvd|Highway|Hwy)\.?"
 )
 UNIT = r"(?:\s*,?\s*(?:Suite|Ste\.?|Unit|Apt\.?|#)\s*[A-Z0-9\-]+)"
-ITEM3C_ADDR_RE = re.compile(
-    rf"(?P<street>\d{{1,6}}\s+(?!\d+\s)(?:[A-Za-z0-9.'#\-]+\s+)*{ROAD}{UNIT}?)\s*,\s*"
+_ADDR_TAIL = (
     rf"(?P<city>(?!Placer(?:\s+County)?\b)[A-Za-z][A-Za-z .'-]+?)\s*,\s*"
     rf"(?:(?P<county>[A-Za-z][A-Za-z .'-]+?)\s+County\s*,\s*)?"
     rf"(?P<state>{STATE_ALT})\.?\s*"
-    rf"(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
+    rf"(?P<zip>\d{{5}}(?:-\d{{4}})?)?"
+)
+ITEM3C_ADDR_RE = re.compile(
+    rf"(?P<street>\d{{1,6}}\s+(?!\d+\s)(?:[A-Za-z0-9.'#\-]+\s+)*{ROAD}{UNIT}?)\s*,\s*"
+    rf"{_ADDR_TAIL}",
+    re.I,
+)
+US_LINE_RE = re.compile(
+    rf"(?P<street>\d{{1,6}}\s+(?!\d+\s)[^,\n]{{2,60}}?)\s*,\s*"
+    rf"{_ADDR_TAIL}",
     re.I,
 )
 PHONE_RE = re.compile(
@@ -78,7 +131,7 @@ ITEM2_NAMES_RE = re.compile(
     re.I | re.S,
 )
 ITEM8_RE = re.compile(
-    r"8\.\s*Name and relationship to decedent.{0,120}Address(?P<body>.+?)"
+    r"8\.\s*Name and relationship to decedent(?P<header>.{0,500}?)Address(?P<body>.+?)"
     r"(?:Continued on Attachment 8|Number of pages attached|"
     r"I declare under penalty|TYPE OR PRINT NAME)",
     re.I | re.S,
@@ -95,7 +148,7 @@ PERMANENT_ADDR_RE = re.compile(
 CAPTION_ADDR_RE = re.compile(
     r"STREET ADDRESS:\s*(?P<street>[^\n]+?)\s+"
     r"CITY:\s*(?P<city>[A-Za-z .'-]+)\s+"
-    r"STATE:\s*(?P<state>CA|WA|OR|NV|AZ|ID)\s+"
+    r"STATE:\s*(?P<state>[A-Z]{2})\s+"
     r"ZIP(?:\s*CODE)?:\s*(?P<zip>\d{5}(?:-\d{4})?)",
     re.I,
 )
@@ -112,20 +165,20 @@ ADDR_PATTERNS = [
     re.compile(
         rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD}{UNIT}?)"
         rf"\s*,?\s*(?P<city>[A-Za-z][A-Za-z .'-]+?),\s*"
-        rf"(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
+        rf"(?P<state>{STATE_ALT})\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
         re.I,
     ),
     re.compile(
         rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+\s+{ROAD}{UNIT}?)"
         rf"\s+(?P<city>[A-Za-z][A-Za-z .'-]+?)"
-        rf"\s+(?:Placer(?:\s+County)?\s+)?(?P<state>CA|WA|OR|NV)\s+"
+        rf"\s+(?:Placer(?:\s+County)?\s+)?(?P<state>{STATE_ALT})\s+"
         rf"(?P<zip>\d{{5}}(?:-\d{{4}})?)(?:\s*\(Placer County\))?",
         re.I,
     ),
     re.compile(
         rf"(?P<street>\d{{1,6}}\s+[^\n]+?{ROAD}{UNIT}?)\s+"
         r"(?P<city>[A-Za-z][A-Za-z .'-]+),\s*"
-        r"(?P<state>CA|WA|OR|NV|AZ|ID)\s*(?P<zip>\d{5}(?:-\d{4})?)?",
+        rf"(?P<state>{STATE_ALT})\s*(?P<zip>\d{{5}}(?:-\d{{4}})?)?",
         re.I,
     ),
 ]
@@ -159,10 +212,10 @@ def split_de111_address(line: str) -> dict:
     text = re.sub(r"\s+,", ",", text)
     if not text:
         return {}
-    match = ITEM3C_ADDR_RE.search(text)
+    match = ITEM3C_ADDR_RE.search(text) or US_LINE_RE.search(text)
     if not match:
         stripped = _strip_county_noise(text)
-        match = ITEM3C_ADDR_RE.search(stripped)
+        match = ITEM3C_ADDR_RE.search(stripped) or US_LINE_RE.search(stripped)
     if not match:
         return {}
     city = _usable_city(match.group("city"))
@@ -365,49 +418,76 @@ def _first_parsed_address(body: str, *, prefix: str) -> dict:
     return _parse_address(body, prefix=prefix)
 
 
+def _parsed_from_addr_match(hit: re.Match, *, prefix: str) -> dict:
+    return _address_from_groups(
+        hit.group("street"),
+        hit.group("city"),
+        hit.group("state"),
+        hit.group("zip") or "",
+        prefix=prefix,
+    )
+
+
+def _iter_us_addresses(blob: str, *, prefix: str) -> list[dict]:
+    found: list[dict] = []
+    seen: set[str] = set()
+    search_from = 0
+    while True:
+        hit = ITEM3C_ADDR_RE.search(blob, search_from) or US_LINE_RE.search(blob, search_from)
+        if not hit:
+            break
+        search_from = hit.end()
+        parsed = _parsed_from_addr_match(hit, prefix=prefix)
+        key = str(parsed.get("mailing_address") or parsed.get("decedent_residence") or "")
+        if not parsed or key in seen:
+            continue
+        seen.add(key)
+        found.append(parsed)
+    return found
+
+
+def _item8_people(header: str) -> list[str]:
+    people: list[str] = []
+    for raw in (header or "").splitlines():
+        line = re.sub(r"\s+", " ", raw).strip(" .")
+        if not line:
+            continue
+        low = line.lower()
+        if any(
+            bit in low
+            for bit in ("age", "adult", "minor", "relationship", "decedent", "name and", "address")
+        ):
+            continue
+        if re.search(r"\d{5}", line) or re.match(r"\d", line):
+            continue
+        if len(_name_tokens(line)) >= 2:
+            people.append(line)
+    return people
+
+
 def _item8_petitioner_address(text: str, petitioner_name: str = "") -> dict:
     match = ITEM8_RE.search(text)
     if not match:
         return {}
-    body = match.group("body")
-    tokens = _name_tokens(petitioner_name)
-    found: list[tuple[int, dict]] = []
-    search_from = 0
-    while True:
-        hit = ITEM3C_ADDR_RE.search(body, search_from)
-        if not hit:
-            break
-        window = body[max(0, hit.start() - 160) : hit.start()]
-        window_tokens = _name_tokens(window)
-        parsed = _address_from_groups(
-            hit.group("street"),
-            hit.group("city"),
-            hit.group("state"),
-            hit.group("zip") or "",
-            prefix="mailing",
-        )
-        search_from = hit.end()
-        if not parsed:
-            continue
-        overlap = tokens & window_tokens if tokens else set()
-        if tokens:
-            first = (petitioner_name.split() or [""])[0].lower()
-            if first and len(first) > 2 and first not in window_tokens:
-                search_from = hit.end()
-                continue
-            if len(tokens) >= 2 and len(overlap) < 2:
-                search_from = hit.end()
-                continue
-            if not overlap:
-                search_from = hit.end()
-                continue
-        found.append((len(overlap), parsed))
-    if found:
-        found.sort(key=lambda item: item[0], reverse=True)
-        return found[0][1]
-    if tokens:
+    header = match.group("header") or ""
+    body = match.group("body") or ""
+    addrs = _iter_us_addresses(body, prefix="mailing")
+    if not addrs:
         return {}
-    return _first_parsed_address(body, prefix="mailing")
+    tokens = _name_tokens(petitioner_name)
+    people = _item8_people(header)
+    if tokens and people:
+        for idx, person in enumerate(people):
+            overlap = tokens & _name_tokens(person)
+            first = (petitioner_name.split() or [""])[0].lower()
+            if first and len(first) > 2 and first not in _name_tokens(person):
+                continue
+            if overlap and idx < len(addrs):
+                return addrs[idx]
+        if tokens & _name_tokens(header) and addrs:
+            return addrs[0]
+        return {}
+    return addrs[0]
 
 
 def _item3h_address(text: str) -> dict:
@@ -435,7 +515,12 @@ def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
     citizen = ITEM3B_RE.search(text)
     if citizen:
         country = re.sub(r"\s+", " ", (citizen.group("country") or "")).strip(" .")
-        if country and country.lower() not in {"specify country", "street address"}:
+        if (
+            country
+            and country.lower() not in {"specify country", "street address"}
+            and not re.match(r"^c\.?\s", country, re.I)
+            and "street address" not in country.lower()
+        ):
             out["decedent_citizenship"] = country
     res = RESIDENCE_RE.search(text)
     if res:
