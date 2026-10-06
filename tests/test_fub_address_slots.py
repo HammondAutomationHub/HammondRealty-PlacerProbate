@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "custom_components" / "placer_probate_monitor"))
 
-from fub_client import build_person  # noqa: E402
+from fub_client import build_event, build_person  # noqa: E402
 
 
 ROW = {
@@ -64,6 +64,18 @@ class AddressSlotTests(unittest.TestCase):
         self.assertEqual(addrs[1]["street"], "51 Ashby Hills Ct")
         self.assertEqual(addrs[1]["type"], "mailing")
         self.assertNotIn("_addr_slots", person)
+
+    def test_verify_event_reuses_the_same_person_addresses(self):
+        mapping = _mapping(
+            {
+                "mailing_address": "address2",
+                "decedent_residence": "addresses",
+            }
+        )
+        person = build_person(ROW, mapping, SETTINGS)
+        event = build_event(ROW, mapping, SETTINGS, person=person)
+        self.assertEqual(event["person"]["addresses"], person["addresses"])
+        self.assertEqual(len(event["person"]["addresses"]), 2)
 
     def test_home_mapped_before_mailing_keeps_both(self):
         person = build_person(

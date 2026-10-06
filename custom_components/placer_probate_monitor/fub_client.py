@@ -1135,7 +1135,7 @@ def source_extract_rows(row: dict, mapping: dict) -> list[dict]:
 
 
 def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) -> dict:
-    event = build_event(row, mapping, settings)
+    event = build_event(row, mapping, settings, person=person)
     addresses = person.get("addresses") or []
     person_rows = [
         {"label": "firstName", "value": person.get("firstName") or ""},
@@ -1159,7 +1159,18 @@ def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) 
             "value": _fub_display_value(person.get("phones")),
         },
     ]
-    skip = {"id", "firstName", "lastName", "assignedTo", "stage", "addresses", "background", "emails", "phones"}
+    skip = {
+        "id",
+        "_addr_slots",
+        "firstName",
+        "lastName",
+        "assignedTo",
+        "stage",
+        "addresses",
+        "background",
+        "emails",
+        "phones",
+    }
     for key, value in person.items():
         if key in skip or value in (None, "", []):
             continue
@@ -2257,11 +2268,34 @@ def verify_record_payload(
     }
 
 
+def _person_api_body(person: dict) -> dict:
+    return {k: v for k, v in (person or {}).items() if k not in {"id", "_addr_slots"}}
+
+
+def _log_fub_person_payload(key: str, row: dict, person: dict) -> None:
+    print(
+        f"FUB petitioner address {key}: "
+        f"{row.get('mailing_address') or '(empty)'}",
+        flush=True,
+    )
+    print(
+        f"FUB last residence {key}: "
+        f"{row.get('decedent_residence') or '(empty)'}",
+        flush=True,
+    )
+    print(
+        f"FUB sending {len(person.get('addresses') or [])} "
+        f"address(es) {key}: {person.get('addresses')}",
+        flush=True,
+    )
+
+
 def build_event(
     row: dict,
     mapping: dict,
     settings: dict,
     *,
+    person: dict | None = None,
     person_id: int | None = None,
     allowed_custom: set[str] | None = None,
 ) -> dict:
@@ -2275,16 +2309,18 @@ def build_event(
     )
     if row.get("notice_url"):
         message += f" Notice: {row['notice_url']}"
-    event: dict = {
-        "system": mapping.get("system") or "PlacerProbateMonitor",
-        "type": settings.get("event_type") or "Seller Inquiry",
-        "person": build_person(
+    if person is None:
+        person = build_person(
             row,
             mapping,
             settings,
             person_id=person_id,
             allowed_custom=allowed_custom,
-        ),
+        )
+    event: dict = {
+        "system": mapping.get("system") or "PlacerProbateMonitor",
+        "type": settings.get("event_type") or "Seller Inquiry",
+        "person": _person_api_body(person),
     }
     if person_id is None and send.get("source", True):
         event["source"] = settings.get("source") or "probate"
@@ -2336,7 +2372,7 @@ def post_event(api_url: str, api_key: str, payload: dict, system: str) -> dict:
 
 
 def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system: str) -> dict | None:
-    body = {k: v for k, v in payload.items() if k not in {"id", "_addr_slots"}}
+    body = _person_api_body(payload)
     url = f"{_api_root(api_url)}/people/{int(person_id)}"
     response = requests.put(
         url,
@@ -2828,21 +2864,7 @@ def export_new_leads(
                 record_view["posted"] = False
                 record_view["updated"] = False
                 summary["verify_record"] = record_view
-                print(
-                    f"FUB petitioner address {key}: "
-                    f"{row.get('mailing_address') or '(empty)'}",
-                    flush=True,
-                )
-                print(
-                    f"FUB last residence {key}: "
-                    f"{row.get('decedent_residence') or '(empty)'}",
-                    flush=True,
-                )
-                print(
-                    f"FUB sending {len(person.get('addresses') or [])} "
-                    f"address(es) {key}: {person.get('addresses')}",
-                    flush=True,
-                )
+                _log_fub_person_payload(key, row, person)
                 body = put_person(
                     settings["api_url"], api_key, existing_id, person, system
                 )
@@ -2955,10 +2977,12 @@ def export_new_leads(
             record_view["view_only"] = False
             record_view["posted"] = False
             summary["verify_record"] = record_view
+            _log_fub_person_payload(key, row, person)
             payload = build_event(
                 row,
                 mapping,
                 settings,
+                person=person,
                 allowed_custom=allowed_custom,
             )
             body = post_event(settings["api_url"], api_key, payload, system)
@@ -2968,6 +2992,17 @@ def export_new_leads(
                     "FUB create returned no person id; refusing to continue without a trackable ID"
                 )
             _remember_person(cases, key, pid, fingerprint)
+            try:
+                synced = put_person(
+                    settings["api_url"], api_key, pid, person, system
+                )
+                if synced is None:
+                    print(
+                        f"FUB create-sync PUT skipped {key} person_id={pid} (404)",
+                        flush=True,
+                    )
+            except Exception as put_exc:  # noqa: BLE001
+                print(f"FUB create-sync PUT error {key}: {put_exc}", flush=True)
             try:
                 post_note(
                     settings["api_url"],
