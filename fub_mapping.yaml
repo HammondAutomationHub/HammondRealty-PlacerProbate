@@ -24,6 +24,7 @@ send:
   emails: true
   phones: true
   assignedTo: true
+  stage: true
   source: true
   message: true
   custom_fields: true

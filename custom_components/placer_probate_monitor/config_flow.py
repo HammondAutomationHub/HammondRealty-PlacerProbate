@@ -16,6 +16,7 @@ from .const import (
     CONF_FUB_API_KEY,
     CONF_FUB_API_URL,
     CONF_FUB_ASSIGNED_TO,
+    CONF_FUB_STAGE,
     CONF_FUB_ENABLED,
     CONF_FUB_EVENT_TYPE,
     CONF_FUB_SOURCE,
@@ -181,6 +182,10 @@ def _fub_schema(defaults: dict) -> vol.Schema:
             vol.Required(
                 CONF_FUB_ASSIGNED_TO,
                 default=defaults.get(CONF_FUB_ASSIGNED_TO, "Blake Hammond"),
+            ): selector.TextSelector(),
+            vol.Optional(
+                CONF_FUB_STAGE,
+                default=str(defaults.get(CONF_FUB_STAGE) or ""),
             ): selector.TextSelector(),
             vol.Required(
                 CONF_FUB_EVENT_TYPE,

@@ -609,6 +609,12 @@ FUB_DESTINATIONS = [
         "from_config": "fub_assigned_to",
     },
     {
+        "id": "person.stage",
+        "label": "Person stage",
+        "group": "person",
+        "from_config": "fub_stage",
+    },
+    {
         "id": "event.source",
         "label": "Event source",
         "group": "event",
@@ -675,6 +681,7 @@ SEND_TOGGLES = [
     {"key": "emails", "label": "Send petitioner email", "editable": True},
     {"key": "phones", "label": "Send petitioner phone", "editable": True},
     {"key": "assignedTo", "label": "Send assignedTo from config", "editable": True},
+    {"key": "stage", "label": "Send person stage from config", "editable": True},
     {"key": "source", "label": "Send event source from config", "editable": True},
     {"key": "message", "label": "Send event message/description", "editable": True},
     {"key": "custom_fields", "label": "Send custom fields below", "editable": True},
@@ -1078,6 +1085,7 @@ def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) 
         {"label": "firstName", "value": person.get("firstName") or ""},
         {"label": "lastName", "value": person.get("lastName") or ""},
         {"label": "assignedTo", "value": person.get("assignedTo") or ""},
+        {"label": "stage", "value": person.get("stage") or ""},
         {
             "label": "Address 1",
             "value": _format_fub_address(addresses[0] if addresses else None),
@@ -1095,7 +1103,7 @@ def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) 
             "value": _fub_display_value(person.get("phones")),
         },
     ]
-    skip = {"id", "firstName", "lastName", "assignedTo", "addresses", "background", "emails", "phones"}
+    skip = {"id", "firstName", "lastName", "assignedTo", "stage", "addresses", "background", "emails", "phones"}
     for key, value in person.items():
         if key in skip or value in (None, "", []):
             continue
@@ -1956,6 +1964,7 @@ def preview_one_record(
     settings = {
         "source": os.environ.get("FUB_SOURCE", "probate"),
         "assigned_to": os.environ.get("FUB_ASSIGNED_TO", "Blake Hammond"),
+        "stage": (os.environ.get("FUB_STAGE") or "").strip(),
         "event_type": os.environ.get("FUB_EVENT_TYPE", "Seller Inquiry"),
     }
     strict = _env_bool("FUB_STRICT_PROPERTY")
@@ -2060,6 +2069,8 @@ def build_person(
         person["lastName"] = last
     if send.get("assignedTo", True) and settings.get("assigned_to"):
         person["assignedTo"] = settings["assigned_to"]
+    if send.get("stage", True) and settings.get("stage"):
+        person["stage"] = str(settings["stage"]).strip()
     values = probate_export_values(row, mapping)
     if send.get("emails", True):
         email = str(values.get("petitioner_email") or "").strip()
@@ -2174,6 +2185,7 @@ def verify_record_payload(
         "firstName": person.get("firstName"),
         "lastName": person.get("lastName"),
         "assignedTo": person.get("assignedTo"),
+        "stage": person.get("stage"),
         "lead_source": settings.get("source"),
         "event_type": settings.get("event_type"),
         "decedent": row.get("decedent"),
@@ -2652,6 +2664,7 @@ def export_new_leads(
         "api_url": os.environ.get("FUB_API_URL", "https://api.followupboss.com/v1"),
         "source": os.environ.get("FUB_SOURCE", "probate"),
         "assigned_to": os.environ.get("FUB_ASSIGNED_TO", "Blake Hammond"),
+        "stage": (os.environ.get("FUB_STAGE") or "").strip(),
         "event_type": os.environ.get("FUB_EVENT_TYPE", "Seller Inquiry"),
     }
     strict = _env_bool("FUB_STRICT_PROPERTY")

@@ -18,6 +18,7 @@ from .const import (
     CONF_FUB_SYSTEM_KEY,
     CONF_FUB_API_URL,
     CONF_FUB_ASSIGNED_TO,
+    CONF_FUB_STAGE,
     CONF_FUB_ENABLED,
     CONF_FUB_EVENT_TYPE,
     CONF_FUB_SOURCE,
@@ -45,7 +46,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.42"
+PANEL_JS_VERSION = "1.3.43"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -69,6 +70,7 @@ FUB_KEYS = {
     CONF_FUB_SYSTEM_KEY,
     CONF_FUB_SOURCE,
     CONF_FUB_ASSIGNED_TO,
+    CONF_FUB_STAGE,
     CONF_FUB_EVENT_TYPE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
@@ -156,6 +158,7 @@ def _public_fub(settings: dict) -> dict:
         "fub_system_key_set": bool(str(settings.get(CONF_FUB_SYSTEM_KEY) or "")),
         CONF_FUB_SOURCE: settings.get(CONF_FUB_SOURCE) or "probate",
         CONF_FUB_ASSIGNED_TO: settings.get(CONF_FUB_ASSIGNED_TO) or "Blake Hammond",
+        CONF_FUB_STAGE: str(settings.get(CONF_FUB_STAGE) or "").strip(),
         CONF_FUB_EVENT_TYPE: settings.get(CONF_FUB_EVENT_TYPE) or "Seller Inquiry",
         CONF_FUB_STRICT_PROPERTY: bool(settings.get(CONF_FUB_STRICT_PROPERTY)),
         CONF_FUB_VERIFY_ONLY: bool(settings.get(CONF_FUB_VERIFY_ONLY, True)),

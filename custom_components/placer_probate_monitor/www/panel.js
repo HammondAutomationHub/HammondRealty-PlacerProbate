@@ -857,6 +857,8 @@ class PlacerProbateFubPanel extends HTMLElement {
               <div><label>Lead source name</label><input id="fub_source" /></div>
               <div><label>Assign to</label><input id="fub_assigned_to" /></div>
             </div>
+            <label>Person stage</label>
+            <input id="fub_stage" placeholder="Must match a Follow Up Boss stage name (leave blank for FUB default)" />
             <label>Event type</label>
             <select id="fub_event_type"></select>
             <label class="ppm-toggle"><input id="fub_strict_property" type="checkbox" /><span>Require decedent residence before upload</span></label>
@@ -955,6 +957,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       : "No FUB system key saved. Files API will 403; DE-111 goes to Notes as a download link.";
     this._qs("#fub_source").value = data.fub_source || "probate";
     this._qs("#fub_assigned_to").value = data.fub_assigned_to || "";
+    this._qs("#fub_stage").value = data.fub_stage || "";
     const types = data.event_types || ["Seller Inquiry"];
     this._qs("#fub_event_type").innerHTML = types
       .map((item) => `<option value="${ppmEsc(item)}">${ppmEsc(item)}</option>`)
@@ -1154,6 +1157,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       fub_system_key: this._qs("#fub_system_key").value,
       fub_source: this._qs("#fub_source").value.trim(),
       fub_assigned_to: this._qs("#fub_assigned_to").value.trim(),
+      fub_stage: this._qs("#fub_stage").value.trim(),
       fub_event_type: this._qs("#fub_event_type").value,
       fub_strict_property: this._qs("#fub_strict_property").checked,
       fub_verify_only: this._qs("#fub_verify_only").checked,

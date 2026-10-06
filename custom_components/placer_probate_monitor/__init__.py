@@ -40,6 +40,7 @@ from .const import (
     CONF_FUB_SYSTEM_KEY,
     CONF_FUB_API_URL,
     CONF_FUB_ASSIGNED_TO,
+    CONF_FUB_STAGE,
     CONF_FUB_ENABLED,
     CONF_FUB_EVENT_TYPE,
     CONF_FUB_SOURCE,
@@ -136,6 +137,7 @@ def apply_env(
     os.environ["FUB_ASSIGNED_TO"] = str(
         settings.get(CONF_FUB_ASSIGNED_TO) or "Blake Hammond"
     )
+    os.environ["FUB_STAGE"] = str(settings.get(CONF_FUB_STAGE) or "").strip()
     os.environ["FUB_EVENT_TYPE"] = str(
         settings.get(CONF_FUB_EVENT_TYPE) or "Seller Inquiry"
     )

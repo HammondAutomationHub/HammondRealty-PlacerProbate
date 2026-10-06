@@ -49,6 +49,7 @@ options:
   fub_api_key: ""
   fub_source: probate
   fub_assigned_to: "Blake Hammond"
+  fub_stage: ""
   fub_event_type: "Seller Inquiry"
   fub_strict_property: false
   fub_verify_only: true
@@ -80,6 +81,7 @@ schema:
   fub_api_key: password
   fub_source: str
   fub_assigned_to: str
+  fub_stage: str
   fub_event_type: list(Seller Inquiry|General Inquiry|Property Inquiry|Inquiry|Registration)
   fub_strict_property: bool
   fub_verify_only: bool

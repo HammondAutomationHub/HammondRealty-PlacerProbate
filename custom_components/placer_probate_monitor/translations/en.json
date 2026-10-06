@@ -43,6 +43,7 @@
           "fub_api_key": "API key",
           "fub_source": "Lead source name",
           "fub_assigned_to": "Assign to (agent full name)",
+          "fub_stage": "Person stage (must match a Follow Up Boss stage name)",
           "fub_event_type": "Event type",
           "fub_strict_property": "Require decedent residence before upload",
           "fub_verify_only": "Verify only: import one new go-case per run"
@@ -99,6 +100,7 @@
           "fub_api_key": "API key",
           "fub_source": "Lead source name",
           "fub_assigned_to": "Assign to (agent full name)",
+          "fub_stage": "Person stage (must match a Follow Up Boss stage name)",
           "fub_event_type": "Event type",
           "fub_strict_property": "Require decedent residence before upload",
           "fub_verify_only": "Verify only: import one new go-case per run"

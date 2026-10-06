@@ -50,6 +50,7 @@ DEFAULTS = {
     "fub_api_key": "",
     "fub_source": "probate",
     "fub_assigned_to": "Blake Hammond",
+    "fub_stage": "",
     "fub_event_type": "Seller Inquiry",
     "fub_strict_property": False,
     "fub_verify_only": True,
@@ -247,6 +248,7 @@ def apply_env(settings: dict) -> None:
     os.environ["FUB_API_KEY"] = str(settings.get("fub_api_key") or "")
     os.environ["FUB_SOURCE"] = str(settings.get("fub_source") or "probate")
     os.environ["FUB_ASSIGNED_TO"] = str(settings.get("fub_assigned_to") or "Blake Hammond")
+    os.environ["FUB_STAGE"] = str(settings.get("fub_stage") or "").strip()
     os.environ["FUB_EVENT_TYPE"] = str(settings.get("fub_event_type") or "Seller Inquiry")
     os.environ["FUB_STRICT_PROPERTY"] = "1" if settings.get("fub_strict_property") else "0"
     os.environ["FUB_VERIFY_ONLY"] = "1" if settings.get("fub_verify_only") else "0"

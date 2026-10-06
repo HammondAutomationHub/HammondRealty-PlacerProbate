@@ -29,6 +29,7 @@ CONF_FUB_API_KEY = "fub_api_key"
 CONF_FUB_SYSTEM_KEY = "fub_system_key"
 CONF_FUB_SOURCE = "fub_source"
 CONF_FUB_ASSIGNED_TO = "fub_assigned_to"
+CONF_FUB_STAGE = "fub_stage"
 CONF_FUB_EVENT_TYPE = "fub_event_type"
 CONF_FUB_STRICT_PROPERTY = "fub_strict_property"
 CONF_FUB_VERIFY_ONLY = "fub_verify_only"
@@ -82,6 +83,7 @@ DEFAULTS = {
     CONF_FUB_SYSTEM_KEY: "",
     CONF_FUB_SOURCE: "probate",
     CONF_FUB_ASSIGNED_TO: "Blake Hammond",
+    CONF_FUB_STAGE: "",
     CONF_FUB_EVENT_TYPE: "Seller Inquiry",
     CONF_FUB_STRICT_PROPERTY: False,
     CONF_FUB_VERIFY_ONLY: True,
