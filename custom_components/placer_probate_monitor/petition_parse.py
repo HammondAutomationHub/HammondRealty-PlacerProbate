@@ -682,3 +682,46 @@ def looks_like_probate_petition(name: str) -> bool:
             "petition for probate",
         )
     )
+
+
+def looks_like_duties_form(name: str) -> bool:
+    low = (name or "").lower()
+    if "de-147" in low or "de147" in low:
+        return True
+    return "duties" in low and "personal representative" in low
+
+
+DE147_CONTACT_RE = re.compile(
+    r"My address and telephone number are\s*\(specify\)\s*:?\s*(?P<body>.+?)"
+    r"(?:I acknowledge|acknowledge that|3\.\s|CONFIDENTIAL INFORMATION|Date:|pate:)",
+    re.I | re.S,
+)
+BARE_PHONE_RE = re.compile(
+    r"(?P<phone>\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})"
+)
+
+
+def parse_de147_text(text: str) -> dict:
+    text = _clean(text)
+    out: dict = {}
+    match = DE147_CONTACT_RE.search(text)
+    if not match:
+        return out
+    body = re.sub(r"\s+", " ", match.group("body")).strip()
+    phone = BARE_PHONE_RE.search(body)
+    if phone:
+        out["petitioner_phone"] = re.sub(r"\s+", " ", phone.group("phone")).strip()
+        body = body[: phone.start()] + body[phone.end() :]
+    email = EMAIL_RE.search(body)
+    if email:
+        out["petitioner_email"] = email.group("email").strip()
+        body = body.replace(email.group("email"), " ")
+    body = re.sub(r"[\s;]+$", "", body).strip(" ;,")
+    parsed = _parse_address(body, prefix="mailing")
+    if parsed:
+        out.update(parsed)
+    return out
+
+
+def parse_de147_pdf(path: Path) -> dict:
+    return parse_de147_text(extract_pdf_text(path))

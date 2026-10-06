@@ -478,10 +478,20 @@ def guess_petition(portal: dict, notice: Notice) -> str:
 def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = None) -> list[dict]:
     try:
         from .ecourt_client import ECourtClient
-        from .petition_parse import looks_like_probate_petition, parse_de111_pdf
+        from .petition_parse import (
+            looks_like_duties_form,
+            looks_like_probate_petition,
+            parse_de111_pdf,
+            parse_de147_pdf,
+        )
     except ImportError:
         from ecourt_client import ECourtClient
-        from petition_parse import looks_like_probate_petition, parse_de111_pdf
+        from petition_parse import (
+            looks_like_duties_form,
+            looks_like_probate_petition,
+            parse_de111_pdf,
+            parse_de147_pdf,
+        )
 
     client = ECourtClient(pause=float(os.environ.get("ECOURT_PAUSE", "1.2")))
     rows = []
@@ -494,13 +504,22 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                 portal = {"found": False, "error": str(exc), "case_number": notice.case_number}
         if docs_dir and portal.get("found"):
             case_dir = docs_dir / re.sub(r"[^\w\-]+", "_", notice.case_number)
+            safe = re.sub(r"[^\w\-]+", "_", notice.case_number)
+            petition_item = None
+            duties_item = None
             for item in portal.get("document_files") or []:
-                if not (item.get("available") and looks_like_probate_petition(item.get("name") or "")):
+                if not item.get("available"):
                     continue
-                dest = case_dir / f"{re.sub(r'[^\w\-]+', '_', notice.case_number)}_DE-111.pdf"
+                name = item.get("name") or ""
+                if looks_like_probate_petition(name) and petition_item is None:
+                    petition_item = item
+                if looks_like_duties_form(name) and duties_item is None:
+                    duties_item = item
+            if petition_item:
+                dest = case_dir / f"{safe}_DE-111.pdf"
                 try:
                     time.sleep(client.pause)
-                    client.download(item["url"], dest)
+                    client.download(petition_item["url"], dest)
                     if dest.read_bytes()[:4] == b"%PDF":
                         parsed = parse_de111_pdf(dest, petitioner=notice.petitioner)
                         portal.update(parsed)
@@ -515,7 +534,28 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
                         portal["petition_parse_error"] = "download was not a PDF"
                 except Exception as exc:  # noqa: BLE001
                     portal["petition_parse_error"] = str(exc)
-                break
+            if duties_item:
+                dest = case_dir / f"{safe}_DE-147.pdf"
+                try:
+                    time.sleep(client.pause)
+                    client.download(duties_item["url"], dest)
+                    if dest.read_bytes()[:4] == b"%PDF":
+                        extra = parse_de147_pdf(dest)
+                        for key, value in extra.items():
+                            if value not in (None, "", [], {}) and not portal.get(key):
+                                portal[key] = value
+                        portal["duties_pdf"] = str(dest)
+                        print(
+                            f"DE-147 {notice.case_number}: "
+                            f"mailing={extra.get('mailing_address') or portal.get('mailing_address') or '(empty)'} "
+                            f"phone={extra.get('petitioner_phone') or '(empty)'} "
+                            f"email={extra.get('petitioner_email') or '(empty)'}",
+                            flush=True,
+                        )
+                    else:
+                        portal["duties_parse_error"] = "download was not a PDF"
+                except Exception as exc:  # noqa: BLE001
+                    portal["duties_parse_error"] = str(exc)
         row = asdict(notice)
         merged = {k: v for k, v in portal.items() if v not in (None, "", [], {})}
         if "status" in merged and "court_status" not in merged:
