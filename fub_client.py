@@ -305,8 +305,8 @@ PROBATE_SOURCE_FIELDS = [
         "key": "mailing_address",
         "label": "Petitioner address",
         "group": "petitioner",
-        "source": "DE-111 item 1 petitioner address",
-        "notes": "FUB Address 1. Line 2 is left empty.",
+        "source": "DE-111 item 8 (interested persons) / item 3h / in-pro-per caption",
+        "notes": "FUB Address 1. Not item 1 (publication) and not item 3c (decedent).",
         "person": "addresses",
         "custom": True,
     },
@@ -314,7 +314,7 @@ PROBATE_SOURCE_FIELDS = [
         "key": "petitioner_email",
         "label": "Petitioner email",
         "group": "petitioner",
-        "source": "DE-111 item 1",
+        "source": "DE-111 caption / item 2 when present",
         "notes": "Maps to FUB emails. Never use attorney email.",
         "person": "emails",
         "custom": True,
@@ -323,7 +323,7 @@ PROBATE_SOURCE_FIELDS = [
         "key": "petitioner_phone",
         "label": "Petitioner phone",
         "group": "petitioner",
-        "source": "DE-111 item 1",
+        "source": "DE-111 caption / item 2 when present",
         "notes": "Maps to FUB phones. Never use attorney_phone.",
         "person": "phones",
         "custom": True,
@@ -674,7 +674,7 @@ SEND_TOGGLES = [
 
 GO_NO_GO = [
     "Petitioner is the FUB Person. Decedent is never firstName/lastName.",
-    "No go-case without petitioner address from DE-111 item 1. Email and phone also come from item 1 when present.",
+    "No go-case without petitioner address. On current DE-111 that is item 8 (and item 3h if a nonresident personal representative). Item 1 is publication. Item 3c is decedent last residence, not Address 1. Attorney caption is not petitioner Address 1.",
     "Never map attorney_phone onto person.phones. Attorney caption address is not petitioner Address 1.",
     "Last residence is DE-111 text, not a verified APN.",
     "Notes gets the per-case eCourt Public URL (node/45/…) plus a unique DE-111 PDF link. Files needs a registered FUB system key.",
@@ -702,19 +702,19 @@ SOURCE_GO_NO_GO = {
             {
                 "key": "mailing_address",
                 "label": "Petitioner address",
-                "from": "DE-111 item 1",
+                "from": "DE-111 item 8 / 3h / in-pro-per caption",
             },
         ],
         "optional": [
             {
                 "key": "petitioner_email",
                 "label": "Petitioner email",
-                "from": "DE-111 item 1",
+                "from": "DE-111 caption / item 2 when present",
             },
             {
                 "key": "petitioner_phone",
                 "label": "Petitioner phone",
-                "from": "DE-111 item 1",
+                "from": "DE-111 caption / item 2 when present",
             },
             {
                 "key": "decedent_residence",

@@ -44,8 +44,13 @@ STATE_ALIAS = {
     "id": "ID",
     "idaho": "ID",
 }
+ROAD = (
+    r"(?:Road|Rd|Lane|Ln|Drive|Dr|Street|St|Way|Court|Ct|Avenue|Ave|"
+    r"Place|Pl|Circle|Cir|Boulevard|Blvd|Highway|Hwy)\.?"
+)
+UNIT = r"(?:\s*,?\s*(?:Suite|Ste\.?|Unit|Apt\.?|#)\s*[A-Z0-9\-]+)"
 ITEM3C_ADDR_RE = re.compile(
-    rf"(?P<street>\d{{1,6}}(?:\s+[A-Za-z0-9.'#\-]+)+)\s*,\s*"
+    rf"(?P<street>\d{{1,6}}\s+(?!\d+\s)(?:[A-Za-z0-9.'#\-]+\s+)*{ROAD}{UNIT}?)\s*,\s*"
     rf"(?P<city>(?!Placer(?:\s+County)?\b)[A-Za-z][A-Za-z .'-]+?)\s*,\s*"
     rf"(?:(?P<county>[A-Za-z][A-Za-z .'-]+?)\s+County\s*,\s*)?"
     rf"(?P<state>{STATE_ALT})\.?\s*"
@@ -62,15 +67,26 @@ EMAIL_RE = re.compile(
     r"(?P<email>[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,})",
     re.I,
 )
-ROAD = (
-    r"(?:Road|Rd|Lane|Ln|Drive|Dr|Street|St|Way|Court|Ct|Avenue|Ave|"
-    r"Place|Pl|Circle|Cir|Boulevard|Blvd|Highway|Hwy)\.?"
-)
-UNIT = r"(?:\s*,?\s*(?:Suite|Ste\.?|Unit|Apt\.?|#)\s*[A-Z0-9\-]+)"
 PETITIONER_ITEM_RE = re.compile(
-    r"1\.?\s*Petitioner\s*(?:\([^)]*name[^)]*\))?\s*:?\s*(?P<body>.+?)"
-    r"(?=2\.?\s*Petitioner\s+is\b|2\.?\s*Jurisdiction|"
-    r"3\.\s*Decedent|Publication of Notice|Character and estimated value)",
+    r"(?:1|2)\.?\s*Petitioner\s*(?:\([^)]*name[^)]*\))?\s*:?\s*(?P<body>.+?)"
+    r"(?=requests that|2\.\s*Petitioner\s+is\b|2\.\s*[a-d]\.|3\.\s*Decedent|"
+    r"Publication of Notice|Character and estimated value)",
+    re.I | re.S,
+)
+ITEM2_NAMES_RE = re.compile(
+    r"Petitioner\s*\(name each\)\s*:?\s*(?P<names>.+?)\s*requests that",
+    re.I | re.S,
+)
+ITEM8_RE = re.compile(
+    r"8\.\s*Name and relationship to decedent.{0,120}Address(?P<body>.+?)"
+    r"(?:Continued on Attachment 8|Number of pages attached|"
+    r"I declare under penalty|TYPE OR PRINT NAME)",
+    re.I | re.S,
+)
+ITEM3H_RE = re.compile(
+    r"nonresident of California\s*\(specify permanent address\):\s*(?P<body>.+?)"
+    r"(?:resident of the United States|nonresident of the United States|"
+    r"4\.\s|DE-111|Form Adopted)",
     re.I | re.S,
 )
 CAPTION_ADDR_RE = re.compile(
@@ -282,11 +298,99 @@ def _item1_body(text: str) -> str:
     if pet:
         return pet.group("body")
     fallback = re.search(
-        r"1\.?\s*Petitioner\b(.{0,3000}?)(?:\n\s*2\.|\n\s*3\.\s*Decedent)",
+        r"(?:1|2)\.?\s*Petitioner\b(.{0,3000}?)(?:\n\s*2\.|\n\s*3\.\s*Decedent|requests that)",
         text,
         re.I | re.S,
     )
     return fallback.group(1) if fallback else ""
+
+
+def _name_tokens(name: str) -> set[str]:
+    skip = {
+        "the",
+        "estate",
+        "of",
+        "decedent",
+        "petitioner",
+        "and",
+        "aka",
+        "a/k/a",
+        "jr",
+        "sr",
+        "ii",
+        "iii",
+    }
+    return {
+        part.lower()
+        for part in re.findall(r"[A-Za-z']{2,}", name or "")
+        if part.lower() not in skip
+    }
+
+
+def _item2_names(text: str) -> str:
+    match = ITEM2_NAMES_RE.search(text)
+    if not match:
+        return ""
+    names = re.sub(r"\s+", " ", match.group("names")).strip(" :.")
+    if len(names) > 200:
+        return names[:200]
+    return names
+
+
+def _first_parsed_address(body: str, *, prefix: str) -> dict:
+    split = split_de111_address(body)
+    if split:
+        return _address_from_groups(
+            split["street"],
+            split["city"],
+            split.get("state") or "CA",
+            split.get("zip") or "",
+            prefix=prefix,
+        )
+    return _parse_address(body, prefix=prefix)
+
+
+def _item8_petitioner_address(text: str, petitioner_name: str = "") -> dict:
+    match = ITEM8_RE.search(text)
+    if not match:
+        return {}
+    body = match.group("body")
+    tokens = _name_tokens(petitioner_name)
+    found: list[tuple[int, dict]] = []
+    search_from = 0
+    while True:
+        hit = ITEM3C_ADDR_RE.search(body, search_from)
+        if not hit:
+            break
+        window = body[max(0, hit.start() - 160) : hit.start()]
+        window_tokens = _name_tokens(window)
+        parsed = _address_from_groups(
+            hit.group("street"),
+            hit.group("city"),
+            hit.group("state"),
+            hit.group("zip") or "",
+            prefix="mailing",
+        )
+        search_from = hit.end()
+        if not parsed:
+            continue
+        score = len(tokens & window_tokens) if tokens else 0
+        if tokens and score == 0:
+            continue
+        found.append((score, parsed))
+    if found:
+        found.sort(key=lambda item: item[0], reverse=True)
+        return found[0][1]
+    if tokens:
+        return {}
+    return _first_parsed_address(body, prefix="mailing")
+
+
+def _item3h_address(text: str) -> dict:
+    match = ITEM3H_RE.search(text)
+    if not match:
+        return {}
+    return _first_parsed_address(match.group("body")[:500], prefix="mailing")
 
 
 def parse_de111_text(text: str) -> dict:
@@ -321,7 +425,11 @@ def parse_de111_text(text: str) -> dict:
         if marker:
             out.update(_parse_address(text[marker.end() : marker.end() + 500], prefix="decedent"))
     body = _item1_body(text)
-    if body:
+    names = _item2_names(text)
+    mailing = _item8_petitioner_address(text, names)
+    if not mailing:
+        mailing = _item3h_address(text)
+    if not mailing and body:
         mailing = _parse_address(body, prefix="mailing")
         cap = CAPTION_ADDR_RE.search(text)
         cap_street = (cap.group("street").strip().lower() if cap else "")
@@ -332,11 +440,13 @@ def parse_de111_text(text: str) -> dict:
             and not _parse_caption_mailing(text)
         ):
             mailing = {}
-        out.update(mailing)
-        phone = PHONE_RE.search(body)
+    out.update(mailing)
+    contact_src = body or text
+    if contact_src:
+        phone = PHONE_RE.search(body) if body else None
         if phone:
             out["petitioner_phone"] = re.sub(r"\s+", " ", phone.group("phone")).strip()
-        email = EMAIL_RE.search(body)
+        email = EMAIL_RE.search(body) if body else None
         if email:
             out["petitioner_email"] = email.group("email").strip()
     if not out.get("mailing_address"):
@@ -381,7 +491,18 @@ def _mailing_from_form_fields(path: Path) -> dict:
             continue
         if not any(
             bit in name
-            for bit in ("petitioner", "partywithoutattorney", "inproper", "item1")
+            for bit in (
+                "petitioner",
+                "partywithoutattorney",
+                "inproper",
+                "item1",
+                "item2",
+                "item8",
+                "attachment8",
+                "permanentaddress",
+                "3h",
+                "nameeach",
+            )
         ):
             continue
         value = _field_value(field)
