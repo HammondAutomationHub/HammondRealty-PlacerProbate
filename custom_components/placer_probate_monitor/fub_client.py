@@ -637,8 +637,8 @@ SEND_TOGGLES = [
 
 GO_NO_GO = [
     "Petitioner is the FUB Person. Decedent is never firstName/lastName.",
-    "Petitioner address, email, and phone come from DE-111 item 1.",
-    "Never map attorney_phone onto person.phones. Attorney stays a custom field at most.",
+    "No go-case without petitioner address from DE-111 item 1. Email and phone also come from item 1 when present.",
+    "Never map attorney_phone onto person.phones. Attorney caption address is not petitioner Address 1.",
     "Last residence is DE-111 text, not a verified APN. Case Summary URLs 404 unless you search first.",
     "DE-111 is downloaded from eCourt and attached to the person Files tab on Verify and on a full import. Preview does not upload.",
     "Only NEW cases are created on a full run. Verify can update a person ID you enter, reuse the last test person, or create one if none exist.",
@@ -1720,6 +1720,8 @@ def gate_reason(
     low = petitioner.lower()
     if any(bit in low for bit in skip_bits if bit):
         return "petitioner_skipped"
+    if not str(row.get("mailing_address") or "").strip():
+        return "missing_petitioner_address"
     if (
         existing_id is None
         and strict_property

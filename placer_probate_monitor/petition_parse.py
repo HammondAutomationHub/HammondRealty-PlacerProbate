@@ -263,8 +263,45 @@ def parse_de111_text(text: str) -> dict:
     return out
 
 
+def _field_value(field) -> str:
+    if not isinstance(field, dict):
+        return ""
+    value = field.get("/V")
+    if value in (None, ""):
+        return ""
+    return str(value).strip()
+
+
+def _mailing_from_form_fields(path: Path) -> dict:
+    from pypdf import PdfReader
+
+    try:
+        fields = PdfReader(str(path)).get_fields() or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    blobs: list[str] = []
+    for key, field in fields.items():
+        name = str(key or "").lower()
+        if any(bit in name for bit in ("atty", "attorney", "counsel", "firm")):
+            continue
+        if not any(
+            bit in name
+            for bit in ("petitioner", "partywithoutattorney", "inproper", "item1")
+        ):
+            continue
+        value = _field_value(field)
+        if value:
+            blobs.append(value)
+    if not blobs:
+        return {}
+    return _parse_address("\n".join(blobs), prefix="mailing")
+
+
 def parse_de111_pdf(path: Path) -> dict:
-    return parse_de111_text(extract_pdf_text(path))
+    out = parse_de111_text(extract_pdf_text(path))
+    if not out.get("mailing_address"):
+        out.update(_mailing_from_form_fields(path))
+    return out
 
 
 def looks_like_probate_petition(name: str) -> bool:
