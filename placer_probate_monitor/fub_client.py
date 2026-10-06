@@ -2314,7 +2314,7 @@ def post_event(api_url: str, api_key: str, payload: dict, system: str) -> dict:
         return {}
 
 
-def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system: str) -> dict:
+def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system: str) -> dict | None:
     body = {k: v for k, v in payload.items() if k != "id"}
     url = f"{_api_root(api_url)}/people/{int(person_id)}"
     response = requests.put(
@@ -2324,6 +2324,8 @@ def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system
         headers=_fub_headers(system),
         timeout=30,
     )
+    if response.status_code == 404:
+        return None
     if response.status_code >= 400:
         raise RuntimeError(f"FUB HTTP {response.status_code}: {response.text[:500]}")
     try:
@@ -2676,6 +2678,23 @@ def _remember_person(cases: dict, key: str, person_id: int, fingerprint: str) ->
     cases[key]["fub_skip"] = None
 
 
+def _clear_fub_person(cases: dict, key: str) -> None:
+    if not key:
+        return
+    record = cases.setdefault(key, {})
+    for field in (
+        "fub_person_id",
+        "fub_fingerprint",
+        "fub_attachment_id",
+        "fub_de111_note",
+        "fub_de111_note_uri",
+        "fub_de147_note_fp",
+        "fub_court_note_url",
+        "fub_skip",
+    ):
+        record.pop(field, None)
+
+
 def export_new_leads(
     rows: list[dict],
     state: dict,
@@ -2789,87 +2808,103 @@ def export_new_leads(
                 body = put_person(
                     settings["api_url"], api_key, existing_id, person, system
                 )
-                pid = person_id_from_response(body) or existing_id
-                _remember_person(cases, key, pid, fingerprint)
-                summary["updated"] += 1
-                posted_case = key
-                posted_pid = pid
-                record_view["posted"] = True
-                record_view["updated"] = True
-                record_view["fub_person_id"] = int(pid)
-                record_view["fub_error"] = None
-                summary["verify_record"] = record_view
-                print(f"FUB updated {key} person_id={pid}")
-                if verify:
-                    state["last_fub_verify_case"] = key
+                if body is None:
+                    print(
+                        f"FUB person_id={existing_id} was deleted; "
+                        f"creating a new person for {key}",
+                        flush=True,
+                    )
+                    _clear_fub_person(cases, key)
+                    existing_id = None
+                    person = build_person(
+                        row,
+                        mapping,
+                        settings,
+                        person_id=None,
+                        allowed_custom=allowed_custom,
+                    )
+                else:
+                    pid = person_id_from_response(body) or existing_id
+                    _remember_person(cases, key, pid, fingerprint)
+                    summary["updated"] += 1
+                    posted_case = key
+                    posted_pid = pid
+                    record_view["posted"] = True
+                    record_view["updated"] = True
+                    record_view["fub_person_id"] = int(pid)
+                    record_view["fub_error"] = None
+                    summary["verify_record"] = record_view
+                    print(f"FUB updated {key} person_id={pid}")
+                    if verify:
+                        state["last_fub_verify_case"] = key
+                        try:
+                            post_note(
+                                settings["api_url"],
+                                api_key,
+                                pid,
+                                combined_notes(row, mapping),
+                                system,
+                            )
+                        except Exception as note_exc:  # noqa: BLE001
+                            print(f"FUB notes error {key}: {note_exc}", flush=True)
                     try:
-                        post_note(
-                            settings["api_url"],
-                            api_key,
+                        court_note = post_court_portal_note(
+                            row,
                             pid,
-                            combined_notes(row, mapping),
-                            system,
+                            mapping=mapping,
+                            api_url=settings["api_url"],
+                            api_key=api_key,
+                            system=system,
+                            cases=cases,
+                            key=key,
+                            force=verify,
                         )
-                    except Exception as note_exc:  # noqa: BLE001
-                        print(f"FUB notes error {key}: {note_exc}", flush=True)
-                try:
-                    court_note = post_court_portal_note(
-                        row,
-                        pid,
-                        mapping=mapping,
-                        api_url=settings["api_url"],
-                        api_key=api_key,
-                        system=system,
-                        cases=cases,
-                        key=key,
-                        force=verify,
-                    )
-                    record_view["court_url_note"] = court_note
-                except Exception as court_exc:  # noqa: BLE001
-                    record_view["court_url_note"] = {
-                        "ok": False,
-                        "reason": str(court_exc)[:300],
-                    }
-                    print(f"FUB court URL notes error {key}: {court_exc}", flush=True)
-                try:
-                    attached = attach_de111_file(
-                        row,
-                        pid,
-                        mapping=mapping,
-                        api_url=settings["api_url"],
-                        api_key=api_key,
-                        system=system,
-                        cases=cases,
-                        key=key,
-                        force=verify,
-                    )
-                    record_view["de111_attach"] = attached
-                    summary["verify_record"] = record_view
-                except Exception as file_exc:  # noqa: BLE001
-                    record_view["de111_attach"] = {"ok": False, "reason": str(file_exc)[:300]}
-                    summary["verify_record"] = record_view
-                    print(f"FUB files error {key}: {file_exc}", flush=True)
-                try:
-                    duties = attach_de147_file(
-                        row,
-                        pid,
-                        mapping=mapping,
-                        api_url=settings["api_url"],
-                        api_key=api_key,
-                        system=system,
-                        cases=cases,
-                        key=key,
-                        force=verify,
-                    )
-                    record_view["de147_attach"] = duties
-                    summary["verify_record"] = record_view
-                except Exception as duties_exc:  # noqa: BLE001
-                    record_view["de147_attach"] = {"ok": False, "reason": str(duties_exc)[:300]}
-                    summary["verify_record"] = record_view
-                    print(f"FUB DE-147 notes error {key}: {duties_exc}", flush=True)
-                if verify:
-                    break
-                continue
+                        record_view["court_url_note"] = court_note
+                    except Exception as court_exc:  # noqa: BLE001
+                        record_view["court_url_note"] = {
+                            "ok": False,
+                            "reason": str(court_exc)[:300],
+                        }
+                        print(f"FUB court URL notes error {key}: {court_exc}", flush=True)
+                    try:
+                        attached = attach_de111_file(
+                            row,
+                            pid,
+                            mapping=mapping,
+                            api_url=settings["api_url"],
+                            api_key=api_key,
+                            system=system,
+                            cases=cases,
+                            key=key,
+                            force=verify,
+                        )
+                        record_view["de111_attach"] = attached
+                        summary["verify_record"] = record_view
+                    except Exception as file_exc:  # noqa: BLE001
+                        record_view["de111_attach"] = {"ok": False, "reason": str(file_exc)[:300]}
+                        summary["verify_record"] = record_view
+                        print(f"FUB files error {key}: {file_exc}", flush=True)
+                    try:
+                        duties = attach_de147_file(
+                            row,
+                            pid,
+                            mapping=mapping,
+                            api_url=settings["api_url"],
+                            api_key=api_key,
+                            system=system,
+                            cases=cases,
+                            key=key,
+                            force=verify,
+                        )
+                        record_view["de147_attach"] = duties
+                        summary["verify_record"] = record_view
+                    except Exception as duties_exc:  # noqa: BLE001
+                        record_view["de147_attach"] = {"ok": False, "reason": str(duties_exc)[:300]}
+                        summary["verify_record"] = record_view
+                        print(f"FUB DE-147 notes error {key}: {duties_exc}", flush=True)
+                    if verify:
+                        break
+                    continue
             if verify and (summary["posted"] >= 1 or summary["updated"] >= 1):
                 summary["skipped"] += 1
                 summary["skips"].append({"case": key, "reason": "verify_only_limit"})
