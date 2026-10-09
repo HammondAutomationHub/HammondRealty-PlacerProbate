@@ -60,6 +60,8 @@ from .const import (
     CONF_RECIPIENTS,
     CONF_RUN_ON_START,
     CONF_RUN_TIME,
+    CONF_SACRAMENTO_PORTAL_PASSWORD,
+    CONF_SACRAMENTO_PORTAL_USER,
     CONF_SEND_EMAIL,
     CONF_SKIP_PORTAL,
     CONF_SMTP_HOST,
@@ -129,6 +131,12 @@ def apply_env(
     os.environ["PROBATE_KEYWORDS"] = str(settings.get(CONF_KEYWORDS) or DEFAULTS[CONF_KEYWORDS])
     os.environ["PROBATE_MAX_PAGES"] = str(int(settings.get(CONF_MAX_PAGES) or 10))
     os.environ["ECOURT_PAUSE"] = str(float(settings.get(CONF_ECOURT_PAUSE) or 1.2))
+    os.environ["SACRAMENTO_PORTAL_USER"] = str(
+        settings.get(CONF_SACRAMENTO_PORTAL_USER) or ""
+    ).strip()
+    os.environ["SACRAMENTO_PORTAL_PASSWORD"] = str(
+        settings.get(CONF_SACRAMENTO_PORTAL_PASSWORD) or ""
+    )
     os.environ["FUB_ENABLED"] = "1" if settings.get(CONF_FUB_ENABLED) else "0"
     os.environ["FUB_API_URL"] = str(
         settings.get(CONF_FUB_API_URL) or "https://api.followupboss.com/v1"
@@ -281,29 +289,28 @@ async def notify_ecourt_view_limit(hass: HomeAssistant, alert: dict) -> None:
     )
 
 
-def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
-    data_dir = Path(hass.config.path(DOMAIN))
-    apply_env(settings, mapping_path=data_dir / "fub_mapping.yaml", hass=hass)
-    try:
-        from .job_progress import clear_progress, report_progress
-    except ImportError:
-        from job_progress import clear_progress, report_progress
-
-    clear_progress()
-    report_progress("start", "Starting Placer job…")
+def _source_job_cmd(data_dir: Path, settings: dict, source_id: str) -> list[str]:
     reports = data_dir / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
+    if source_id == "sacramento":
+        script = COMPONENT_DIR / "sacramento_probate_monitor.py"
+        state = data_dir / "seen_cases_sacramento.json"
+        out_dir = reports / "sacramento"
+    else:
+        script = COMPONENT_DIR / "placer_probate_monitor.py"
+        state = data_dir / "seen_cases.json"
+        out_dir = reports
+    out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
-        str(COMPONENT_DIR / "placer_probate_monitor.py"),
+        str(script),
         "--lookback-days",
         str(int(settings.get(CONF_LOOKBACK_DAYS) or 21)),
         "--lookahead-days",
         str(int(settings.get(CONF_LOOKAHEAD_DAYS) or 21)),
         "--state-file",
-        str(data_dir / "seen_cases.json"),
+        str(state),
         "--out-dir",
-        str(reports),
+        str(out_dir),
     ]
     if not settings.get(CONF_SEND_EMAIL):
         cmd.append("--no-email")
@@ -319,22 +326,16 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
             cmd.append("--no-pdf")
     elif settings.get(CONF_FUB_VERIFY_ONLY):
         cmd.append("--fub-verify-one")
-    proc = subprocess.run(
-        cmd,
-        cwd=str(COMPONENT_DIR),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    log = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
-    (data_dir / "last_run.log").write_text(log, encoding="utf-8")
-    pdfs = sorted(reports.glob("*.pdf"), key=lambda path: path.stat().st_mtime, reverse=True)
+    return cmd
+
+
+def _parse_job_log(log: str, data_dir: Path, reports: Path, returncode: int) -> dict:
     new_count = None
     notice_count = None
     for line in reversed(log.splitlines()):
-        if " new / " in line and "Placer probate notices" in line:
+        if " new / " in line and (
+            "Placer probate notices" in line or "Sacramento probate notices" in line
+        ):
             try:
                 tail = line.split("—")[-1]
                 new_count = int(tail.split("new")[0].strip())
@@ -343,7 +344,7 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
             except ValueError:
                 pass
             break
-    ok = proc.returncode == 0
+    ok = returncode == 0
     fub_posted = None
     fub_updated = None
     fub_skipped = None
@@ -381,10 +382,17 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
             if line.startswith("FUB enabled but") or line.startswith("FUB error"):
                 fub_error = line[-500:]
                 break
+    pdfs = sorted(reports.glob("*.pdf"), key=lambda path: path.stat().st_mtime, reverse=True)
+    pdfs += sorted(
+        (reports / "sacramento").glob("*.pdf"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    pdfs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
     return {
         "ok": ok,
         ATTR_LAST_RESULT: "ok" if ok else "failed",
-        ATTR_LAST_ERROR: None if ok else (log[-2000:] or f"exit {proc.returncode}"),
+        ATTR_LAST_ERROR: None if ok else (log[-2000:] or f"exit {returncode}"),
         ATTR_PDF: pdfs[0].name if pdfs else None,
         ATTR_NEW_COUNT: new_count,
         ATTR_NOTICE_COUNT: notice_count,
@@ -396,6 +404,126 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
         ATTR_ECOURT_VIEW_LIMIT: view_limit,
         "log_tail": log[-1500:],
     }
+
+
+def _run_one_source(hass: HomeAssistant, settings: dict, source_id: str) -> dict:
+    data_dir = Path(hass.config.path(DOMAIN))
+    reports = data_dir / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    cmd = _source_job_cmd(data_dir, settings, source_id)
+    proc = subprocess.run(
+        cmd,
+        cwd=str(COMPONENT_DIR),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    log = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+    existing = ""
+    last_log = data_dir / "last_run.log"
+    if last_log.exists():
+        existing = last_log.read_text(encoding="utf-8")
+    prefix = f"\n===== {source_id} =====\n"
+    last_log.write_text((existing + prefix + log).strip(), encoding="utf-8")
+    return _parse_job_log(log, data_dir, reports, proc.returncode)
+
+
+def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
+    data_dir = Path(hass.config.path(DOMAIN))
+    apply_env(settings, mapping_path=data_dir / "fub_mapping.yaml", hass=hass)
+    try:
+        from .fub_client import enabled_live_sources, source_is_enabled
+        from .job_progress import clear_progress, report_progress
+    except ImportError:
+        from fub_client import enabled_live_sources, source_is_enabled
+        from job_progress import clear_progress, report_progress
+
+    requested = str(settings.get("source_id") or "").strip().lower()
+    if requested:
+        sources = [requested]
+        if not source_is_enabled(settings, requested):
+            clear_progress()
+            report_progress("done", f"{requested} is turned off.")
+            return {
+                "ok": True,
+                ATTR_LAST_RESULT: "ok",
+                ATTR_LAST_ERROR: None,
+                ATTR_PDF: None,
+                ATTR_NEW_COUNT: 0,
+                ATTR_NOTICE_COUNT: 0,
+                ATTR_FUB_POSTED: 0,
+                ATTR_FUB_UPDATED: 0,
+                ATTR_FUB_SKIPPED: 0,
+                ATTR_FUB_ERROR: None,
+                ATTR_FUB_VERIFY: {
+                    "note": f"{requested} is turned off. Enable it on Probate sources to run this county."
+                },
+                ATTR_ECOURT_VIEW_LIMIT: {},
+                "log_tail": f"{requested} is turned off.",
+            }
+    else:
+        sources = enabled_live_sources(settings)
+
+    clear_progress()
+    if not sources:
+        report_progress("done", "No county sources are enabled.")
+        return {
+            "ok": True,
+            ATTR_LAST_RESULT: "ok",
+            ATTR_LAST_ERROR: None,
+            ATTR_PDF: None,
+            ATTR_NEW_COUNT: 0,
+            ATTR_NOTICE_COUNT: 0,
+            ATTR_FUB_POSTED: 0,
+            ATTR_FUB_UPDATED: 0,
+            ATTR_FUB_SKIPPED: 0,
+            ATTR_FUB_ERROR: None,
+            ATTR_FUB_VERIFY: {
+                "note": "No county sources are enabled. Turn Placer or Sacramento on from Probate sources."
+            },
+            ATTR_ECOURT_VIEW_LIMIT: {},
+            "log_tail": "No county sources are enabled.",
+        }
+
+    (data_dir / "last_run.log").write_text("", encoding="utf-8")
+    combined = {
+        "ok": True,
+        ATTR_LAST_RESULT: "ok",
+        ATTR_LAST_ERROR: None,
+        ATTR_PDF: None,
+        ATTR_NEW_COUNT: 0,
+        ATTR_NOTICE_COUNT: 0,
+        ATTR_FUB_POSTED: 0,
+        ATTR_FUB_UPDATED: 0,
+        ATTR_FUB_SKIPPED: 0,
+        ATTR_FUB_ERROR: None,
+        ATTR_FUB_VERIFY: None,
+        ATTR_ECOURT_VIEW_LIMIT: {},
+        "log_tail": "",
+    }
+    for source_id in sources:
+        label = "Placer" if source_id == "placer" else "Sacramento"
+        report_progress("start", f"Starting {label} job…")
+        result = _run_one_source(hass, settings, source_id)
+        if not result.get("ok"):
+            combined["ok"] = False
+            combined[ATTR_LAST_RESULT] = "failed"
+            combined[ATTR_LAST_ERROR] = result.get(ATTR_LAST_ERROR)
+        for key in (ATTR_NEW_COUNT, ATTR_NOTICE_COUNT, ATTR_FUB_POSTED, ATTR_FUB_UPDATED, ATTR_FUB_SKIPPED):
+            combined[key] = int(combined.get(key) or 0) + int(result.get(key) or 0)
+        if result.get(ATTR_PDF):
+            combined[ATTR_PDF] = result.get(ATTR_PDF)
+        if result.get(ATTR_FUB_ERROR):
+            combined[ATTR_FUB_ERROR] = result.get(ATTR_FUB_ERROR)
+        if result.get(ATTR_FUB_VERIFY):
+            combined[ATTR_FUB_VERIFY] = result.get(ATTR_FUB_VERIFY)
+        limit = result.get(ATTR_ECOURT_VIEW_LIMIT) or {}
+        if limit.get("cases"):
+            combined[ATTR_ECOURT_VIEW_LIMIT] = limit
+        combined["log_tail"] = result.get("log_tail") or combined["log_tail"]
+    return combined
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:

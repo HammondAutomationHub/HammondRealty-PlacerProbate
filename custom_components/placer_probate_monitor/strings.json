@@ -34,6 +34,14 @@
           "max_search_pages": "Max CNPA pages"
         }
       },
+      "sacramento": {
+        "title": "Sacramento court portal",
+        "description": "Optional Journal Technologies login so Sacramento can download public petition and duties PDFs. Username is the portal email. The math CAPTCHA is solved from the login HTML. Leave the password blank in options to keep the saved password. Never download confidential or Not Viewable filings.",
+        "data": {
+          "sacramento_portal_user": "Sacramento portal email",
+          "sacramento_portal_password": "Sacramento portal password"
+        }
+      },
       "fub": {
         "title": "Follow Up Boss",
         "description": "CRM connection and verification only. Field mapping is the Follow Up Boss sidebar. County extracts are under Probate sources.",
@@ -91,6 +99,14 @@
           "generate_pdf": "Generate PDF",
           "ecourt_pause_seconds": "eCourt pause (seconds)",
           "max_search_pages": "Max CNPA pages"
+        }
+      },
+      "sacramento": {
+        "title": "Sacramento court portal",
+        "description": "Optional Journal Technologies login so Sacramento can download public petition and duties PDFs. Username is the portal email. The math CAPTCHA is solved from the login HTML. Leave the password blank in options to keep the saved password. Never download confidential or Not Viewable filings.",
+        "data": {
+          "sacramento_portal_user": "Sacramento portal email",
+          "sacramento_portal_password": "Sacramento portal password"
         }
       },
       "fub": {

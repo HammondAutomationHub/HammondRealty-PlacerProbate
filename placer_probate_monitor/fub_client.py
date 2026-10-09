@@ -41,6 +41,13 @@ def _progress_fub(summary: dict, action: str, key: str | None = None) -> None:
 COURT_SEARCH_DEFAULT = "https://webportal.placerco.org/eCourtPublic/?q=node/48"
 CASE_PORTAL_TEMPLATE = "https://webportal.placerco.org/eCourtPublic/?q=node/45/{nid}"
 CASE_PORTAL_RE = re.compile(r"node/45/(\d+)", re.I)
+SACRAMENTO_PORTAL_BASE = (
+    "https://prod-portal-sacramento-ca.journaltech.com/public-portal/"
+)
+SACRAMENTO_CASE_RE = re.compile(
+    r"prod-portal-sacramento-ca\.journaltech\.com/public-portal/.*?node/(?:397|430)/(\d+)",
+    re.I,
+)
 DOWNLOAD_CASE_RE = re.compile(r"downloadFile/\d+/(\d+)", re.I)
 MAPPING_PATH = Path(__file__).resolve().parent / "fub_mapping.yaml"
 ADDR_RE = re.compile(
@@ -69,7 +76,7 @@ ADDRESS2_TYPE = "mailing"
 
 
 def case_portal_url(row: dict) -> str:
-    """Per-case eCourt Public page, e.g. ?q=node/45/1322377."""
+    """Per-case court page. Placer uses node/45. Sacramento keeps node/397."""
     candidates = [
         row.get("court_url"),
         row.get("url"),
@@ -83,6 +90,11 @@ def case_portal_url(row: dict) -> str:
         text = str(raw or "").strip()
         if not text:
             continue
+        sac = SACRAMENTO_CASE_RE.search(text)
+        if sac:
+            return f"{SACRAMENTO_PORTAL_BASE}?q=node/397/{sac.group(1)}"
+        if "prod-portal-sacramento-ca.journaltech.com" in text.lower():
+            return text
         match = CASE_PORTAL_RE.search(text)
         if match:
             return CASE_PORTAL_TEMPLATE.format(nid=match.group(1))
@@ -807,10 +819,57 @@ SOURCE_GO_NO_GO = {
         "rules": GO_NO_GO,
     },
     "sacramento": {
-        "required": [],
-        "optional": [],
-        "rules": [
-            "Sacramento import is not live. Go/no-go data requirements will be listed here when this county is wired.",
+        "required": [
+            {
+                "key": "case_number",
+                "label": "Case number",
+                "from": "CNPA notice / Sacramento portal",
+            },
+            {
+                "key": "petitioner_first",
+                "label": "Petitioner first name",
+                "from": "Published notice / portal parties",
+            },
+            {
+                "key": "petitioner_last",
+                "label": "Petitioner last name",
+                "from": "Published notice / portal parties",
+            },
+            {
+                "key": "mailing_address",
+                "label": "Petitioner address",
+                "from": "DE-111 item 8 / 3h or DE-147, whichever has it",
+            },
+        ],
+        "optional": [
+            {
+                "key": "petitioner_email",
+                "label": "Petitioner email",
+                "from": "DE-111 or DE-147, whichever has it",
+            },
+            {
+                "key": "petitioner_phone",
+                "label": "Petitioner phone",
+                "from": "DE-111 or DE-147, whichever has it",
+            },
+            {
+                "key": "decedent_residence",
+                "label": "Estate location (3.a.(2))",
+                "from": "DE-111 item 3.a.(2) street; never 'at (place)'",
+                "when": "Required only if “Require decedent residence” is on",
+            },
+            {
+                "key": "court_url",
+                "label": "Sacramento case summary URL",
+                "from": "Journal Technologies node/397/{id}",
+                "when": "Posted to Follow Up Boss Notes when present. Never rewritten to Placer node/45.",
+            },
+        ],
+        "rules": GO_NO_GO + [
+            "Court summaries stay on prod-portal-sacramento-ca.journaltech.com node/397. Do not rewrite them to Placer node/45.",
+            "Public petition and duties PDFs are downloaded after portal login. Confidential Not Viewable documents, including DE-147S, are skipped.",
+            "Follow Up Boss tags are probate plus sacramento. Person updates use mergeTags=true so existing tags are kept.",
+            "The same Follow Up Boss mapping and Events import path as Placer. Turning this source off does not stop Placer.",
         ],
     },
     "nevada": {
@@ -849,9 +908,9 @@ DATA_SOURCES = [
     {
         "id": "sacramento",
         "name": "Sacramento County",
-        "status": "coming_soon",
-        "description": "Next county source. Import settings and field catalog will live on this screen.",
-        "extracts": "Not wired yet",
+        "status": "live",
+        "description": "California Newspaper Public Notices (NOTICE OF PETITION) plus Sacramento Journal Technologies summaries and public DE-111/DE-147 PDFs after portal login.",
+        "extracts": "CNPA notice, Sacramento portal summary, public petition and duties PDFs",
     },
     {
         "id": "nevada",
@@ -875,8 +934,36 @@ SOURCE_SETTING_KEYS = [
 
 
 def source_field_catalog(source_id: str) -> list[dict]:
-    if str(source_id or "placer") == "placer":
+    key = str(source_id or "placer")
+    if key == "placer":
         return PROBATE_SOURCE_FIELDS
+    if key == "sacramento":
+        rows = []
+        for item in PROBATE_SOURCE_FIELDS:
+            row = dict(item)
+            if row.get("key") in {"court_search", "court_url"}:
+                row["source"] = "Sacramento portal node/397 (not Placer node/45)"
+            elif row.get("key") == "case_number":
+                row["source"] = "CNPA notice / Sacramento portal"
+                row["notes"] = "YYPR###### case number used as the lead key."
+            elif row.get("key") in {
+                "mailing_address",
+                "petitioner_email",
+                "petitioner_phone",
+                "decedent_residence",
+                "decedent_died",
+                "death_place",
+                "estate_real",
+                "estate_personal",
+                "petition_pdf",
+                "de111_url",
+                "de147_url",
+            }:
+                row["source"] = "Sacramento public DE-111 / DE-147 after portal login"
+            else:
+                row["source"] = row.get("source") or "CNPA notice / Sacramento portal"
+            rows.append(row)
+        return rows
     rows = []
     for item in PROBATE_SOURCE_FIELDS:
         row = dict(item)
@@ -895,7 +982,45 @@ def custom_fields_for_source(mapping: dict, source_id: str) -> dict:
         return fields
     if source_id == "placer":
         return mapping.get("custom_fields") or {}
+    if source_id == "sacramento":
+        return mapping.get("custom_fields") or {}
     return {}
+
+
+def mapping_for_export(mapping: dict, source_id: str | None = None) -> dict:
+    source_id = str(
+        source_id or os.environ.get("FUB_DATA_SOURCE") or "placer"
+    ).strip().lower() or "placer"
+    out = dict(mapping or {})
+    fields = custom_fields_for_source(out, source_id)
+    if fields:
+        out["custom_fields"] = fields
+    return out
+
+
+def normalize_source_enabled(settings: dict | None = None) -> dict[str, bool]:
+    raw = (settings or {}).get("source_enabled") or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    flags = {"placer": True, "sacramento": False, "nevada": False}
+    for key in flags:
+        if key in raw:
+            flags[key] = bool(raw[key])
+    return flags
+
+
+def source_is_enabled(settings: dict | None, source_id: str) -> bool:
+    key = str(source_id or "").strip().lower()
+    return bool(normalize_source_enabled(settings).get(key))
+
+
+def enabled_live_sources(settings: dict | None = None) -> list[str]:
+    flags = normalize_source_enabled(settings)
+    return [
+        item["id"]
+        for item in DATA_SOURCES
+        if item.get("status") == "live" and flags.get(item["id"])
+    ]
 
 
 def sources_payload(settings: dict | None = None) -> dict:
@@ -904,10 +1029,31 @@ def sources_payload(settings: dict | None = None) -> dict:
         placer[key] = (settings or {}).get(key)
     if not placer.get("county"):
         placer["county"] = "Placer"
+    enabled = normalize_source_enabled(settings)
+    sources = []
+    for item in DATA_SOURCES:
+        row = dict(item)
+        row["enabled"] = bool(enabled.get(row["id"])) if row.get("status") == "live" else False
+        sources.append(row)
     return {
-        "sources": DATA_SOURCES,
+        "sources": sources,
+        "source_enabled": enabled,
         "active": "placer",
         "placer": placer,
+        "sacramento": {
+            "county": "Sacramento",
+            "keywords": '"NOTICE OF PETITION"',
+            "lookback_days": placer.get("lookback_days"),
+            "lookahead_days": placer.get("lookahead_days"),
+            "skip_portal": placer.get("skip_portal"),
+            "generate_pdf": placer.get("generate_pdf"),
+            "ecourt_pause_seconds": placer.get("ecourt_pause_seconds"),
+            "max_search_pages": placer.get("max_search_pages"),
+            "sacramento_portal_user": str((settings or {}).get("sacramento_portal_user") or ""),
+            "sacramento_portal_password_set": bool(
+                str((settings or {}).get("sacramento_portal_password") or "").strip()
+            ),
+        },
         "fields": source_field_catalog("placer"),
         "source_fields": {item["id"]: source_field_catalog(item["id"]) for item in DATA_SOURCES},
         "source_go_no_go": {
@@ -941,7 +1087,7 @@ def mapping_errors(mapping: dict, *, source_id: str = "placer") -> list[str]:
     send = mapping.get("send") or {}
     fields = mapping.get("custom_fields") or {}
     by_key = {item["key"]: item for item in source_field_catalog(source_id)}
-    live = str(source_id or "placer") == "placer"
+    live = str(source_id or "placer") in {"placer", "sacramento"}
     for local_key, api_name in fields.items():
         api = str(api_name or "").strip()
         if not api:
@@ -2013,7 +2159,12 @@ def gate_reason(
     low = petitioner.lower()
     if any(bit in low for bit in skip_bits if bit):
         return "petitioner_skipped"
-    if not str(_row_contact(row).get("mailing_address") or row.get("mailing_address") or "").strip():
+    source = str(
+        row.get("source_id") or os.environ.get("FUB_DATA_SOURCE") or "placer"
+    ).strip().lower()
+    if source in {"placer", "sacramento"} and not str(
+        _row_contact(row).get("mailing_address") or row.get("mailing_address") or ""
+    ).strip():
         return "missing_petitioner_address"
     if (
         existing_id is None
@@ -2029,7 +2180,7 @@ def preview_one_record(
     *,
     mapping_path: Path | None = None,
 ) -> dict:
-    mapping = load_mapping(mapping_path)
+    mapping = mapping_for_export(load_mapping(mapping_path))
     settings = {
         "source": os.environ.get("FUB_SOURCE", "probate"),
         "assigned_to": os.environ.get("FUB_ASSIGNED_TO", "Blake Hammond"),
@@ -2200,6 +2351,22 @@ def build_person(
     if notes:
         person["background"] = notes
     _flush_address_slots(person)
+    county_tags = row.get("tags")
+    if not county_tags:
+        source = str(
+            row.get("source_id") or os.environ.get("FUB_DATA_SOURCE") or "placer"
+        ).strip().lower()
+        try:
+            from .datasources import fub_tags
+        except ImportError:
+            from datasources import fub_tags
+
+        try:
+            county_tags = fub_tags(source)
+        except ValueError:
+            county_tags = ["probate"]
+    if county_tags:
+        person["tags"] = list(county_tags)
     return person
 
 
@@ -2373,7 +2540,7 @@ def post_event(api_url: str, api_key: str, payload: dict, system: str) -> dict:
 
 def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system: str) -> dict | None:
     body = _person_api_body(payload)
-    url = f"{_api_root(api_url)}/people/{int(person_id)}"
+    url = f"{_api_root(api_url)}/people/{int(person_id)}?mergeTags=true"
     response = requests.put(
         url,
         json=body,
@@ -2787,7 +2954,7 @@ def export_new_leads(
         print(summary["error"], flush=True)
         print("FUB: posted=0 updated=0 skipped=0", flush=True)
         return summary
-    mapping = load_mapping(mapping_path)
+    mapping = mapping_for_export(load_mapping(mapping_path))
     settings = {
         "api_url": os.environ.get("FUB_API_URL", "https://api.followupboss.com/v1"),
         "source": os.environ.get("FUB_SOURCE", "probate"),

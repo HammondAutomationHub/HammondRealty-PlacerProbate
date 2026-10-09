@@ -53,6 +53,8 @@ options:
   fub_event_type: "Seller Inquiry"
   fub_strict_property: false
   fub_verify_only: true
+  sacramento_portal_user: ""
+  sacramento_portal_password: ""
 schema:
   recipients:
     - email
@@ -85,3 +87,5 @@ schema:
   fub_event_type: list(Seller Inquiry|General Inquiry|Property Inquiry|Inquiry|Registration)
   fub_strict_property: bool
   fub_verify_only: bool
+  sacramento_portal_user: str
+  sacramento_portal_password: password

@@ -49,16 +49,18 @@ USER_AGENT = (
 )
 CASE_RE = re.compile(r"\bS-PR-0*\d+\b", re.I)
 ESTATE_RE = re.compile(
-    r"NOTICE OF PETITION TO ADMINISTER ESTATE OF\s+"
-    r"(?P<name>.+?)(?:\s+CASE NO\.|\s+\d+\.\s+To all heirs)",
+    r"NOTICE OF PETITION TO ADMINISTER ESTATE OF:?\s+"
+    r"(?P<name>.+?)(?:\s+CASE\s+(?:NO\.?|NUMBER)|\s+\d+\.\s+To all heirs)",
     re.I | re.S,
 )
 AKA_LINE_RE = re.compile(
-    r"interested in the will or estate, or both, of:\s*(?P<name>.+?)(?:\s*\d+\.\s|\s*$)",
+    r"interested in the will or estate, or both,?\s+of[:,]?\s*"
+    r"(?P<name>.+?)"
+    r"(?=\s*\d+\.\s|\s+A PETITION|\s+THE PETITION|\s*$)",
     re.I | re.S,
 )
 PETITIONER_RE = re.compile(
-    r"(?:A PETITION FOR PROBATE has been filed by|PETITION FOR PROBATE has been filed by)\s*:\s*"
+    r"(?:A PETITION FOR PROBATE has been filed by|PETITION FOR PROBATE has been filed by)\s*:?\s*"
     r"(?P<name>.+?)\s+in the Superior Court",
     re.I | re.S,
 )
@@ -68,17 +70,23 @@ COURT_RE = re.compile(
 )
 HEARING_RE = re.compile(
     r"A HEARING on the petition will be held in this court as follows:\s*"
-    r"(?P<when>.+?)(?:\s+\d+\.\s+IF YOU OBJECT|\s*$)",
+    r"(?P<when>.+?)"
+    r"(?=\s+\d+\.\s+IF YOU OBJECT|\s+IF YOU OBJECT|\s*$)",
     re.I | re.S,
 )
 ATTORNEY_RE = re.compile(
-    r"(?:Attorney for Petitioner|ATTORNEY FOR PETITIONER)\s*:\s*(?P<atty>.+?)(?:\nPUBLISHED|\s*$)",
+    r"(?:Attorney for Petitioner|ATTORNEY FOR PETITIONER)\s*:?\s*"
+    r"(?P<atty>.+?)"
+    r"(?=\s*(?:Telephone|Phone(?:\s*No\.)?|Tel)\s*:|\s*PUBLISHED\b|\s*$)",
     re.I | re.S,
 )
 PUBLISHED_RE = re.compile(r"PUBLISHED IN\s+(?P<pub>.+)", re.I)
 WILL_RE = re.compile(r"will and codicils, if any, be admitted to probate", re.I)
 IAEA_RE = re.compile(r"Independent Administration of Estates Act", re.I)
-PHONE_RE = re.compile(r"(?:Phone(?:\s*No\.)?|Tel)\s*:\s*([0-9().\-\s]{7,20})", re.I)
+PHONE_RE = re.compile(
+    r"(?:Phone(?:\s*No\.)?|Telephone|Tel)\s*:\s*([0-9().\-\s]{7,20})",
+    re.I,
+)
 
 
 @dataclass
@@ -100,6 +108,8 @@ class Notice:
     notice_url: str
     snippet: str
     raw_text: str
+    extra_flag: str = ""
+    source_note: str = ""
     first_seen: bool = False
     status: str = "repeat"  # new | repeat | missing_case
 
@@ -117,20 +127,28 @@ def default_window(lookback_days: int, lookahead_days: int) -> tuple[date, date]
     return start, end
 
 
-def search_url(start: date, end: date, page: int = 0, size: int = 24) -> str:
+def search_url(
+    start: date,
+    end: date,
+    page: int = 0,
+    size: int = 24,
+    county: str | None = None,
+    keywords: str | None = None,
+) -> str:
     params = {
         "page": page,
         "size": size,
         "view": "list",
         "showExtended": "false",
         "startRange": "",
-        "keywords": os.environ.get(
+        "keywords": keywords
+        or os.environ.get(
             "PROBATE_KEYWORDS", '"NOTICE OF PETITION TO ADMINISTER ESTATE"'
         ),
         "firstDate": start.strftime("%m/%d/%Y"),
         "lastDate": end.strftime("%m/%d/%Y"),
         "_categories": "1",
-        "county": os.environ.get("PROBATE_COUNTY", "Placer"),
+        "county": county or os.environ.get("PROBATE_COUNTY", "Placer"),
         "ordering": "BY_DATE_DEC",
     }
     return f"{BASE_SEARCH}?{urlencode(params)}"
@@ -211,13 +229,72 @@ def extract_case(text: str) -> str:
     return f"S-PR-{int(m.group(1)):07d}"
 
 
-def parse_card(card) -> Notice | None:
+def normalize_notice_text(raw: str) -> str:
+    """Put spaces back into ads whose HTML glues words together."""
+    text = raw or ""
+    text = re.sub(r"TOADMINISTER", "TO ADMINISTER", text, flags=re.I)
+    text = re.sub(r"(\d{2}PR\d{3,8})(?=[A-Za-z])", r"\1 ", text, flags=re.I)
+    text = re.sub(r"([,:;])([A-Za-z])", r"\1 \2", text)
+    text = re.sub(r"([a-z]{2})\.([A-Za-z])", r"\1. \2", text)
+    text = re.sub(r"\.(\d)", r". \1", text)
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+    text = re.sub(r"([a-z])(\d)", r"\1 \2", text)
+    text = re.sub(r"(\d)(am|pm)\b", r"\1 \2", text, flags=re.I)
+    text = re.sub(r"\b(am|pm)(?=in\b)", r"\1 ", text, flags=re.I)
+    text = re.sub(r"(?<![\d])(?<!PR)(\d{3,})([A-Z][a-z]{2,})", r"\1 \2", text)
+    text = re.sub(r"([A-Z]{2})([a-z])", r"\1 \2", text)
+    text = re.sub(r"\bOF(?!FICE\b|FICIAL\b|TEN\b)([A-Z]{3,})", r"OF \1", text)
+    text = re.sub(r"([A-Z])(CASE\s+NO)", r"\1 \2", text)
+    return text
+
+
+def trailing_publication(raw: str) -> str:
+    lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    last = lines[-1]
+    if re.search(r"\b20\d{2}\b", last) and "attorney" not in last.lower() and len(last) < 80:
+        return last
+    return ""
+
+
+def notice_fields(raw: str, case_extractor=None) -> dict:
+    extractor = case_extractor or extract_case
+    raw = normalize_notice_text(raw or "")
+    raw_flat = re.sub(r"[ \t]+", " ", raw)
+    if "PETITION TO ADMINISTER ESTATE" not in raw_flat.upper():
+        return {}
+    atty = first_match(ATTORNEY_RE, raw, "atty")
+    phone = first_match(PHONE_RE, raw, 1)
+    if not phone:
+        phone_m = re.search(r"(\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4})", atty)
+        phone = phone_m.group(1) if phone_m else ""
+    case_number = extractor(raw_flat)
+    publication = first_match(PUBLISHED_RE, raw_flat, "pub") or trailing_publication(raw)
+    return {
+        "case_number": case_number,
+        "decedent": extract_decedent(raw_flat),
+        "petitioner": first_match(PETITIONER_RE, raw_flat, "name"),
+        "court_county": first_match(COURT_RE, raw_flat, "county"),
+        "hearing": first_match(HEARING_RE, raw, "when"),
+        "attorney": re.sub(r"\s+", " ", atty),
+        "attorney_phone": phone,
+        "publication_line": publication,
+        "will_offered": bool(WILL_RE.search(raw_flat)),
+        "iaea_requested": bool(IAEA_RE.search(raw_flat)),
+        "snippet": raw_flat[:280],
+        "raw_text": raw,
+        "status": "missing_case" if not case_number else "repeat",
+    }
+
+
+def parse_card(card, case_extractor=None) -> Notice | None:
     desc = card.select_one(".description")
     if not desc:
         return None
     raw = desc.get_text("\n", strip=True)
-    raw_flat = re.sub(r"[ \t]+", " ", raw)
-    if "PETITION TO ADMINISTER ESTATE" not in raw_flat.upper():
+    fields = notice_fields(raw, case_extractor)
+    if not fields:
         return None
 
     heading = card.select_one(".panel-heading h4")
@@ -234,56 +311,51 @@ def parse_card(card) -> Notice | None:
     refcode = re.sub(r"^Refcode:\s*", "", ref.get_text(strip=True) if ref else "")
     advert_inputs = card.select("input[id^=advertId_]")
     advert_id = advert_inputs[0]["value"] if advert_inputs else ""
-    notice_url = f"{NOTICE_HOME}/advert/-{advert_id}" if advert_id else search_url(*default_window(21, 21))
-
-    atty = first_match(ATTORNEY_RE, raw, "atty")
-    phone = first_match(PHONE_RE, raw, 1)
-    if not phone:
-        phone_m = re.search(r"(\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4})", atty)
-        phone = phone_m.group(1) if phone_m else ""
+    notice_url = (
+        f"{NOTICE_HOME}/advert/-{advert_id}"
+        if advert_id
+        else search_url(*default_window(21, 21))
+    )
 
     notice = Notice(
-        case_number=extract_case(raw_flat),
-        decedent=extract_decedent(raw_flat),
-        petitioner=first_match(PETITIONER_RE, raw_flat, "name"),
-        court_county=first_match(COURT_RE, raw_flat, "county"),
-        hearing=first_match(HEARING_RE, raw, "when"),
-        attorney=re.sub(r"\s+", " ", atty),
-        attorney_phone=phone,
         newspaper=newspaper,
         post_date=post_date,
-        publication_line=first_match(PUBLISHED_RE, raw_flat, "pub"),
-        will_offered=bool(WILL_RE.search(raw_flat)),
-        iaea_requested=bool(IAEA_RE.search(raw_flat)),
         refcode=refcode,
         advert_id=advert_id,
         notice_url=notice_url,
-        snippet=raw_flat[:280],
-        raw_text=raw,
-        status="missing_case" if not extract_case(raw_flat) else "repeat",
+        **fields,
     )
     return notice
 
 
-def parse_html(page_html: str) -> list[Notice]:
+def parse_html(page_html: str, case_extractor=None) -> list[Notice]:
     soup = BeautifulSoup(page_html, "html.parser")
     cards = soup.select("div.panel.panel-result")
     notices: list[Notice] = []
     for card in cards:
-        parsed = parse_card(card)
+        parsed = parse_card(card, case_extractor=case_extractor)
         if parsed:
             notices.append(parsed)
     return notices
 
 
-def paginate(start: date, end: date, max_pages: int | None = None) -> tuple[list[Notice], list[str]]:
+def paginate(
+    start: date,
+    end: date,
+    max_pages: int | None = None,
+    county: str | None = None,
+    keywords: str | None = None,
+    case_extractor=None,
+) -> tuple[list[Notice], list[str]]:
     if max_pages is None:
         max_pages = int(os.environ.get("PROBATE_MAX_PAGES", "10"))
     collected: list[Notice] = []
     urls: list[str] = []
     last_full = False
     for page in range(max_pages):
-        url = search_url(start, end, page=page)
+        url = search_url(
+            start, end, page=page, county=county, keywords=keywords
+        )
         urls.append(url)
         _progress(
             "cnpa",
@@ -292,7 +364,7 @@ def paginate(start: date, end: date, max_pages: int | None = None) -> tuple[list
             cnpa_max_pages=max_pages,
         )
         html_text = fetch_page(url)
-        batch = parse_html(html_text)
+        batch = parse_html(html_text, case_extractor=case_extractor)
         collected.extend(batch)
         soup = BeautifulSoup(html_text, "html.parser")
         # Site uses 0-based page in query, hidden #page starts at 1 after first view.
@@ -368,8 +440,12 @@ def listing_from_row(row: dict, run_date: str) -> dict:
         "case_number": case,
         "date": str(row.get("post_date") or row.get("filed") or "").strip(),
         "filed": str(row.get("filed") or row.get("filed_from_docket") or "").strip(),
-        "source": "Placer County",
-        "source_id": "placer",
+        "source": (
+            "Sacramento County"
+            if str(row.get("source_id") or "").lower() == "sacramento"
+            else "Placer County"
+        ),
+        "source_id": str(row.get("source_id") or "placer").lower() or "placer",
         "petitioner": petitioner,
         "decedent": decedent,
         "decedent_address": str(row.get("decedent_residence") or "").strip(),
@@ -466,11 +542,17 @@ def yesno(flag: bool) -> str:
     return "Yes" if flag else "No"
 
 
-def build_text(notices: list[Notice], start: date, end: date, urls: list[str]) -> str:
+def build_text(
+    notices: list[Notice],
+    start: date,
+    end: date,
+    urls: list[str],
+    county: str = "Placer",
+) -> str:
     new_items = [n for n in notices if n.first_seen]
     lines = [
         f"Hammond IT Consulting — Blake Hammond Realty",
-        f"Placer County probate petition notices",
+        f"{county} County probate petition notices",
         f"Window: {start.isoformat()} to {end.isoformat()}",
         f"Unique estates: {len(notices)}  |  New today: {len(new_items)}",
         "",
@@ -497,7 +579,7 @@ def build_text(notices: list[Notice], start: date, end: date, urls: list[str]) -
             "",
         ]
     lines += [
-        "Watchlist (look up in Placer Assessor / Recorder):",
+        f"Watchlist (look up in {county} Assessor / Recorder):",
         *[f"  - {n.decedent} ({n.case_number})" for n in notices if n.decedent],
         "",
         "A published petition does not prove a house is in the estate.",
@@ -526,7 +608,13 @@ def row_html(n: Notice) -> str:
     """
 
 
-def build_html(notices: list[Notice], start: date, end: date, urls: list[str]) -> str:
+def build_html(
+    notices: list[Notice],
+    start: date,
+    end: date,
+    urls: list[str],
+    county: str = "Placer",
+) -> str:
     new_count = sum(1 for n in notices if n.first_seen)
     rows = "\n".join(row_html(n) for n in sorted(notices, key=lambda x: x.sort_key()))
     watch = "".join(
@@ -539,7 +627,7 @@ def build_html(notices: list[Notice], start: date, end: date, urls: list[str]) -
     return f"""<!DOCTYPE html>
 <html><body style="font-family:Georgia,serif;color:#222;max-width:960px;">
   <p style="letter-spacing:.08em;font-size:12px;color:#8a6d2b;margin:0 0 4px;">HAMMOND IT CONSULTING · BLAKE HAMMOND REALTY</p>
-  <h2>Placer County probate petition notices</h2>
+  <h2>{html.escape(county)} County probate petition notices</h2>
   <p>Window {start.isoformat()} → {end.isoformat()} &nbsp;|&nbsp;
      Unique estates: <strong>{len(notices)}</strong> &nbsp;|&nbsp;
      New since last run: <strong>{new_count}</strong></p>
@@ -556,7 +644,7 @@ def build_html(notices: list[Notice], start: date, end: date, urls: list[str]) -
     </tbody>
   </table>
   <h3>Assessor watchlist</h3>
-  <p>Look these names up in the Placer Assessor and Recorder. A petition is not proof of a house.</p>
+  <p>Look these names up in the {html.escape(county)} Assessor and Recorder. A petition is not proof of a house.</p>
   <ul>{watch or "<li>None</li>"}</ul>
   <p style="color:#666;font-size:12px;">Query used:<br>{query}</p>
 </body></html>
@@ -835,6 +923,7 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     root = Path(__file__).resolve().parent
     load_env_file(root / args.env_file)
+    os.environ.setdefault("FUB_DATA_SOURCE", "placer")
     if args.fub_preview_one:
         os.environ["FUB_PREVIEW_ONE"] = "1"
     if args.fub_verify_one:
@@ -887,6 +976,12 @@ def main() -> int:
         (out_dir / f"dossiers-{stamp}.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
     else:
         _progress("ecourt_skip", "Skipping eCourt lookups.")
+    try:
+        from .datasources import stamp_fub_tags
+    except ImportError:
+        from datasources import stamp_fub_tags
+
+    rows = stamp_fub_tags(rows, "Placer")
     write_ecourt_alerts(state_path.parent / "ecourt_alerts.json", rows)
     merge_listings(state_path.parent / "listings.json", rows, run_date)
     if not args.no_pdf:

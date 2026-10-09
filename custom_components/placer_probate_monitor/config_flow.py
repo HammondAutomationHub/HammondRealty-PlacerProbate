@@ -33,6 +33,8 @@ from .const import (
     CONF_RECIPIENTS,
     CONF_RUN_ON_START,
     CONF_RUN_TIME,
+    CONF_SACRAMENTO_PORTAL_PASSWORD,
+    CONF_SACRAMENTO_PORTAL_USER,
     CONF_SEND_EMAIL,
     CONF_SKIP_PORTAL,
     CONF_SMTP_HOST,
@@ -162,6 +164,24 @@ def _search_schema(defaults: dict) -> vol.Schema:
     )
 
 
+def _sacramento_schema(defaults: dict) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Optional(
+                CONF_SACRAMENTO_PORTAL_USER,
+                default=defaults.get(CONF_SACRAMENTO_PORTAL_USER, ""),
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
+            ),
+            vol.Optional(
+                CONF_SACRAMENTO_PORTAL_PASSWORD, default=""
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+            ),
+        }
+    )
+
+
 def _fub_schema(defaults: dict) -> vol.Schema:
     return vol.Schema(
         {
@@ -220,6 +240,10 @@ def _normalize(user_input: dict[str, Any], previous: dict | None = None) -> dict
         data[CONF_SMTP_PASSWORD] = previous.get(CONF_SMTP_PASSWORD, "")
     if not data.get(CONF_FUB_API_KEY) and previous:
         data[CONF_FUB_API_KEY] = previous.get(CONF_FUB_API_KEY, "")
+    if not data.get(CONF_SACRAMENTO_PORTAL_PASSWORD) and previous:
+        data[CONF_SACRAMENTO_PORTAL_PASSWORD] = previous.get(
+            CONF_SACRAMENTO_PORTAL_PASSWORD, ""
+        )
     for key in (
         CONF_SMTP_PORT,
         CONF_LOOKBACK_DAYS,
@@ -251,8 +275,16 @@ class PlacerProbateMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_search(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
             self._data = _normalize(user_input, self._data)
-            return await self.async_step_fub()
+            return await self.async_step_sacramento()
         return self.async_show_form(step_id="search", data_schema=_search_schema(self._data))
+
+    async def async_step_sacramento(self, user_input: dict[str, Any] | None = None):
+        if user_input is not None:
+            self._data = _normalize(user_input, self._data)
+            return await self.async_step_fub()
+        return self.async_show_form(
+            step_id="sacramento", data_schema=_sacramento_schema(self._data)
+        )
 
     async def async_step_fub(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
@@ -294,8 +326,17 @@ class PlacerProbateMonitorOptionsFlow(config_entries.OptionsFlow):
         defaults = self._defaults()
         if user_input is not None:
             self._data = _normalize(user_input, defaults)
-            return await self.async_step_fub()
+            return await self.async_step_sacramento()
         return self.async_show_form(step_id="search", data_schema=_search_schema(defaults))
+
+    async def async_step_sacramento(self, user_input: dict[str, Any] | None = None):
+        defaults = self._defaults()
+        if user_input is not None:
+            self._data = _normalize(user_input, defaults)
+            return await self.async_step_fub()
+        return self.async_show_form(
+            step_id="sacramento", data_schema=_sacramento_schema(defaults)
+        )
 
     async def async_step_fub(self, user_input: dict[str, Any] | None = None):
         defaults = self._defaults()

@@ -603,8 +603,15 @@ class PlacerProbateSourcesPanel extends HTMLElement {
 
   _renderList() {
     this._qs("#source-list").innerHTML = (this._data.sources || []).map((src) => {
-      const pill = src.status === "live" ? "live" : "wait";
-      const label = src.status === "live" ? "Live" : "Coming next";
+      let pill = "wait";
+      let label = "Coming next";
+      if (src.status === "live" && src.enabled) {
+        pill = "live";
+        label = "On";
+      } else if (src.status === "live") {
+        pill = "off";
+        label = "Off";
+      }
       const active = src.id === this._source ? "active" : "";
       return `<button type="button" data-source="${ppmEsc(src.id)}" class="${active}">${ppmEsc(src.name)} <span class="ppm-pill ${pill}">${label}</span></button>`;
     }).join("");
@@ -621,6 +628,118 @@ class PlacerProbateSourcesPanel extends HTMLElement {
     const src = (this._data.sources || []).find((item) => item.id === this._source)
       || { id: this._source, name: this._source, status: "coming_soon", description: "", extracts: "" };
     const body = this._qs("#source-body");
+    if (src.status === "live") {
+      const on = !!src.enabled;
+      const label = src.id === "sacramento" ? "Sacramento" : "Placer";
+      const p = src.id === "sacramento" ? (this._data.sacramento || {}) : (this._data.placer || {});
+      const keywords = src.id === "sacramento"
+        ? '"NOTICE OF PETITION"'
+        : (p.keywords || '"NOTICE OF PETITION TO ADMINISTER ESTATE"');
+      const county = src.id === "sacramento" ? "Sacramento" : "Placer";
+      const skipLabel = src.id === "sacramento" ? "Skip court-portal lookups" : "Skip eCourt lookups";
+      const pauseLabel = src.id === "sacramento" ? "Portal pause (seconds)" : "eCourt pause (seconds)";
+      const fields = (this._mapData.source_fields && this._mapData.source_fields[src.id])
+        || this._data.fields || [];
+      const custom = ((this._mapData.mapping && this._mapData.mapping.source_mappings
+        && this._mapData.mapping.source_mappings[src.id]
+        && this._mapData.mapping.source_mappings[src.id].custom_fields)
+        || (src.id === "placer" && this._mapData.mapping && this._mapData.mapping.custom_fields)
+        || {});
+      body.innerHTML = `
+        <section class="ppm-card">
+          <h2>${ppmEsc(src.name)} import</h2>
+          <p class="ppm-note">${ppmEsc(src.description)}</p>
+          <div class="ppm-toggle">
+            <input id="source_enabled" type="checkbox" ${on ? "checked" : ""} />
+            <div>
+              <label style="margin:0;">Use this county in the daily job</label>
+              <p class="ppm-note" style="margin:4px 0 0;">Off keeps ${ppmEsc(label)} out of the scheduled run and Follow Up Boss import. The other county is unchanged.</p>
+            </div>
+          </div>
+          <div class="ppm-row">
+            <div><label>Lookback days</label><input id="lookback_days" type="number" min="1" max="120" value="${ppmEsc(p.lookback_days ?? 21)}" ${src.id === "sacramento" ? "disabled" : ""} /></div>
+            <div><label>Lookahead days</label><input id="lookahead_days" type="number" min="0" max="120" value="${ppmEsc(p.lookahead_days ?? 21)}" ${src.id === "sacramento" ? "disabled" : ""} /></div>
+          </div>
+          <div class="ppm-row">
+            <div><label>County</label><input id="county" value="${ppmEsc(county)}" disabled /></div>
+            <div>
+              <label>${ppmEsc(skipLabel)}</label>
+              <select id="skip_portal" ${src.id === "sacramento" ? "disabled" : ""}><option value="false">No</option><option value="true">Yes</option></select>
+            </div>
+          </div>
+          <label>CNPA keywords</label>
+          <input id="keywords" value="${ppmEsc(keywords)}" ${src.id === "sacramento" ? "disabled" : ""} />
+          <div class="ppm-row">
+            <div>
+              <label>Generate PDF</label>
+              <select id="generate_pdf" ${src.id === "sacramento" ? "disabled" : ""}><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+            <div><label>${ppmEsc(pauseLabel)}</label><input id="ecourt_pause_seconds" type="number" step="0.1" min="0.5" max="10" value="${ppmEsc(p.ecourt_pause_seconds ?? 1.2)}" ${src.id === "sacramento" ? "disabled" : ""} /></div>
+          </div>
+          <label>Max CNPA pages</label>
+          <input id="max_search_pages" type="number" min="1" max="20" value="${ppmEsc(p.max_search_pages ?? 10)}" ${src.id === "sacramento" ? "disabled" : ""} />
+          ${src.id === "sacramento" ? `
+          <h2 style="margin-top:16px;">Court portal login</h2>
+          <p class="ppm-note">Email and password for the Sacramento Journal Technologies public portal. Jobs scrape the math CAPTCHA from the login HTML. Confidential and Not Viewable filings are never downloaded. Leave the password blank to keep the saved password.</p>
+          <label>Portal email</label>
+          <input id="sacramento_portal_user" type="email" autocomplete="username" value="${ppmEsc(p.sacramento_portal_user || "")}" />
+          <label>Portal password</label>
+          <input id="sacramento_portal_password" type="password" autocomplete="new-password" placeholder="${p.sacramento_portal_password_set ? "unchanged if blank" : ""}" />
+          <p class="ppm-note">${p.sacramento_portal_password_set ? "A portal password is already saved." : "No portal password saved yet. Public PDFs will not download until this is set."}</p>
+          ` : ""}
+          <div class="ppm-actions">
+            ${src.id === "placer" ? '<button id="save-source" type="button">Save Placer import</button>' : '<button id="save-source" type="button">Save Sacramento portal login</button>'}
+            <button class="secondary" id="preview-source" type="button">Preview one extract</button>
+            <button class="secondary" id="run-source" type="button">Run ${ppmEsc(label)} job</button>
+          </div>
+          <p class="ppm-note">Preview and Run use the same Follow Up Boss path as ${src.id === "placer" ? "today" : "Placer"}. They only process ${ppmEsc(src.name)}. Turn the county off to leave it out of the scheduled job.</p>
+        </section>
+        <section class="ppm-card" id="source-preview">
+          <h2>Last live extract</h2>
+          <p class="ppm-note">Run Preview one extract to see pulled values and the Follow Up Boss mapping for one case.</p>
+        </section>
+        ${ppmGoNoGoCard(ppmSourceGoNoGo(this._data, this._mapData, src.id), src.name)}
+        <section class="ppm-card">
+          <h2>Follow Up Boss mapping</h2>
+          <p class="ppm-note">${(this._mapData.fub_custom_fields || []).length
+            ? `Each ${ppmEsc(src.name)} field can map to a custom field that already exists in Follow Up Boss.`
+            : (this._mapData.fub_custom_error || "Save a Follow Up Boss API key, then reload to load custom fields.")}</p>
+          ${ppmExamplePersonBar(this._fubPerson && this._fubPerson.query)}
+          <table>
+            <thead><tr><th>Source field</th><th>From</th><th>FUB custom field</th><th>Example person</th></tr></thead>
+            <tbody>
+              ${ppmMappingRows(
+                fields,
+                custom,
+                this._mapData.fub_custom_fields || [],
+                this._fubPerson,
+                this._mapData.fub_builtin_fields || [],
+                (this._mapData.catalog && this._mapData.catalog.default_custom_fields) || {},
+              )}
+            </tbody>
+          </table>
+          <div class="ppm-actions"><button id="save-source-map" type="button">Save ${ppmEsc(src.name)} mapping</button></div>
+        </section>
+      `;
+      const skip = this._qs("#skip_portal");
+      if (skip) skip.value = String(!!p.skip_portal);
+      const pdf = this._qs("#generate_pdf");
+      if (pdf) pdf.value = String(p.generate_pdf !== false);
+      const saveBtn = this._qs("#save-source");
+      if (saveBtn) saveBtn.addEventListener("click", () => this._save());
+      this._qs("#source_enabled").addEventListener("change", (ev) => this._toggleEnabled(src.id, ev.target.checked));
+      this._qs("#preview-source").addEventListener("click", () => this._preview(src.id));
+      this._qs("#run-source").addEventListener("click", () => this._run(src.id));
+      const saveMap = this._qs("#save-source-map");
+      if (saveMap) saveMap.addEventListener("click", () => this._saveSourceMap(src.id));
+      this._bindExamplePerson();
+      ppmBindMappingExamples(body, this._fubPerson);
+      ppmRenderPreview(this._qs("#source-preview"), this._jobSt);
+      const shot = this._qs(".fub-person-shot");
+      if (shot && this._fubPerson) shot.innerHTML = ppmPersonSnapshot(this._fubPerson)
+        + ppmCompareExtractToFub(ppmPreviewRecord(this._jobSt), this._fubPerson);
+      return;
+    }
     if (src.status !== "live") {
       const fields = (this._mapData.source_fields && this._mapData.source_fields[src.id])
         || [];
@@ -653,85 +772,6 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       ppmBindMappingExamples(body, this._fubPerson);
       return;
     }
-    const p = this._data.placer || {};
-    const fields = this._data.fields || [];
-    body.innerHTML = `
-      <section class="ppm-card">
-        <h2>Placer County import</h2>
-        <p class="ppm-note">${ppmEsc(src.description)}</p>
-        <div class="ppm-row">
-          <div><label>Lookback days</label><input id="lookback_days" type="number" min="1" max="120" value="${ppmEsc(p.lookback_days ?? 21)}" /></div>
-          <div><label>Lookahead days</label><input id="lookahead_days" type="number" min="0" max="120" value="${ppmEsc(p.lookahead_days ?? 21)}" /></div>
-        </div>
-        <div class="ppm-row">
-          <div><label>County</label><input id="county" value="Placer" disabled /></div>
-          <div>
-            <label>Skip eCourt lookups</label>
-            <select id="skip_portal"><option value="false">No</option><option value="true">Yes</option></select>
-          </div>
-        </div>
-        <label>CNPA keywords</label>
-        <input id="keywords" value="${ppmEsc(p.keywords || "")}" />
-        <div class="ppm-row">
-          <div>
-            <label>Generate PDF</label>
-            <select id="generate_pdf"><option value="true">Yes</option><option value="false">No</option></select>
-          </div>
-          <div><label>eCourt pause (seconds)</label><input id="ecourt_pause_seconds" type="number" step="0.1" min="0.5" max="10" value="${ppmEsc(p.ecourt_pause_seconds ?? 1.2)}" /></div>
-        </div>
-        <label>Max CNPA pages</label>
-        <input id="max_search_pages" type="number" min="1" max="20" value="${ppmEsc(p.max_search_pages ?? 10)}" />
-        <div class="ppm-actions">
-          <button id="save-source" type="button">Save Placer import</button>
-          <button class="secondary" id="preview-source" type="button">Preview one extract</button>
-          <button class="secondary" id="run-source" type="button">Run Placer job</button>
-        </div>
-        <p class="ppm-note">Preview one extract pulls a live go-case for review only. It does not post to Follow Up Boss or mark cases seen. Use Run Placer job for a full import.</p>
-      </section>
-      <section class="ppm-card" id="source-preview">
-        <h2>Last live extract</h2>
-        <p class="ppm-note">Run Preview one extract to see pulled values and the Follow Up Boss mapping for one case.</p>
-      </section>
-      ${ppmGoNoGoCard(ppmSourceGoNoGo(this._data, this._mapData, "placer"), "Placer County")}
-      <section class="ppm-card">
-        <h2>Follow Up Boss mapping</h2>
-        <p class="ppm-note">${(this._mapData.fub_custom_fields || []).length
-          ? "Each Placer field can map to a custom field that already exists in Follow Up Boss. Pull an example person to compare real values."
-          : (this._mapData.fub_custom_error || "Save a Follow Up Boss API key, then reload to load custom fields.")}</p>
-        ${ppmExamplePersonBar(this._fubPerson && this._fubPerson.query)}
-        <table>
-          <thead><tr><th>Placer field</th><th>From</th><th>FUB custom field</th><th>Example person</th></tr></thead>
-          <tbody>
-            ${ppmMappingRows(
-              fields,
-              ((this._mapData.mapping && this._mapData.mapping.source_mappings
-                && this._mapData.mapping.source_mappings.placer
-                && this._mapData.mapping.source_mappings.placer.custom_fields)
-                || (this._mapData.mapping && this._mapData.mapping.custom_fields)
-                || {}),
-              this._mapData.fub_custom_fields || [],
-              this._fubPerson,
-              this._mapData.fub_builtin_fields || [],
-              (this._mapData.catalog && this._mapData.catalog.default_custom_fields) || {},
-            )}
-          </tbody>
-        </table>
-        <div class="ppm-actions"><button id="save-source-map" type="button">Save Placer mapping</button></div>
-      </section>
-    `;
-    this._qs("#skip_portal").value = String(!!p.skip_portal);
-    this._qs("#generate_pdf").value = String(p.generate_pdf !== false);
-    this._qs("#save-source").addEventListener("click", () => this._save());
-    this._qs("#preview-source").addEventListener("click", () => this._preview());
-    this._qs("#run-source").addEventListener("click", () => this._run());
-    const saveMap = this._qs("#save-source-map");
-    if (saveMap) saveMap.addEventListener("click", () => this._saveSourceMap("placer"));
-    this._bindExamplePerson();
-    ppmBindMappingExamples(body, this._fubPerson);
-    ppmRenderPreview(this._qs("#source-preview"), this._jobSt);
-    const shot = this._qs(".fub-person-shot");
-    if (shot && this._fubPerson) shot.innerHTML = ppmPersonSnapshot(this._fubPerson)
-      + ppmCompareExtractToFub(ppmPreviewRecord(this._jobSt), this._fubPerson);
   }
 
   async _load() {
@@ -752,42 +792,74 @@ class PlacerProbateSourcesPanel extends HTMLElement {
   }
 
   async _save() {
-    const body = {
-      lookback_days: Number(this._qs("#lookback_days").value),
-      lookahead_days: Number(this._qs("#lookahead_days").value),
-      keywords: this._qs("#keywords").value,
-      skip_portal: this._qs("#skip_portal").value === "true",
-      generate_pdf: this._qs("#generate_pdf").value === "true",
-      ecourt_pause_seconds: Number(this._qs("#ecourt_pause_seconds").value),
-      max_search_pages: Number(this._qs("#max_search_pages").value),
-    };
+    const src = this._source || "placer";
+    const body = src === "sacramento"
+      ? {
+        source_id: "sacramento",
+        sacramento_portal_user: (this._qs("#sacramento_portal_user") || {}).value || "",
+        sacramento_portal_password: (this._qs("#sacramento_portal_password") || {}).value || "",
+      }
+      : {
+        source_id: "placer",
+        lookback_days: Number(this._qs("#lookback_days").value),
+        lookahead_days: Number(this._qs("#lookahead_days").value),
+        keywords: this._qs("#keywords").value,
+        skip_portal: this._qs("#skip_portal").value === "true",
+        generate_pdf: this._qs("#generate_pdf").value === "true",
+        ecourt_pause_seconds: Number(this._qs("#ecourt_pause_seconds").value),
+        max_search_pages: Number(this._qs("#max_search_pages").value),
+      };
     try {
       this._data = await this._hass.callApi("POST", "placer_probate_monitor/sources", body);
       this._renderList();
       this._renderBody();
-      this._flash("Placer import settings saved.", true);
+      this._flash(src === "sacramento" ? "Sacramento portal login saved." : "Placer import settings saved.", true);
     } catch (err) {
       this._flash(ppmText(err), false);
     }
   }
 
-  async _run() {
-    this._flash("Starting Placer job…", "wait");
+  async _toggleEnabled(sourceId, enabled) {
     try {
-      const st = await ppmRunJob(this._hass, "run", {}, (live) => {
-        this._flash(ppmJobLiveMessage(live) || "Placer job is running…", "wait");
+      this._data = await this._hass.callApi("POST", "placer_probate_monitor/sources", {
+        source_id: sourceId,
+        enabled,
+      });
+      this._renderList();
+      this._renderBody();
+      const name = sourceId === "sacramento" ? "Sacramento County" : "Placer County";
+      this._flash(
+        enabled
+          ? `${name} is on. Scheduled jobs and Follow Up Boss import include this county.`
+          : `${name} is off. The other county and Follow Up Boss settings are unchanged.`,
+        true,
+      );
+    } catch (err) {
+      this._flash(ppmText(err), false);
+    }
+  }
+
+  async _run(sourceId) {
+    const id = sourceId || "placer";
+    const label = id === "sacramento" ? "Sacramento" : "Placer";
+    this._flash(`Starting ${label} job…`, "wait");
+    try {
+      const st = await ppmRunJob(this._hass, "run", { source_id: id }, (live) => {
+        this._flash(ppmJobLiveMessage(live) || `${label} job is running…`, "wait");
       });
       const ok = st.last_result !== "failed" && st.last_result !== "running";
-      this._flash(ok ? ppmJobDoneMessage(st) : (ppmText(st.last_error) || "Placer job failed. Check last_run.log."), ok);
+      this._flash(ok ? ppmJobDoneMessage(st) : (ppmText(st.last_error) || `${label} job failed. Check last_run.log.`), ok);
     } catch (err) {
       this._flash(ppmText(err), false);
     }
   }
 
-  async _preview() {
-    this._flash("Preview started… pulling one live Placer go-case (view only).", "wait");
+  async _preview(sourceId) {
+    const id = sourceId || "placer";
+    const label = id === "sacramento" ? "Sacramento" : "Placer";
+    this._flash(`Preview started… pulling one live ${label} go-case (view only).`, "wait");
     try {
-      const st = await ppmRunJob(this._hass, "preview", {}, (live) => {
+      const st = await ppmRunJob(this._hass, "preview", { source_id: id }, (live) => {
         this._flash(ppmJobLiveMessage(live) || "Preview is running…", "wait");
       });
       this._jobSt = st;
@@ -1276,6 +1348,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       const st = await ppmRunJob(this._hass, "verify", {
         fub_verify_existing: useExisting,
         fub_verify_person_id: personId,
+        source_id: this._mapSource || "placer",
       }, (live) => {
         this._flash(ppmJobLiveMessage(live) || "Verify is running…", "wait");
       });
@@ -1302,7 +1375,9 @@ class PlacerProbateFubPanel extends HTMLElement {
   async _preview() {
     this._flash("Preview started… retrieving one live go-case (view only).", "wait");
     try {
-      const st = await ppmRunJob(this._hass, "preview", {}, (live) => {
+      const st = await ppmRunJob(this._hass, "preview", {
+        source_id: this._mapSource || "placer",
+      }, (live) => {
         this._flash(ppmJobLiveMessage(live) || "Preview is running…", "wait");
       });
       const ok = st.last_result !== "failed" && st.last_result !== "running";
@@ -1363,7 +1438,7 @@ class PlacerProbateListingsPanel extends HTMLElement {
       <div class="ppm-wrap">
         <header>
           <h1>Probate listings</h1>
-          <p>Collected Placer cases. Date is the newspaper notice date. Source is the county import. Decedent address is DE-111 item 3.a.(2) when marked, else 3c. Not the “at (place)” death location.</p>
+          <p>Collected county cases. Date is the newspaper notice date. Source is the county import. Placer decedent address is DE-111 item 3.a.(2) when marked, else 3c. Sacramento uses the published notice and court summary (no petition PDF).</p>
         </header>
         <main class="ppm-listings">
           <div id="flash" class="ppm-banner"></div>

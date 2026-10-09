@@ -36,6 +36,9 @@ CONF_FUB_VERIFY_ONLY = "fub_verify_only"
 CONF_FUB_UPDATE_EXISTING = "fub_update_existing"
 CONF_FUB_VERIFY_EXISTING = "fub_verify_existing"
 CONF_FUB_VERIFY_PERSON_ID = "fub_verify_person_id"
+CONF_SOURCE_ENABLED = "source_enabled"
+CONF_SACRAMENTO_PORTAL_USER = "sacramento_portal_user"
+CONF_SACRAMENTO_PORTAL_PASSWORD = "sacramento_portal_password"
 
 FUB_EVENT_TYPES = [
     "Seller Inquiry",
@@ -91,6 +94,9 @@ DEFAULTS = {
     CONF_FUB_UPDATE_EXISTING: False,
     CONF_FUB_VERIFY_EXISTING: False,
     CONF_FUB_VERIFY_PERSON_ID: "",
+    CONF_SOURCE_ENABLED: {"placer": True, "sacramento": False},
+    CONF_SACRAMENTO_PORTAL_USER: "",
+    CONF_SACRAMENTO_PORTAL_PASSWORD: "",
 }
 
 ATTR_LAST_RUN = "last_run"

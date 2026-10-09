@@ -726,7 +726,16 @@ def _kpi_counts(rows: list[dict], run_date: date) -> tuple[int, int, int, int]:
     return len(rows), contested, this_month, companions
 
 
-def build_pdf(rows: list[dict], out_path: Path, run_date: date, start: date, end: date) -> Path:
+def build_pdf(
+    rows: list[dict],
+    out_path: Path,
+    run_date: date,
+    start: date,
+    end: date,
+    county: str = "Placer",
+    source_note: str | None = None,
+    intro: str | None = None,
+) -> Path:
     from ecourt_client import parse_summary
 
     s = _styles()
@@ -806,15 +815,22 @@ def build_pdf(rows: list[dict], out_path: Path, run_date: date, start: date, end
         Paragraph("HAMMOND IT CONSULTING  ·  BLAKE HAMMOND REALTY", s["kicker"]),
         Paragraph("Daily Probate Petition Feed — Case Dossiers", s["title"]),
         Paragraph(
-            f"{_format_run_date(run_date)}  ·  Placer County  ·  "
-            f"CNPA notices + eCourt Public summaries + DE-111 last residence",
+            f"{_format_run_date(run_date)}  ·  {county} County  ·  "
+            + (
+                "CNPA notices + Sacramento public case summaries + public DE-111/DE-147"
+                if county.lower() == "sacramento"
+                else "CNPA notices + eCourt Public summaries + DE-111 last residence"
+            ),
             s["sub"],
         ),
         Paragraph(
-            "Each estate below merges the published Notice of Petition to Administer Estate with the "
-            "public Case Summary (parties, filing date, hearings, document titles, counsel). "
-            "Public register PDFs are downloaded when the portal exposes a Download link; "
-            "Unavailable filings need court e-access.",
+            intro
+            or (
+                "Each estate below merges the published Notice of Petition to Administer Estate with the "
+                "public Case Summary (parties, filing date, hearings, document titles, counsel). "
+                "Public register PDFs are downloaded when the portal exposes a Download link; "
+                "Unavailable filings need court e-access."
+            ),
             s["body"],
         ),
         Spacer(1, 8),
@@ -841,10 +857,14 @@ def build_pdf(rows: list[dict], out_path: Path, run_date: date, start: date, end
         )
         links = []
         case_no = r.get("case_number") or "this case"
-        links.append(
-            f"Court search: {_rl_link(ECOURT_SEARCH, ECOURT_SEARCH)} "
-            f"(paste {_esc(case_no)} — Case Summary URLs 404 unless you search first)"
-        )
+        court_url = safe_href(r.get("court_url") or "")
+        if county.lower() == "sacramento" and court_url:
+            links.append(f"Court summary: {_rl_link(court_url, court_url)}")
+        else:
+            links.append(
+                f"Court search: {_rl_link(ECOURT_SEARCH, ECOURT_SEARCH)} "
+                f"(paste {_esc(case_no)} — Case Summary URLs 404 unless you search first)"
+            )
         if notice:
             links.append(f"Published notice: {_rl_link(notice, notice)}")
         pairs = [
@@ -884,10 +904,13 @@ def build_pdf(rows: list[dict], out_path: Path, run_date: date, start: date, end
         story.append(Spacer(1, 12))
 
     story.append(Paragraph(
-        "Sources: California Public Notices (CNPA) search for NOTICE OF PETITION TO ADMINISTER ESTATE, "
-        "Placer County; Placer Superior Court eCourt Public Case Search. "
-        "Assessor/Recorder match is still required before treating any estate as a property lead. "
-        "No inventory and appraisal appears on these public registers yet.",
+        source_note
+        or (
+            "Sources: California Public Notices (CNPA) search for NOTICE OF PETITION TO ADMINISTER ESTATE, "
+            "Placer County; Placer Superior Court eCourt Public Case Search. "
+            "Assessor/Recorder match is still required before treating any estate as a property lead. "
+            "No inventory and appraisal appears on these public registers yet."
+        ),
         s["foot"],
     ))
 
@@ -898,7 +921,7 @@ def build_pdf(rows: list[dict], out_path: Path, run_date: date, start: date, end
         rightMargin=0.5 * inch,
         topMargin=0.5 * inch,
         bottomMargin=0.42 * inch,
-        title=f"Placer County Daily Probate Feed — {run_date.isoformat()}",
+        title=f"{county} County Daily Probate Feed — {run_date.isoformat()}",
         author="Hammond IT Consulting — Blake Hammond Realty",
     )
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)

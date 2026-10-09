@@ -241,6 +241,12 @@ def apply_env(settings: dict) -> None:
     )
     os.environ["PROBATE_MAX_PAGES"] = str(int(settings.get("max_search_pages") or 10))
     os.environ["ECOURT_PAUSE"] = str(float(settings.get("ecourt_pause_seconds") or 1.2))
+    os.environ["SACRAMENTO_PORTAL_USER"] = str(
+        settings.get("sacramento_portal_user") or ""
+    ).strip()
+    os.environ["SACRAMENTO_PORTAL_PASSWORD"] = str(
+        settings.get("sacramento_portal_password") or ""
+    )
     os.environ["FUB_ENABLED"] = "1" if settings.get("fub_enabled") else "0"
     os.environ["FUB_API_URL"] = str(
         settings.get("fub_api_url") or "https://api.followupboss.com/v1"

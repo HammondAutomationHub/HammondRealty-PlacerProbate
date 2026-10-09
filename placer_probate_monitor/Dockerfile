@@ -17,7 +17,7 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY placer_probate_monitor.py ecourt_client.py pdf_report.py petition_parse.py addon_server.py fub_client.py fub_mapping.yaml /app/
+COPY placer_probate_monitor.py ecourt_client.py pdf_report.py petition_parse.py addon_server.py fub_client.py fub_mapping.yaml datasources.py sacramento_portal.py sacramento_probate_monitor.py job_progress.py /app/
 COPY www /app/www
 
 EXPOSE 8099

@@ -33,8 +33,11 @@ from .const import (
     CONF_LOOKAHEAD_DAYS,
     CONF_LOOKBACK_DAYS,
     CONF_MAX_PAGES,
+    CONF_SACRAMENTO_PORTAL_PASSWORD,
+    CONF_SACRAMENTO_PORTAL_USER,
     CONF_SEND_EMAIL,
     CONF_SKIP_PORTAL,
+    CONF_SOURCE_ENABLED,
     DEFAULTS,
     DOMAIN,
     FUB_EVENT_TYPES,
@@ -42,13 +45,15 @@ from .const import (
 from .fub_client import (
     inspect_fub_person,
     mapping_payload,
+    normalize_source_enabled,
     petition_file_token,
     petition_safe_case,
     save_mapping,
+    source_is_enabled,
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.62"
+PANEL_JS_VERSION = "1.3.64"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -275,14 +280,29 @@ class SourcesView(HomeAssistantView):
         if not isinstance(body, dict):
             return self.json({"error": "Expected a JSON object."}, status_code=400)
         merged = _merged(entry)
-        for key in SOURCE_KEYS:
-            if key not in body:
-                continue
-            try:
-                merged[key] = _coerce(key, body[key])
-            except (TypeError, ValueError):
-                return self.json({"error": f"Invalid {key}."}, status_code=400)
-        merged["county"] = "Placer"
+        source_id = str(body.get("source_id") or "").strip().lower()
+        if "enabled" in body and source_id in {"placer", "sacramento"}:
+            flags = normalize_source_enabled(merged)
+            flags[source_id] = bool(body.get("enabled"))
+            merged[CONF_SOURCE_ENABLED] = flags
+        if source_id == "sacramento":
+            if CONF_SACRAMENTO_PORTAL_USER in body:
+                merged[CONF_SACRAMENTO_PORTAL_USER] = str(
+                    body.get(CONF_SACRAMENTO_PORTAL_USER) or ""
+                ).strip()
+            if CONF_SACRAMENTO_PORTAL_PASSWORD in body:
+                value = str(body.get(CONF_SACRAMENTO_PORTAL_PASSWORD) or "").strip()
+                if value and value not in {"••••••••", "********"}:
+                    merged[CONF_SACRAMENTO_PORTAL_PASSWORD] = value
+        if source_id in {"", "placer"}:
+            for key in SOURCE_KEYS:
+                if key not in body:
+                    continue
+                try:
+                    merged[key] = _coerce(key, body[key])
+                except (TypeError, ValueError):
+                    return self.json({"error": f"Invalid {key}."}, status_code=400)
+            merged["county"] = "Placer"
         self.hass.config_entries.async_update_entry(entry, options=merged)
         return self.json(sources_payload(merged))
 
@@ -485,6 +505,22 @@ class JobView(HomeAssistantView):
         if not isinstance(body, dict):
             body = {}
         action = str(body.get("action") or "run")
+        source_id = str(body.get("source_id") or "").strip().lower()
+        settings = _merged(entry)
+        if source_id and source_id not in {"placer", "sacramento"}:
+            return self.json({"error": "Unknown data source."}, status_code=400)
+        if source_id and not source_is_enabled(settings, source_id):
+            return self.json(
+                {
+                    "ok": False,
+                    "error": (
+                        f"{source_id} is turned off. Enable it on Probate sources "
+                        "without changing the other county."
+                    ),
+                },
+                status_code=400,
+            )
+        extra = {"source_id": source_id} if source_id else {}
         if action == "verify":
             settings = _merged(entry)
             if not str(settings.get(CONF_FUB_API_KEY) or "").strip():
@@ -520,6 +556,7 @@ class JobView(HomeAssistantView):
                         CONF_SEND_EMAIL: False,
                         CONF_FUB_VERIFY_EXISTING: bool(use_existing),
                         CONF_FUB_VERIFY_PERSON_ID: person_id,
+                        **extra,
                     },
                 )
             )
@@ -532,11 +569,12 @@ class JobView(HomeAssistantView):
                         CONF_FUB_VERIFY_ONLY: False,
                         CONF_SEND_EMAIL: False,
                         CONF_GENERATE_PDF: False,
+                        **extra,
                     },
                 )
             )
         else:
-            self.hass.async_create_task(runner("panel"))
+            self.hass.async_create_task(runner("panel", extra or None))
         return self.json({"ok": True, "started": True, "action": action})
 
 
@@ -565,7 +603,9 @@ def _listings_payload(hass: HomeAssistant) -> dict:
     reports = data_dir / "reports"
     if not catalog and reports.is_dir():
         rows: list[dict] = []
-        for dossier in sorted(reports.glob("dossiers-*.json")):
+        for dossier in list(sorted(reports.glob("dossiers-*.json"))) + list(
+            sorted((reports / "sacramento").glob("sacramento-dossiers-*.json"))
+        ):
             try:
                 payload = json.loads(dossier.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
