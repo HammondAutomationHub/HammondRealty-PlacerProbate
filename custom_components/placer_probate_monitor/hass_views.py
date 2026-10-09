@@ -49,11 +49,10 @@ from .fub_client import (
     petition_file_token,
     petition_safe_case,
     save_mapping,
-    source_is_enabled,
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.64"
+PANEL_JS_VERSION = "1.3.65"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -127,6 +126,13 @@ def _store(hass: HomeAssistant):
 
 def _merged(entry) -> dict:
     return {**DEFAULTS, **entry.data, **entry.options}
+
+
+def _api_error(message: str, status: int = 400, **extra):
+    """HA frontend callApi only surfaces JSON `message`, not `error`."""
+    payload = {"ok": False, "error": message, "message": message}
+    payload.update(extra)
+    return payload, status
 
 
 def _apply_key(hass: HomeAssistant) -> None:
@@ -492,12 +498,13 @@ class JobView(HomeAssistantView):
         entry = _entry(self.hass)
         runner = (store or {}).get("run") if store else None
         if not store or not runner or not entry:
-            return self.json({"error": "Integration is not configured."}, status_code=400)
+            payload, status = _api_error("Integration is not configured.")
+            return self.json(payload, status_code=status)
         if store.get("running"):
-            return self.json(
-                {"ok": False, "error": "A run is already in progress.", "running": True},
-                status_code=409,
+            payload, status = _api_error(
+                "A run is already in progress.", status=409, running=True
             )
+            return self.json(payload, status_code=status)
         try:
             body = await request.json()
         except Exception:  # noqa: BLE001
@@ -506,28 +513,15 @@ class JobView(HomeAssistantView):
             body = {}
         action = str(body.get("action") or "run")
         source_id = str(body.get("source_id") or "").strip().lower()
-        settings = _merged(entry)
         if source_id and source_id not in {"placer", "sacramento"}:
-            return self.json({"error": "Unknown data source."}, status_code=400)
-        if source_id and not source_is_enabled(settings, source_id):
-            return self.json(
-                {
-                    "ok": False,
-                    "error": (
-                        f"{source_id} is turned off. Enable it on Probate sources "
-                        "without changing the other county."
-                    ),
-                },
-                status_code=400,
-            )
+            payload, status = _api_error("Unknown data source.")
+            return self.json(payload, status_code=status)
         extra = {"source_id": source_id} if source_id else {}
         if action == "verify":
             settings = _merged(entry)
             if not str(settings.get(CONF_FUB_API_KEY) or "").strip():
-                return self.json(
-                    {"ok": False, "error": "Set the Follow Up Boss API key first."},
-                    status_code=400,
-                )
+                payload, status = _api_error("Set the Follow Up Boss API key first.")
+                return self.json(payload, status_code=status)
             use_existing = _coerce(
                 CONF_FUB_VERIFY_EXISTING,
                 body.get(CONF_FUB_VERIFY_EXISTING, settings.get(CONF_FUB_VERIFY_EXISTING)),
@@ -536,13 +530,10 @@ class JobView(HomeAssistantView):
                 body.get(CONF_FUB_VERIFY_PERSON_ID, settings.get(CONF_FUB_VERIFY_PERSON_ID) or "")
             ).strip()
             if use_existing and (not person_id.isdigit() or int(person_id) <= 0):
-                return self.json(
-                    {
-                        "ok": False,
-                        "error": "Enter the Follow Up Boss person ID to update.",
-                    },
-                    status_code=400,
+                payload, status = _api_error(
+                    "Enter the Follow Up Boss person ID to update."
                 )
+                return self.json(payload, status_code=status)
             merged = dict(settings)
             merged[CONF_FUB_VERIFY_EXISTING] = bool(use_existing)
             merged[CONF_FUB_VERIFY_PERSON_ID] = person_id

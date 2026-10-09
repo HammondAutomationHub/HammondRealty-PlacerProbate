@@ -434,35 +434,17 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
     data_dir = Path(hass.config.path(DOMAIN))
     apply_env(settings, mapping_path=data_dir / "fub_mapping.yaml", hass=hass)
     try:
-        from .fub_client import enabled_live_sources, source_is_enabled
+        from .fub_client import enabled_live_sources
         from .job_progress import clear_progress, report_progress
     except ImportError:
-        from fub_client import enabled_live_sources, source_is_enabled
+        from fub_client import enabled_live_sources
         from job_progress import clear_progress, report_progress
 
     requested = str(settings.get("source_id") or "").strip().lower()
     if requested:
+        # Panel Preview/Run always names a county. The daily-job toggle must
+        # not block that; it only filters scheduled/startup/service runs.
         sources = [requested]
-        if not source_is_enabled(settings, requested):
-            clear_progress()
-            report_progress("done", f"{requested} is turned off.")
-            return {
-                "ok": True,
-                ATTR_LAST_RESULT: "ok",
-                ATTR_LAST_ERROR: None,
-                ATTR_PDF: None,
-                ATTR_NEW_COUNT: 0,
-                ATTR_NOTICE_COUNT: 0,
-                ATTR_FUB_POSTED: 0,
-                ATTR_FUB_UPDATED: 0,
-                ATTR_FUB_SKIPPED: 0,
-                ATTR_FUB_ERROR: None,
-                ATTR_FUB_VERIFY: {
-                    "note": f"{requested} is turned off. Enable it on Probate sources to run this county."
-                },
-                ATTR_ECOURT_VIEW_LIMIT: {},
-                "log_tail": f"{requested} is turned off.",
-            }
     else:
         sources = enabled_live_sources(settings)
 
