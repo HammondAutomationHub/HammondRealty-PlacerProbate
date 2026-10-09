@@ -18,9 +18,9 @@ except ImportError:
     from petition_parse import STATE_ALT as _STATE_ALT
 
 try:
-    from .datasources import COUNTY_FUB_LEAD_SOURCES, fub_lead_source
+    from .datasources import COUNTY_FUB_LEAD_SOURCES, fub_lead_source, petition_docs_dir
 except ImportError:
-    from datasources import COUNTY_FUB_LEAD_SOURCES, fub_lead_source
+    from datasources import COUNTY_FUB_LEAD_SOURCES, fub_lead_source, petition_docs_dir
 
 
 def _progress_fub(summary: dict, action: str, key: str | None = None) -> None:
@@ -950,7 +950,8 @@ def source_field_catalog(source_id: str) -> list[dict]:
         for item in PROBATE_SOURCE_FIELDS:
             row = dict(item)
             if row.get("key") in {"court_search", "court_url"}:
-                row["source"] = "Sacramento portal node/397 (not Placer node/45)"
+                row["label"] = "Sacramento case summary URL"
+                row["source"] = "Journal Technologies public portal node/397"
             elif row.get("key") == "case_number":
                 row["source"] = "CNPA notice / Sacramento portal"
                 row["notes"] = "YYPR###### case number used as the lead key."
@@ -969,7 +970,17 @@ def source_field_catalog(source_id: str) -> list[dict]:
             }:
                 row["source"] = "Sacramento public DE-111 / DE-147 after portal login"
             else:
-                row["source"] = row.get("source") or "CNPA notice / Sacramento portal"
+                src = str(row.get("source") or "CNPA notice / Sacramento portal")
+                src = (
+                    src.replace("eCourt petitioner", "Sacramento portal petitioner")
+                    .replace("eCourt parties", "Sacramento portal parties")
+                    .replace("eCourt next event", "Sacramento portal next event")
+                    .replace("eCourt search / docket", "Sacramento portal docket")
+                    .replace("eCourt summary", "Sacramento portal summary")
+                    .replace("eCourt", "Journal Technologies public portal")
+                    .replace("node/45", "node/397")
+                )
+                row["source"] = src
             rows.append(row)
         return rows
     rows = []
@@ -1237,7 +1248,13 @@ def source_extract_rows(row: dict, mapping: dict) -> list[dict]:
     values = probate_export_values(row, mapping)
     seen: set[str] = set()
     out: list[dict] = []
-    for field in PROBATE_SOURCE_FIELDS:
+    source_id = _row_source_id(row)
+    extra_source = (
+        "Journal Technologies public portal"
+        if source_id == "sacramento"
+        else "eCourt"
+    )
+    for field in source_field_catalog(source_id):
         key = str(field.get("key") or "")
         if not key:
             continue
@@ -1282,7 +1299,7 @@ def source_extract_rows(row: dict, mapping: dict) -> list[dict]:
             {
                 "key": key,
                 "label": label,
-                "source": "eCourt",
+                "source": extra_source,
                 "value": value,
                 "empty": False,
                 "unavailable": False,
@@ -1352,7 +1369,12 @@ def mapped_look_payload(row: dict, person: dict, settings: dict, mapping: dict) 
     return {
         "person": person_rows,
         "event_type": event.get("type") or settings.get("event_type") or "",
-        "lead_source": event.get("source") or settings.get("source") or "",
+        "lead_source": (
+            mapping.get("lead_source")
+            or event.get("source")
+            or _fub_lead_source_name(row)
+            or ""
+        ),
         "system": event.get("system") or "",
         "message": event.get("message") or "",
         "description": event.get("description") or "",
@@ -2069,6 +2091,17 @@ def form_public_uri(case: str, kind: str) -> str:
     return f"{base}/{petition_file_token(case, kind=kind)}/{safe}.pdf"
 
 
+def _petition_docs_search_dirs(row: dict | None = None) -> list[Path]:
+    source = _row_source_id(row)
+    primary = petition_docs_dir(source)
+    other = petition_docs_dir("placer" if source == "sacramento" else "sacramento")
+    seen: list[Path] = []
+    for docs in (primary, other):
+        if docs not in seen:
+            seen.append(docs)
+    return seen
+
+
 def _petition_pdf_path(row: dict) -> Path | None:
     raw = str(row.get("petition_pdf") or "").strip()
     if raw:
@@ -2076,20 +2109,22 @@ def _petition_pdf_path(row: dict) -> Path | None:
         if path.is_file() and path.stat().st_size > 4:
             return path
     case = petition_safe_case(case_key(row))
-    docs = Path(os.environ.get("FUB_PETITION_DOCS_DIR") or "")
-    if not docs.is_dir() or not case:
+    if not case:
         return None
-    folder = docs / case
-    named = folder / f"{case}_DE-111.pdf"
-    if named.is_file():
-        return named
-    if folder.is_dir():
-        for path in sorted(folder.glob("*_petition.pdf")):
-            if path.is_file():
-                return path
-        for path in sorted(folder.glob("*.pdf")):
-            if path.is_file() and "_DE-147" not in path.name.upper():
-                return path
+    for docs in _petition_docs_search_dirs(row):
+        if not docs.is_dir():
+            continue
+        folder = docs / case
+        named = folder / f"{case}_DE-111.pdf"
+        if named.is_file():
+            return named
+        if folder.is_dir():
+            for path in sorted(folder.glob("*_petition.pdf")):
+                if path.is_file():
+                    return path
+            for path in sorted(folder.glob("*.pdf")):
+                if path.is_file() and "_DE-147" not in path.name.upper():
+                    return path
     return None
 
 
@@ -2100,11 +2135,13 @@ def _duties_pdf_path(row: dict) -> Path | None:
         if path.is_file() and path.stat().st_size > 4:
             return path
     case = petition_safe_case(case_key(row))
-    docs = Path(os.environ.get("FUB_PETITION_DOCS_DIR") or "")
-    if not docs.is_dir() or not case:
+    if not case:
         return None
-    named = docs / case / f"{case}_DE-147.pdf"
-    return named if named.is_file() else None
+    for docs in _petition_docs_search_dirs(row):
+        named = docs / case / f"{case}_DE-147.pdf"
+        if named.is_file():
+            return named
+    return None
 
 
 def stored_person_id(state: dict, key: str) -> int | None:
@@ -2192,9 +2229,10 @@ def preview_one_record(
     *,
     mapping_path: Path | None = None,
 ) -> dict:
-    mapping = mapping_for_export(load_mapping(mapping_path))
+    source_id = _row_source_id(rows[0] if rows else None)
+    mapping = mapping_for_export(load_mapping(mapping_path), source_id)
     settings = {
-        "source": os.environ.get("FUB_SOURCE", "probate"),
+        "source": mapping.get("lead_source") or os.environ.get("FUB_SOURCE", "probate"),
         "assigned_to": os.environ.get("FUB_ASSIGNED_TO", "Blake Hammond"),
         "stage": (os.environ.get("FUB_STAGE") or "").strip(),
         "event_type": os.environ.get("FUB_EVENT_TYPE", "Seller Inquiry"),
@@ -2435,9 +2473,13 @@ def verify_record_payload(
         addr = person["addresses"][0] if isinstance(person["addresses"][0], dict) else {}
         if len(person["addresses"]) > 1 and isinstance(person["addresses"][1], dict):
             addr2 = person["addresses"][1]
+    source_id = _row_source_id(row)
     return {
-        "data_source": "placer",
-        "data_source_name": "Placer County",
+        "data_source": source_id,
+        "source_id": source_id,
+        "data_source_name": (
+            "Sacramento County" if source_id == "sacramento" else "Placer County"
+        ),
         "gate": "go",
         "case_number": case_key(row),
         "fub_person_id": int(pid) if pid else None,
@@ -2447,6 +2489,7 @@ def verify_record_payload(
         "assignedTo": person.get("assignedTo"),
         "stage": person.get("stage"),
         "lead_source": person.get("source")
+        or mapping.get("lead_source")
         or _fub_lead_source_name(row)
         or settings.get("source"),
         "event_type": settings.get("event_type"),
@@ -2506,10 +2549,19 @@ def build_event(
     decedent = str(row.get("decedent") or "").strip()
     case = case_key(row)
     court_note = _court_search_note(row, mapping)
-    message = (
-        f"Estate of {decedent or '(unknown)'}. Case {case}. "
-        f"Search eCourt first: {court_note}."
-    )
+    source_id = _row_source_id(row)
+    if source_id == "sacramento":
+        message = (
+            f"Estate of {decedent or '(unknown)'}. Case {case}. "
+            f"Journal Technologies public portal: {court_note}."
+        )
+        court_label = "Journal Technologies node/397"
+    else:
+        message = (
+            f"Estate of {decedent or '(unknown)'}. Case {case}. "
+            f"Search eCourt first: {court_note}."
+        )
+        court_label = "eCourt"
     if row.get("notice_url"):
         message += f" Notice: {row['notice_url']}"
     if person is None:
@@ -2538,7 +2590,7 @@ def build_event(
             f"Estate location (DE-111 3.a.(2), not place of death): "
             f"{row.get('decedent_residence') or '—'}. "
             f"Hearing: {row.get('next_event') or row.get('hearing') or '—'}. "
-            f"eCourt: {case_portal_url(row) or court_note}."
+            f"{court_label}: {case_portal_url(row) or court_note}."
         )
     return event
 
@@ -2995,10 +3047,11 @@ def export_new_leads(
         print(summary["error"], flush=True)
         print("FUB: posted=0 updated=0 skipped=0", flush=True)
         return summary
-    mapping = mapping_for_export(load_mapping(mapping_path))
+    source_id = _row_source_id(rows[0] if rows else None)
+    mapping = mapping_for_export(load_mapping(mapping_path), source_id)
     settings = {
         "api_url": os.environ.get("FUB_API_URL", "https://api.followupboss.com/v1"),
-        "source": os.environ.get("FUB_SOURCE", "probate"),
+        "source": mapping.get("lead_source") or os.environ.get("FUB_SOURCE", "probate"),
         "assigned_to": os.environ.get("FUB_ASSIGNED_TO", "Blake Hammond"),
         "stage": (os.environ.get("FUB_STAGE") or "").strip(),
         "event_type": os.environ.get("FUB_EVENT_TYPE", "Seller Inquiry"),

@@ -116,10 +116,23 @@ function ppmBannerKind(ok) {
   return ok ? "ok" : "err";
 }
 
+function ppmPreviewCounty(rec, st) {
+  const raw = String(
+    (rec && (rec.source_id || rec.data_source))
+    || (st && st.source_id)
+    || ""
+  ).toLowerCase();
+  return raw === "sacramento" ? "sacramento" : "placer";
+}
+
 function ppmJobLiveMessage(st) {
   const p = (st && st.progress) || {};
   if (p.message) return p.message;
-  if (st && st.running) return "Placer job is running…";
+  if (st && st.running) {
+    return ppmPreviewCounty(null, st) === "sacramento"
+      ? "Sacramento job is running…"
+      : "Placer job is running…";
+  }
   return "";
 }
 
@@ -435,21 +448,28 @@ function ppmRenderPreview(el, st) {
   const posted = !!rec.posted && !viewOnly;
   const updated = !!rec.updated && posted;
   const fubError = rec.fub_error || (st && st.fub_error) || "";
+  const county = ppmPreviewCounty(rec, st);
+  const sac = county === "sacramento";
+  const countyName = sac ? "Sacramento" : "Placer";
+  const courtSource = sac
+    ? "Journal Technologies public portal node/397"
+    : "eCourt Public node/45";
+  const courtLabel = sac ? "Journal Technologies portal" : "eCourt Public";
   let extract = rec.source_extract || [];
   if (!extract.length) {
     extract = [
-      { label: "Case number", source: "CNPA / eCourt", value: rec.case_number, empty: !rec.case_number },
+      { label: "Case number", source: sac ? "CNPA / Sacramento portal" : "CNPA / eCourt", value: rec.case_number, empty: !rec.case_number },
       { label: "Petitioner first name", source: "Split from petitioner", value: rec.firstName || rec.petitioner_first, empty: !(rec.firstName || rec.petitioner_first) },
       { label: "Petitioner last name", source: "Split from petitioner", value: rec.lastName || rec.petitioner_last, empty: !(rec.lastName || rec.petitioner_last) },
-      { label: "Petitioner full name", source: "eCourt parties", value: rec.petitioner, empty: !rec.petitioner },
-      { label: "Decedent", source: "CNPA / eCourt", value: rec.decedent, empty: !rec.decedent },
+      { label: "Petitioner full name", source: sac ? "Sacramento portal parties" : "eCourt parties", value: rec.petitioner, empty: !rec.petitioner },
+      { label: "Decedent", source: sac ? "CNPA / Sacramento portal" : "CNPA / eCourt", value: rec.decedent, empty: !rec.decedent },
       { label: "Estate location", source: "DE-111 item 3.a.(2)", value: rec.decedent_residence, empty: !rec.decedent_residence },
       { label: "Petitioner address", source: "DE-111 item 8 / 3h + DE-147", value: rec.mailing_address, empty: !rec.mailing_address },
       { label: "Petitioner email", source: "DE-111 + DE-147", value: rec.petitioner_email, empty: !rec.petitioner_email },
       { label: "Petitioner phone", source: "DE-111 + DE-147", value: rec.petitioner_phone, empty: !rec.petitioner_phone },
-      { label: "Hearing", source: "eCourt", value: rec.hearing, empty: !rec.hearing },
+      { label: "Hearing", source: sac ? "Sacramento portal" : "eCourt", value: rec.hearing, empty: !rec.hearing },
       { label: "Notice URL", source: "CNPA", value: rec.notice_url, empty: !rec.notice_url },
-      { label: "Court case URL", source: "eCourt Public node/45", value: rec.court_url || rec.court_search, empty: !(rec.court_url || rec.court_search) },
+      { label: "Court case URL", source: courtSource, value: rec.court_url || rec.court_search, empty: !(rec.court_url || rec.court_search) },
     ];
   }
   const mapped = rec.mapped || {};
@@ -492,7 +512,7 @@ function ppmRenderPreview(el, st) {
   const blurb = noGo
     ? `This case was skipped (${ppmEsc(rec.gate_reason || "no-go")}). Follow Up Boss was not updated.`
     : (viewOnly
-    ? "This is one live go-case from Placer. Follow Up Boss was not updated."
+    ? `This is one live go-case from ${countyName}. Follow Up Boss was not updated.`
     : (posted
       ? (updated
         ? "This existing Follow Up Boss person was updated with the current mapping, including the DE-111 on Files. Confirm Address 1/2, notes, name, and Files in FUB."
@@ -514,8 +534,10 @@ function ppmRenderPreview(el, st) {
     ${posted && rec.fub_person_id ? `<span class="ppm-pill live">FUB person ${ppmEsc(rec.fub_person_id)}</span>` : ""}
     <div class="ppm-compare">
       <div>
-        <h2>1. Pulled from Placer</h2>
-        <p class="ppm-note">Check these against the notice, eCourt, and petition PDF.</p>
+        <h2>1. Pulled from ${countyName}</h2>
+        <p class="ppm-note">${sac
+          ? "Check these against the notice, Journal Technologies public portal, and petition PDF."
+          : "Check these against the notice, eCourt, and petition PDF."}</p>
         <table>
           <thead><tr><th>Field</th><th>Value</th><th></th></tr></thead>
           <tbody>${pulledRows}</tbody>
@@ -531,7 +553,7 @@ function ppmRenderPreview(el, st) {
             <tr><th>lead source</th><td>${ppmCell(mapped.lead_source || rec.lead_source)}</td></tr>
             <tr><th>system</th><td>${ppmCell(mapped.system)}</td></tr>
             ${attachLine && !viewOnly ? `<tr><th>Files</th><td>${ppmCell(attachLine)}</td></tr>` : ""}
-            ${(rec.court_url || rec.court_search) ? `<tr><th>eCourt Public</th><td>${ppmCell((rec.court_url_note && rec.court_url_note.uri) || rec.court_url || rec.court_search)}</td></tr>` : ""}
+            ${(rec.court_url || rec.court_search) ? `<tr><th>${courtLabel}</th><td>${ppmCell((rec.court_url_note && rec.court_url_note.uri) || rec.court_url || rec.court_search)}</td></tr>` : ""}
           </tbody>
         </table>
         ${mapped.message ? `<label>Event message</label><p class="ppm-pre">${ppmCell(mapped.message)}</p>` : ""}
@@ -695,7 +717,9 @@ class PlacerProbateSourcesPanel extends HTMLElement {
             <button class="secondary" id="preview-source" type="button">Preview one extract</button>
             <button class="secondary" id="run-source" type="button">Run ${ppmEsc(label)} job</button>
           </div>
-          <p class="ppm-note">Preview and Run use the same Follow Up Boss path as ${src.id === "placer" ? "today" : "Placer"}. They only process ${ppmEsc(src.name)}. Turn the county off to leave it out of the scheduled job.</p>
+          <p class="ppm-note">${src.id === "sacramento"
+            ? "Preview and Run use Follow Up Boss like a live import. They only process Sacramento County (Journal Technologies public portal node/397). Turn the county off to leave it out of the scheduled job."
+            : "Preview and Run use Follow Up Boss like a live import. They only process Placer County (eCourt Public node/45). Turn the county off to leave it out of the scheduled job."}</p>
         </section>
         <section class="ppm-card" id="source-preview">
           <h2>Last live extract</h2>
@@ -1443,7 +1467,7 @@ class PlacerProbateListingsPanel extends HTMLElement {
       <div class="ppm-wrap">
         <header>
           <h1>Probate listings</h1>
-          <p>Collected county cases. Date is the newspaper notice date. Source is the county import. Placer decedent address is DE-111 item 3.a.(2) when marked, else 3c. Sacramento uses the published notice and court summary (no petition PDF).</p>
+          <p>Collected county cases. Date is the newspaper notice date. Source is the county import. Placer decedent address is DE-111 item 3.a.(2) when marked, else 3c. Sacramento uses the published notice, Journal Technologies public portal (node/397), and public DE-111 / DE-147 PDFs.</p>
         </header>
         <main class="ppm-listings">
           <div id="flash" class="ppm-banner"></div>
@@ -1489,7 +1513,7 @@ class PlacerProbateListingsPanel extends HTMLElement {
     const rows = this._filtered();
     this._qs("#listing-count").textContent = rows.length
       ? `${rows.length} listing${rows.length === 1 ? "" : "s"}`
-      : "No collected listings yet. Run a Placer import or Preview one extract.";
+      : "No collected listings yet. Run a county import or Preview one extract.";
     if (!rows.length) {
       this._qs("#listing-table").innerHTML = "";
       return;

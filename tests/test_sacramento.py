@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -451,6 +452,82 @@ class PortalParseTests(unittest.TestCase):
                 intro="test intro",
             )
             self.assertGreater(out.stat().st_size, 1000)
+
+
+class PetitionDocsAndPreviewTests(unittest.TestCase):
+    def setUp(self):
+        self._env = {
+            key: os.environ.get(key)
+            for key in (
+                "FUB_PETITION_DOCS_DIR",
+                "FUB_SACRAMENTO_PETITION_DOCS_DIR",
+                "FUB_DATA_SOURCE",
+                "FUB_SOURCE",
+            )
+        }
+        for key in self._env:
+            os.environ.pop(key, None)
+
+    def tearDown(self):
+        for key, value in self._env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def test_petition_docs_dir_by_source_id(self):
+        from datasources import petition_docs_dir
+        from sacramento_probate_monitor import _petition_docs_dir
+
+        data = Path(tempfile.mkdtemp())
+        placer = petition_docs_dir("placer", data_dir=data)
+        sac = petition_docs_dir("sacramento", data_dir=data)
+        self.assertEqual(placer, data / "reports" / "docs")
+        self.assertEqual(sac, data / "reports" / "sacramento" / "docs")
+        self.assertNotEqual(placer, sac)
+        os.environ["FUB_PETITION_DOCS_DIR"] = str(data / "reports" / "docs")
+        hijack = petition_docs_dir("sacramento", out_dir=data / "reports" / "sacramento")
+        self.assertEqual(hijack, data / "reports" / "sacramento" / "docs")
+        self.assertEqual(
+            _petition_docs_dir(data / "reports" / "sacramento"),
+            data / "reports" / "sacramento" / "docs",
+        )
+        derived = petition_docs_dir("sacramento")
+        self.assertTrue(str(derived).replace("\\", "/").endswith("sacramento/docs"))
+
+    def test_preview_lead_source_sacramento(self):
+        from datasources import stamp_fub_tags
+        from fub_client import mapping_for_export, preview_one_record
+
+        os.environ["FUB_SOURCE"] = "probate"
+        row = stamp_fub_tags(
+            [
+                {
+                    "case_number": "26PR002736",
+                    "petitioner": "Grace Boeger-Balubar",
+                    "mailing_address": "123 Main St, Sacramento, CA 95814",
+                    "court_url": (
+                        "https://prod-portal-sacramento-ca.journaltech.com/"
+                        "public-portal/?q=node/397/2506537"
+                    ),
+                }
+            ],
+            "sacramento",
+        )[0]
+        self.assertEqual(row["lead_source"], "probate sacramento")
+        self.assertEqual(
+            mapping_for_export({}, "sacramento")["lead_source"],
+            "probate sacramento",
+        )
+        preview = preview_one_record([row])
+        rec = preview["verify_record"]
+        self.assertEqual(rec["lead_source"], "probate sacramento")
+        self.assertEqual(rec["mapped"]["lead_source"], "probate sacramento")
+        self.assertEqual(rec["source_id"], "sacramento")
+        blob = " ".join(item.get("source") or "" for item in rec["source_extract"])
+        self.assertNotIn("node/45", blob)
+        self.assertNotIn("eCourt Public", blob)
+        self.assertIn("node/397", blob)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ from pathlib import Path
 import requests
 
 try:
-    from .datasources import stamp_fub_tags
+    from .datasources import petition_docs_dir, stamp_fub_tags
     from .placer_probate_monitor import (
         Notice,
         build_html,
@@ -48,7 +48,7 @@ try:
         get_tz,
     )
 except ImportError:
-    from datasources import stamp_fub_tags
+    from datasources import petition_docs_dir, stamp_fub_tags
     from placer_probate_monitor import (
         Notice,
         build_html,
@@ -141,17 +141,7 @@ def hydrate_notice(notice: Notice) -> str:
 
 
 def _petition_docs_dir(out_dir: Path | None = None) -> Path:
-    env = os.environ.get("FUB_PETITION_DOCS_DIR") or ""
-    if env:
-        return Path(env)
-    if out_dir is not None:
-        parent = out_dir.parent
-        if parent.name == "reports":
-            return parent / "docs"
-        if (parent / "reports").is_dir() or parent.name == "placer_probate_monitor":
-            return parent / "reports" / "docs"
-        return out_dir / "docs"
-    return Path("data/reports/docs")
+    return petition_docs_dir("sacramento", out_dir=out_dir)
 
 
 def enrich_notices(notices: list[Notice], docs_dir: Path | None = None) -> list[dict]:

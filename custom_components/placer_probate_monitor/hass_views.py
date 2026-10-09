@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from .const import (
     DOMAIN,
     FUB_EVENT_TYPES,
 )
+from .datasources import petition_docs_dir
 from .fub_client import (
     inspect_fub_person,
     mapping_payload,
@@ -52,7 +54,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.66"
+PANEL_JS_VERSION = "1.3.67"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -354,6 +356,40 @@ class FubSettingsView(HomeAssistantView):
         return self.json(_public_fub(merged))
 
 
+_SAC_CASE_NAME = re.compile(r"^\d{2}PR\d+$", re.I)
+
+
+def _resolve_stored_pdf(hass: HomeAssistant, safe: str, kind: str) -> Path | None:
+    root = Path(hass.config.path(DOMAIN)).resolve()
+    placer = petition_docs_dir("placer", data_dir=root).resolve()
+    sacramento = petition_docs_dir("sacramento", data_dir=root).resolve()
+    bases = [sacramento, placer] if _SAC_CASE_NAME.match(safe) else [placer, sacramento]
+    suffix = "DE-111" if kind == "de111" else "DE-147"
+    named = f"{safe}_{suffix}.pdf"
+    for docs in bases:
+        try:
+            docs.relative_to(root)
+        except ValueError:
+            continue
+        folder = (docs / safe).resolve()
+        try:
+            folder.relative_to(docs)
+        except ValueError:
+            continue
+        path = folder / named
+        if path.is_file():
+            return path
+        if kind == "de111" and folder.is_dir():
+            matches = sorted(
+                item
+                for item in folder.glob("*.pdf")
+                if "_DE-147" not in item.name.upper()
+            )
+            if matches:
+                return matches[0]
+    return None
+
+
 class PetitionPdfView(HomeAssistantView):
     url = "/api/placer_probate_monitor/de111/{token}/{slug}"
     name = "api:placer_probate_monitor:de111"
@@ -373,17 +409,7 @@ class PetitionPdfView(HomeAssistantView):
         expected = petition_file_token(safe, secret=entry.entry_id if entry else None)
         if not hmac_mod.compare_digest(str(token or ""), expected):
             return self.json({"error": "not found"}, status_code=404)
-        docs = (Path(self.hass.config.path(DOMAIN)) / "reports" / "docs").resolve()
-        folder = (docs / safe).resolve()
-        try:
-            folder.relative_to(docs)
-        except ValueError:
-            return self.json({"error": "not found"}, status_code=404)
-        named = folder / f"{safe}_DE-111.pdf"
-        path = named if named.is_file() else None
-        if path is None and folder.is_dir():
-            matches = sorted(folder.glob("*.pdf"))
-            path = matches[0] if matches else None
+        path = _resolve_stored_pdf(self.hass, safe, "de111")
         if not path or not path.is_file():
             return self.json({"error": "not found"}, status_code=404)
         filename = f"{safe}_DE-111.pdf"
@@ -417,14 +443,8 @@ class DutiesPdfView(HomeAssistantView):
         )
         if not hmac_mod.compare_digest(str(token or ""), expected):
             return self.json({"error": "not found"}, status_code=404)
-        docs = (Path(self.hass.config.path(DOMAIN)) / "reports" / "docs").resolve()
-        folder = (docs / safe).resolve()
-        try:
-            folder.relative_to(docs)
-        except ValueError:
-            return self.json({"error": "not found"}, status_code=404)
-        path = folder / f"{safe}_DE-147.pdf"
-        if not path.is_file():
+        path = _resolve_stored_pdf(self.hass, safe, "de147")
+        if not path or not path.is_file():
             return self.json({"error": "not found"}, status_code=404)
         filename = f"{safe}_DE-147.pdf"
         return FileResponse(

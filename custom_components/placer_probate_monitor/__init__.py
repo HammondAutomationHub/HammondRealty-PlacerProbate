@@ -172,6 +172,9 @@ def apply_env(
         data_dir = Path(hass.config.path(DOMAIN))
         os.environ["PPM_PROGRESS_PATH"] = str(data_dir / "job_progress.json")
         os.environ["FUB_PETITION_DOCS_DIR"] = str(data_dir / "reports" / "docs")
+        os.environ["FUB_SACRAMENTO_PETITION_DOCS_DIR"] = str(
+            data_dir / "reports" / "sacramento" / "docs"
+        )
         entry = hass.config_entries.async_entries(DOMAIN)
         if entry:
             os.environ["FUB_PETITION_TOKEN_SECRET"] = entry[0].entry_id

@@ -9,6 +9,8 @@ without that flag replaces the person's whole tag list.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 FUB_TAG_PROBATE = "probate"
@@ -41,6 +43,48 @@ def fub_lead_source(county: str) -> str:
     except KeyError as exc:
         known = ", ".join(sorted(COUNTY_FUB_LEAD_SOURCES))
         raise ValueError(f"Unknown county {county!r}. Known: {known}") from exc
+
+
+def petition_docs_dir(
+    source_id: str | None = None,
+    *,
+    out_dir: Path | None = None,
+    data_dir: Path | None = None,
+) -> Path:
+    """Directory for downloaded DE-111 / DE-147 PDFs for one county.
+
+    Placer stays at ``reports/docs``. Sacramento is
+    ``reports/sacramento/docs`` so HMAC URLs can still look up either folder.
+    """
+    key = (
+        str(source_id or os.environ.get("FUB_DATA_SOURCE") or "placer")
+        .strip()
+        .lower()
+        or "placer"
+    )
+    if key == "sacramento":
+        env = str(os.environ.get("FUB_SACRAMENTO_PETITION_DOCS_DIR") or "").strip()
+        if env:
+            return Path(env)
+        if out_dir is not None:
+            return Path(out_dir) / "docs"
+        if data_dir is not None:
+            return Path(data_dir) / "reports" / "sacramento" / "docs"
+        placer_env = str(os.environ.get("FUB_PETITION_DOCS_DIR") or "").strip()
+        if placer_env:
+            base = Path(placer_env)
+            if base.name == "docs":
+                return base.parent / "sacramento" / "docs"
+            return base / "sacramento" / "docs"
+        return Path("data/reports/sacramento/docs")
+    env = str(os.environ.get("FUB_PETITION_DOCS_DIR") or "").strip()
+    if env:
+        return Path(env)
+    if out_dir is not None:
+        return Path(out_dir) / "docs"
+    if data_dir is not None:
+        return Path(data_dir) / "reports" / "docs"
+    return Path("data/reports/docs")
 
 
 def stamp_fub_tags(rows: list[dict], county: str) -> list[dict]:
