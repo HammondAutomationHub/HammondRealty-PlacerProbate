@@ -19,6 +19,11 @@ COUNTY_FUB_TAGS = {
     "sacramento": [FUB_TAG_PROBATE, FUB_TAG_SACRAMENTO],
 }
 
+COUNTY_FUB_LEAD_SOURCES = {
+    "placer": "probate placer",
+    "sacramento": "probate sacramento",
+}
+
 
 def fub_tags(county: str) -> list[str]:
     key = county.strip().lower()
@@ -29,12 +34,24 @@ def fub_tags(county: str) -> list[str]:
         raise ValueError(f"Unknown county {county!r}. Known: {known}") from exc
 
 
+def fub_lead_source(county: str) -> str:
+    key = county.strip().lower()
+    try:
+        return COUNTY_FUB_LEAD_SOURCES[key]
+    except KeyError as exc:
+        known = ", ".join(sorted(COUNTY_FUB_LEAD_SOURCES))
+        raise ValueError(f"Unknown county {county!r}. Known: {known}") from exc
+
+
 def stamp_fub_tags(rows: list[dict], county: str) -> list[dict]:
     tags = fub_tags(county)
     key = county.strip().lower()
+    lead_source = fub_lead_source(key) if key in COUNTY_FUB_LEAD_SOURCES else ""
     for row in rows:
         row["tags"] = list(tags)
         row["source_id"] = key if key in COUNTY_FUB_TAGS else county
+        if lead_source:
+            row["lead_source"] = lead_source
     return rows
 
 

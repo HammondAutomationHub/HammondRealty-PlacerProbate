@@ -215,17 +215,41 @@ class FubTagTests(unittest.TestCase):
         rows = stamp_fub_tags([{"case_number": "26PR002445"}], "Sacramento")
         self.assertEqual(rows[0]["tags"], ["probate", "sacramento"])
         self.assertIn("probate", rows[0]["tags"])
+        self.assertEqual(rows[0]["lead_source"], "probate sacramento")
+        self.assertEqual(rows[0]["source_id"], "sacramento")
+        placer = stamp_fub_tags([{"case_number": "S-PR-0014448"}], "placer")
+        self.assertEqual(placer[0]["tags"], ["probate"])
+        self.assertEqual(placer[0]["lead_source"], "probate placer")
 
     def test_person_tags_and_merge_query(self):
-        from fub_client import build_person, put_person
+        from fub_client import build_event, build_person, mapping_for_export, put_person
         import inspect
 
         person = build_person(
             {"petitioner": "Wayne Row", "tags": ["probate", "sacramento"], "source_id": "sacramento"},
             {"send": {"firstName": True, "lastName": True}, "custom_fields": {}},
-            {"assigned_to": "", "stage": ""},
+            {"assigned_to": "", "stage": "", "source": "probate"},
         )
         self.assertEqual(person["tags"], ["probate", "sacramento"])
+        self.assertEqual(person["source"], "probate sacramento")
+        placer = build_person(
+            {"petitioner": "Jane Doe", "source_id": "placer"},
+            {"send": {"firstName": True, "lastName": True}, "custom_fields": {}},
+            {"assigned_to": "", "stage": "", "source": "probate"},
+        )
+        self.assertEqual(placer["tags"], ["probate"])
+        self.assertEqual(placer["source"], "probate placer")
+        event = build_event(
+            {"petitioner": "Wayne Row", "source_id": "sacramento", "case_number": "26PR002445"},
+            {"send": {"firstName": True, "lastName": True, "source": True}, "custom_fields": {}},
+            {"assigned_to": "", "stage": "", "source": "probate", "event_type": "Seller Inquiry"},
+        )
+        self.assertEqual(event["source"], "probate sacramento")
+        self.assertEqual(event["person"]["source"], "probate sacramento")
+        self.assertEqual(mapping_for_export({}, "placer")["lead_source"], "probate placer")
+        self.assertEqual(
+            mapping_for_export({}, "sacramento")["lead_source"], "probate sacramento"
+        )
         self.assertIn("mergeTags=true", inspect.getsource(put_person))
 
     def test_sacramento_url_is_not_rewritten_to_placer(self):
@@ -244,9 +268,12 @@ class FubTagTests(unittest.TestCase):
         from fub_client import DATA_SOURCES, enabled_live_sources, normalize_source_enabled
 
         statuses = {item["id"]: item["status"] for item in DATA_SOURCES}
+        names = {item["id"]: item.get("lead_source") for item in DATA_SOURCES}
         self.assertEqual(statuses["placer"], "live")
         self.assertEqual(statuses["sacramento"], "live")
         self.assertEqual(statuses["nevada"], "coming_soon")
+        self.assertEqual(names["placer"], "probate placer")
+        self.assertEqual(names["sacramento"], "probate sacramento")
         flags = normalize_source_enabled({})
         self.assertTrue(flags["placer"])
         self.assertFalse(flags["sacramento"])

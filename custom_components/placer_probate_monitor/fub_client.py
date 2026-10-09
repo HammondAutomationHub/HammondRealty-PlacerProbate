@@ -17,6 +17,11 @@ try:
 except ImportError:
     from petition_parse import STATE_ALT as _STATE_ALT
 
+try:
+    from .datasources import COUNTY_FUB_LEAD_SOURCES, fub_lead_source
+except ImportError:
+    from datasources import COUNTY_FUB_LEAD_SOURCES, fub_lead_source
+
 
 def _progress_fub(summary: dict, action: str, key: str | None = None) -> None:
     try:
@@ -904,6 +909,7 @@ DATA_SOURCES = [
         "status": "live",
         "description": "California Newspaper Public Notices plus Placer eCourt Public and DE-111 petitions.",
         "extracts": "CNPA notice, eCourt docket, petition PDF",
+        "lead_source": COUNTY_FUB_LEAD_SOURCES["placer"],
     },
     {
         "id": "sacramento",
@@ -911,6 +917,7 @@ DATA_SOURCES = [
         "status": "live",
         "description": "California Newspaper Public Notices (NOTICE OF PETITION) plus Sacramento Journal Technologies summaries and public DE-111/DE-147 PDFs after portal login.",
         "extracts": "CNPA notice, Sacramento portal summary, public petition and duties PDFs",
+        "lead_source": COUNTY_FUB_LEAD_SOURCES["sacramento"],
     },
     {
         "id": "nevada",
@@ -918,6 +925,7 @@ DATA_SOURCES = [
         "status": "coming_soon",
         "description": "Queued after Sacramento County.",
         "extracts": "Not wired yet",
+        "lead_source": "",
     },
 ]
 
@@ -995,6 +1003,10 @@ def mapping_for_export(mapping: dict, source_id: str | None = None) -> dict:
     fields = custom_fields_for_source(out, source_id)
     if fields:
         out["custom_fields"] = fields
+    try:
+        out["lead_source"] = fub_lead_source(source_id)
+    except ValueError:
+        out["lead_source"] = ""
     return out
 
 
@@ -2260,6 +2272,27 @@ def preview_one_record(
     }
 
 
+def _row_source_id(row: dict | None = None) -> str:
+    return (
+        str(
+            (row or {}).get("source_id")
+            or os.environ.get("FUB_DATA_SOURCE")
+            or "placer"
+        )
+        .strip()
+        .lower()
+        or "placer"
+    )
+
+
+def _fub_lead_source_name(row: dict | None = None, source_id: str | None = None) -> str:
+    key = str(source_id or "").strip().lower() or _row_source_id(row)
+    try:
+        return fub_lead_source(key)
+    except ValueError:
+        return str((row or {}).get("lead_source") or "").strip()
+
+
 def _court_search_note(row: dict, mapping: dict) -> str:
     portal = case_portal_url(row)
     if portal:
@@ -2353,9 +2386,7 @@ def build_person(
     _flush_address_slots(person)
     county_tags = row.get("tags")
     if not county_tags:
-        source = str(
-            row.get("source_id") or os.environ.get("FUB_DATA_SOURCE") or "placer"
-        ).strip().lower()
+        source = _row_source_id(row)
         try:
             from .datasources import fub_tags
         except ImportError:
@@ -2367,6 +2398,9 @@ def build_person(
             county_tags = ["probate"]
     if county_tags:
         person["tags"] = list(county_tags)
+    lead_source = _fub_lead_source_name(row)
+    if lead_source:
+        person["source"] = lead_source
     return person
 
 
@@ -2412,7 +2446,9 @@ def verify_record_payload(
         "lastName": person.get("lastName"),
         "assignedTo": person.get("assignedTo"),
         "stage": person.get("stage"),
-        "lead_source": settings.get("source"),
+        "lead_source": person.get("source")
+        or _fub_lead_source_name(row)
+        or settings.get("source"),
         "event_type": settings.get("event_type"),
         "decedent": row.get("decedent"),
         "decedent_residence": row.get("decedent_residence"),
@@ -2490,7 +2526,12 @@ def build_event(
         "person": _person_api_body(person),
     }
     if person_id is None and send.get("source", True):
-        event["source"] = settings.get("source") or "probate"
+        event["source"] = (
+            (person or {}).get("source")
+            or _fub_lead_source_name(row)
+            or settings.get("source")
+            or "probate"
+        )
     if send.get("message", True):
         event["message"] = message
         event["description"] = (

@@ -667,6 +667,9 @@ class PlacerProbateSourcesPanel extends HTMLElement {
               <select id="skip_portal" ${src.id === "sacramento" ? "disabled" : ""}><option value="false">No</option><option value="true">Yes</option></select>
             </div>
           </div>
+          <div class="ppm-row">
+            <div><label>Lead source name</label><input id="lead_source" value="${ppmEsc(src.lead_source || "")}" disabled /></div>
+          </div>
           <label>CNPA keywords</label>
           <input id="keywords" value="${ppmEsc(keywords)}" ${src.id === "sacramento" ? "disabled" : ""} />
           <div class="ppm-row">
@@ -751,6 +754,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
         <section class="ppm-card">
           <h2>${ppmEsc(src.name)}</h2>
           <p>${ppmEsc(src.description)}</p>
+          ${src.lead_source ? `<div><label>Lead source name</label><input value="${ppmEsc(src.lead_source)}" disabled /></div>` : ""}
           <p class="ppm-note">Import is not live yet. You can still map this source’s future fields to Follow Up Boss custom fields.</p>
         </section>
         ${ppmGoNoGoCard(ppmSourceGoNoGo(this._data, this._mapData, src.id), src.name)}
@@ -997,6 +1001,7 @@ class PlacerProbateFubPanel extends HTMLElement {
               <div><label>Lead source name</label><input id="fub_source" /></div>
               <div><label>Assign to</label><input id="fub_assigned_to" /></div>
             </div>
+            <p class="ppm-note">County people use the read-only lead source on each Probate sources card (probate placer / probate sacramento). This field is a fallback for other events.</p>
             <label>Person stage</label>
             <input id="fub_stage" placeholder="Must match a Follow Up Boss stage name (leave blank for FUB default)" />
             <label>Event type</label>
