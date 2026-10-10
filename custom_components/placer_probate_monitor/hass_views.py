@@ -34,6 +34,9 @@ from .const import (
     CONF_LOOKAHEAD_DAYS,
     CONF_LOOKBACK_DAYS,
     CONF_MAX_PAGES,
+    CONF_SACRAMENTO_ECOURT_PAUSE,
+    CONF_SACRAMENTO_LOOKAHEAD_DAYS,
+    CONF_SACRAMENTO_LOOKBACK_DAYS,
     CONF_SACRAMENTO_PORTAL_PASSWORD,
     CONF_SACRAMENTO_PORTAL_USER,
     CONF_SEND_EMAIL,
@@ -47,6 +50,7 @@ from .datasources import petition_docs_dir
 from .fub_client import (
     inspect_fub_person,
     mapping_payload,
+    apply_sacramento_source_settings,
     normalize_source_enabled,
     petition_file_token,
     petition_safe_case,
@@ -54,7 +58,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.69"
+PANEL_JS_VERSION = "1.3.71"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -87,7 +91,13 @@ FUB_KEYS = {
     CONF_FUB_VERIFY_EXISTING,
     CONF_FUB_VERIFY_PERSON_ID,
 }
-INT_KEYS = {CONF_LOOKBACK_DAYS, CONF_LOOKAHEAD_DAYS, CONF_MAX_PAGES}
+INT_KEYS = {
+    CONF_LOOKBACK_DAYS,
+    CONF_LOOKAHEAD_DAYS,
+    CONF_MAX_PAGES,
+    CONF_SACRAMENTO_LOOKBACK_DAYS,
+    CONF_SACRAMENTO_LOOKAHEAD_DAYS,
+}
 BOOL_KEYS = {
     CONF_SKIP_PORTAL,
     CONF_GENERATE_PDF,
@@ -159,7 +169,7 @@ def _coerce(key: str, value):
         return bool(value)
     if key in INT_KEYS:
         return int(value)
-    if key == CONF_ECOURT_PAUSE:
+    if key in {CONF_ECOURT_PAUSE, CONF_SACRAMENTO_ECOURT_PAUSE}:
         return float(value)
     return value
 
@@ -302,6 +312,13 @@ class SourcesView(HomeAssistantView):
                 value = str(body.get(CONF_SACRAMENTO_PORTAL_PASSWORD) or "").strip()
                 if value and value not in {"••••••••", "********"}:
                     merged[CONF_SACRAMENTO_PORTAL_PASSWORD] = value
+            try:
+                merged = apply_sacramento_source_settings(merged, body)
+            except (TypeError, ValueError):
+                return self.json(
+                    {"error": "Invalid Sacramento lookback, lookahead, or portal pause."},
+                    status_code=400,
+                )
         if source_id in {"", "placer"}:
             for key in SOURCE_KEYS:
                 if key not in body:

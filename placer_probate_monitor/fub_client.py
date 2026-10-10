@@ -942,6 +942,97 @@ SOURCE_SETTING_KEYS = [
     "max_search_pages",
 ]
 
+SACRAMENTO_LOOKBACK_KEY = "sacramento_lookback_days"
+SACRAMENTO_LOOKAHEAD_KEY = "sacramento_lookahead_days"
+SACRAMENTO_PAUSE_KEY = "sacramento_ecourt_pause_seconds"
+DEFAULT_LOOKBACK_DAYS = 21
+DEFAULT_LOOKAHEAD_DAYS = 21
+DEFAULT_PORTAL_PAUSE = 1.2
+
+
+def _optional_int(value, default: int) -> int:
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
+def _optional_float(value, default: float) -> float:
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
+def source_window_settings(settings: dict | None, source_id: str = "placer") -> dict:
+    """Lookback, lookahead, and portal pause for one county. Independent of the other."""
+    data = settings or {}
+    key = str(source_id or "placer").strip().lower()
+    if key == "sacramento":
+        lookback_raw = data.get(SACRAMENTO_LOOKBACK_KEY)
+        lookahead_raw = data.get(SACRAMENTO_LOOKAHEAD_KEY)
+        pause_raw = data.get(SACRAMENTO_PAUSE_KEY)
+    else:
+        lookback_raw = data.get("lookback_days")
+        lookahead_raw = data.get("lookahead_days")
+        pause_raw = data.get("ecourt_pause_seconds")
+    try:
+        lookback = _optional_int(lookback_raw, DEFAULT_LOOKBACK_DAYS)
+    except (TypeError, ValueError):
+        lookback = DEFAULT_LOOKBACK_DAYS
+    try:
+        lookahead = _optional_int(lookahead_raw, DEFAULT_LOOKAHEAD_DAYS)
+    except (TypeError, ValueError):
+        lookahead = DEFAULT_LOOKAHEAD_DAYS
+    try:
+        pause = _optional_float(pause_raw, DEFAULT_PORTAL_PAUSE)
+    except (TypeError, ValueError):
+        pause = DEFAULT_PORTAL_PAUSE
+    return {
+        "lookback_days": lookback,
+        "lookahead_days": lookahead,
+        "ecourt_pause_seconds": pause,
+    }
+
+
+def apply_sacramento_source_settings(settings: dict, body: dict) -> dict:
+    """Copy Sacramento window fields from a sources POST onto HA options.
+
+    Accepts the panel's lookback_days / lookahead_days / ecourt_pause_seconds
+    or the stored sacramento_* keys. Does not change Placer's window.
+    """
+    out = dict(settings or {})
+    payload = body or {}
+    if "sacramento_lookback_days" in payload or "lookback_days" in payload:
+        raw = (
+            payload["sacramento_lookback_days"]
+            if "sacramento_lookback_days" in payload
+            else payload["lookback_days"]
+        )
+        value = _optional_int(raw, DEFAULT_LOOKBACK_DAYS)
+        if value < 1 or value > 120:
+            raise ValueError("lookback_days")
+        out[SACRAMENTO_LOOKBACK_KEY] = value
+    if "sacramento_lookahead_days" in payload or "lookahead_days" in payload:
+        raw = (
+            payload["sacramento_lookahead_days"]
+            if "sacramento_lookahead_days" in payload
+            else payload["lookahead_days"]
+        )
+        value = _optional_int(raw, DEFAULT_LOOKAHEAD_DAYS)
+        if value < 0 or value > 120:
+            raise ValueError("lookahead_days")
+        out[SACRAMENTO_LOOKAHEAD_KEY] = value
+    if "sacramento_ecourt_pause_seconds" in payload or "ecourt_pause_seconds" in payload:
+        raw = (
+            payload["sacramento_ecourt_pause_seconds"]
+            if "sacramento_ecourt_pause_seconds" in payload
+            else payload["ecourt_pause_seconds"]
+        )
+        value = _optional_float(raw, DEFAULT_PORTAL_PAUSE)
+        if value < 0.5 or value > 10:
+            raise ValueError("ecourt_pause_seconds")
+        out[SACRAMENTO_PAUSE_KEY] = value
+    return out
+
 
 def source_field_catalog(source_id: str) -> list[dict]:
     key = str(source_id or "placer")
@@ -1055,6 +1146,7 @@ def sources_payload(settings: dict | None = None) -> dict:
     if not placer.get("county"):
         placer["county"] = "Placer"
     enabled = normalize_source_enabled(settings)
+    sac_window = source_window_settings(settings, "sacramento")
     sources = []
     for item in DATA_SOURCES:
         row = dict(item)
@@ -1068,11 +1160,11 @@ def sources_payload(settings: dict | None = None) -> dict:
         "sacramento": {
             "county": "Sacramento",
             "keywords": '"NOTICE OF PETITION"',
-            "lookback_days": placer.get("lookback_days"),
-            "lookahead_days": placer.get("lookahead_days"),
+            "lookback_days": sac_window["lookback_days"],
+            "lookahead_days": sac_window["lookahead_days"],
             "skip_portal": placer.get("skip_portal"),
             "generate_pdf": placer.get("generate_pdf"),
-            "ecourt_pause_seconds": placer.get("ecourt_pause_seconds"),
+            "ecourt_pause_seconds": sac_window["ecourt_pause_seconds"],
             "max_search_pages": placer.get("max_search_pages"),
             "sacramento_portal_user": str((settings or {}).get("sacramento_portal_user") or ""),
             "sacramento_portal_password_set": bool(
@@ -2157,6 +2249,33 @@ def stored_person_id(state: dict, key: str) -> int | None:
         return None
 
 
+def needs_fub_create(state: dict, key: str | None) -> bool:
+    """True when this listing has never been assigned a Follow Up Boss person id."""
+    if not key:
+        return True
+    return stored_person_id(state, key) is None
+
+
+def should_skip_unchanged_person(
+    *,
+    existing_id: int | None,
+    record: dict,
+    fingerprint: str,
+    verify: bool,
+    update_existing: bool,
+) -> bool:
+    """Skip PUT only when a FUB person id exists and the payload is unchanged.
+
+    Listings with no person id must always POST/create, even if they are already
+    in seen_cases and even if a leftover fingerprint matches.
+    """
+    if existing_id is None:
+        return False
+    if verify or update_existing:
+        return False
+    return bool(record.get("fub_fingerprint") == fingerprint)
+
+
 def _rows_for_export(rows: list[dict], state: dict, *, verify: bool) -> list[dict]:
     if not verify:
         return list(rows)
@@ -2197,8 +2316,15 @@ def gate_reason(
     *,
     strict_property: bool,
     existing_id: int | None,
-    allow_seen_without_fub: bool = False,
+    allow_seen_without_fub: bool = True,
 ) -> str | None:
+    """Data-quality gate only.
+
+    Presence in seen_cases / seen_cases_sacramento without a Follow Up Boss
+    person id is not a skip. Callers must POST/create those listings.
+    ``allow_seen_without_fub`` is kept for callers and always treated as true.
+    """
+    del state, allow_seen_without_fub
     key = case_key(row)
     if not key:
         return "missing_case_number"
@@ -2251,7 +2377,6 @@ def preview_one_record(
             mapping,
             strict_property=strict,
             existing_id=None,
-            allow_seen_without_fub=True,
         )
         if reason:
             print(
@@ -3078,7 +3203,7 @@ def export_new_leads(
         print(f"FUB verify: updating existing person_id={forced_id}", flush=True)
     for row in work_rows:
         key = case_key(row)
-        existing_id = stored_person_id(state, key) if key else None
+        existing_id = None if needs_fub_create(state, key) else stored_person_id(state, key)
         if forced_id is not None:
             existing_id = forced_id
         reason = gate_reason(
@@ -3087,7 +3212,6 @@ def export_new_leads(
             mapping,
             strict_property=strict,
             existing_id=existing_id,
-            allow_seen_without_fub=verify,
         )
         if reason:
             summary["skipped"] += 1
@@ -3114,7 +3238,13 @@ def export_new_leads(
                     print(f"FUB skip {key}: verify_only_limit")
                     _progress_fub(summary, "verify-only skip", key)
                     continue
-                if not verify and not update_existing and record.get("fub_fingerprint") == fingerprint:
+                if should_skip_unchanged_person(
+                    existing_id=existing_id,
+                    record=record,
+                    fingerprint=fingerprint,
+                    verify=verify,
+                    update_existing=update_existing,
+                ):
                     summary["skipped"] += 1
                     summary["skips"].append({"case": key, "reason": "unchanged"})
                     print(f"FUB skip {key}: unchanged person_id={existing_id}")

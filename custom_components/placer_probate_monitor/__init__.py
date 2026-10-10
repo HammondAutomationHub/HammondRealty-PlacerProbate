@@ -130,7 +130,15 @@ def apply_env(
     os.environ["PROBATE_COUNTY"] = str(settings.get(CONF_COUNTY) or "Placer")
     os.environ["PROBATE_KEYWORDS"] = str(settings.get(CONF_KEYWORDS) or DEFAULTS[CONF_KEYWORDS])
     os.environ["PROBATE_MAX_PAGES"] = str(int(settings.get(CONF_MAX_PAGES) or 10))
-    os.environ["ECOURT_PAUSE"] = str(float(settings.get(CONF_ECOURT_PAUSE) or 1.2))
+    try:
+        from .fub_client import source_window_settings
+    except ImportError:
+        from fub_client import source_window_settings
+
+    placer_window = source_window_settings(settings, "placer")
+    sac_window = source_window_settings(settings, "sacramento")
+    os.environ["ECOURT_PAUSE"] = str(float(placer_window["ecourt_pause_seconds"]))
+    os.environ["SACRAMENTO_PORTAL_PAUSE"] = str(float(sac_window["ecourt_pause_seconds"]))
     os.environ["SACRAMENTO_PORTAL_USER"] = str(
         settings.get(CONF_SACRAMENTO_PORTAL_USER) or ""
     ).strip()
@@ -303,13 +311,19 @@ def _source_job_cmd(data_dir: Path, settings: dict, source_id: str) -> list[str]
         state = data_dir / "seen_cases.json"
         out_dir = reports
     out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        from .fub_client import source_window_settings
+    except ImportError:
+        from fub_client import source_window_settings
+
+    window = source_window_settings(settings, source_id)
     cmd = [
         sys.executable,
         str(script),
         "--lookback-days",
-        str(int(settings.get(CONF_LOOKBACK_DAYS) or 21)),
+        str(int(window["lookback_days"])),
         "--lookahead-days",
-        str(int(settings.get(CONF_LOOKAHEAD_DAYS) or 21)),
+        str(int(window["lookahead_days"])),
         "--state-file",
         str(state),
         "--out-dir",

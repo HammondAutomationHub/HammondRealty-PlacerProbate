@@ -43,6 +43,9 @@ options:
   skip_portal: false
   generate_pdf: true
   ecourt_pause_seconds: 1.2
+  sacramento_lookback_days: 21
+  sacramento_lookahead_days: 21
+  sacramento_ecourt_pause_seconds: 1.2
   max_search_pages: 10
   fub_enabled: false
   fub_api_url: "https://api.followupboss.com/v1"
@@ -77,6 +80,9 @@ schema:
   skip_portal: bool
   generate_pdf: bool
   ecourt_pause_seconds: float(0.5,10)
+  sacramento_lookback_days: int(1,120)
+  sacramento_lookahead_days: int(0,120)
+  sacramento_ecourt_pause_seconds: float(0.5,10)
   max_search_pages: int(1,20)
   fub_enabled: bool
   fub_api_url: str

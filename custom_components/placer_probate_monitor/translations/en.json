@@ -38,6 +38,9 @@
         "title": "Sacramento court portal",
         "description": "Optional Journal Technologies login so Sacramento can download public petition and duties PDFs. Username is the portal email. The math CAPTCHA is solved from the login HTML. Leave the password blank in options to keep the saved password. Never download confidential or Not Viewable filings.",
         "data": {
+          "sacramento_lookback_days": "Lookback days",
+          "sacramento_lookahead_days": "Lookahead days",
+          "sacramento_ecourt_pause_seconds": "Portal pause (seconds)",
           "sacramento_portal_user": "Sacramento portal email",
           "sacramento_portal_password": "Sacramento portal password"
         }
@@ -105,6 +108,9 @@
         "title": "Sacramento court portal",
         "description": "Optional Journal Technologies login so Sacramento can download public petition and duties PDFs. Username is the portal email. The math CAPTCHA is solved from the login HTML. Leave the password blank in options to keep the saved password. Never download confidential or Not Viewable filings.",
         "data": {
+          "sacramento_lookback_days": "Lookback days",
+          "sacramento_lookahead_days": "Lookahead days",
+          "sacramento_ecourt_pause_seconds": "Portal pause (seconds)",
           "sacramento_portal_user": "Sacramento portal email",
           "sacramento_portal_password": "Sacramento portal password"
         }

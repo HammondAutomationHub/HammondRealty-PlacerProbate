@@ -33,6 +33,9 @@ from .const import (
     CONF_RECIPIENTS,
     CONF_RUN_ON_START,
     CONF_RUN_TIME,
+    CONF_SACRAMENTO_ECOURT_PAUSE,
+    CONF_SACRAMENTO_LOOKAHEAD_DAYS,
+    CONF_SACRAMENTO_LOOKBACK_DAYS,
     CONF_SACRAMENTO_PORTAL_PASSWORD,
     CONF_SACRAMENTO_PORTAL_USER,
     CONF_SEND_EMAIL,
@@ -167,6 +170,30 @@ def _search_schema(defaults: dict) -> vol.Schema:
 def _sacramento_schema(defaults: dict) -> vol.Schema:
     return vol.Schema(
         {
+            vol.Required(
+                CONF_SACRAMENTO_LOOKBACK_DAYS,
+                default=int(defaults.get(CONF_SACRAMENTO_LOOKBACK_DAYS, 21)),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=120, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            vol.Required(
+                CONF_SACRAMENTO_LOOKAHEAD_DAYS,
+                default=int(defaults.get(CONF_SACRAMENTO_LOOKAHEAD_DAYS, 21)),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=120, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            vol.Required(
+                CONF_SACRAMENTO_ECOURT_PAUSE,
+                default=float(defaults.get(CONF_SACRAMENTO_ECOURT_PAUSE, 1.2)),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.5, max=10, step=0.1, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
             vol.Optional(
                 CONF_SACRAMENTO_PORTAL_USER,
                 default=defaults.get(CONF_SACRAMENTO_PORTAL_USER, ""),
@@ -250,11 +277,15 @@ def _normalize(user_input: dict[str, Any], previous: dict | None = None) -> dict
         CONF_LOOKAHEAD_DAYS,
         CONF_MONTHLY_DAY,
         CONF_MAX_PAGES,
+        CONF_SACRAMENTO_LOOKBACK_DAYS,
+        CONF_SACRAMENTO_LOOKAHEAD_DAYS,
     ):
         if key in data:
             data[key] = int(data[key])
     if CONF_ECOURT_PAUSE in data:
         data[CONF_ECOURT_PAUSE] = float(data[CONF_ECOURT_PAUSE])
+    if CONF_SACRAMENTO_ECOURT_PAUSE in data:
+        data[CONF_SACRAMENTO_ECOURT_PAUSE] = float(data[CONF_SACRAMENTO_ECOURT_PAUSE])
     return data
 
 

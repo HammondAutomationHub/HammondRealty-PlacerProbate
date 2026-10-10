@@ -679,8 +679,8 @@ class PlacerProbateSourcesPanel extends HTMLElement {
             </div>
           </div>
           <div class="ppm-row">
-            <div><label>Lookback days</label><input id="lookback_days" type="number" min="1" max="120" value="${ppmEsc(p.lookback_days ?? 21)}" ${src.id === "sacramento" ? "disabled" : ""} /></div>
-            <div><label>Lookahead days</label><input id="lookahead_days" type="number" min="0" max="120" value="${ppmEsc(p.lookahead_days ?? 21)}" ${src.id === "sacramento" ? "disabled" : ""} /></div>
+            <div><label>Lookback days</label><input id="lookback_days" type="number" min="1" max="120" value="${ppmEsc(p.lookback_days ?? 21)}" /></div>
+            <div><label>Lookahead days</label><input id="lookahead_days" type="number" min="0" max="120" value="${ppmEsc(p.lookahead_days ?? 21)}" /></div>
           </div>
           <div class="ppm-row">
             <div><label>County</label><input id="county" value="${ppmEsc(county)}" disabled /></div>
@@ -699,7 +699,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
               <label>Generate PDF</label>
               <select id="generate_pdf" ${src.id === "sacramento" ? "disabled" : ""}><option value="true">Yes</option><option value="false">No</option></select>
             </div>
-            <div><label>${ppmEsc(pauseLabel)}</label><input id="ecourt_pause_seconds" type="number" step="0.1" min="0.5" max="10" value="${ppmEsc(p.ecourt_pause_seconds ?? 1.2)}" ${src.id === "sacramento" ? "disabled" : ""} /></div>
+            <div><label>${ppmEsc(pauseLabel)}</label><input id="ecourt_pause_seconds" type="number" step="0.1" min="0.5" max="10" value="${ppmEsc(p.ecourt_pause_seconds ?? 1.2)}" /></div>
           </div>
           <label>Max CNPA pages</label>
           <input id="max_search_pages" type="number" min="1" max="20" value="${ppmEsc(p.max_search_pages ?? 10)}" ${src.id === "sacramento" ? "disabled" : ""} />
@@ -713,7 +713,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
           <p class="ppm-note">${p.sacramento_portal_password_set ? "A portal password is already saved." : "No portal password saved yet. Public PDFs will not download until this is set."}</p>
           ` : ""}
           <div class="ppm-actions">
-            ${src.id === "placer" ? '<button id="save-source" type="button">Save Placer import</button>' : '<button id="save-source" type="button">Save Sacramento portal login</button>'}
+            ${src.id === "placer" ? '<button id="save-source" type="button">Save Placer import</button>' : '<button id="save-source" type="button">Save Sacramento import</button>'}
             <button class="secondary" id="preview-source" type="button">Preview one extract</button>
             <button class="secondary" id="run-source" type="button">Run ${ppmEsc(label)} job</button>
           </div>
@@ -824,6 +824,9 @@ class PlacerProbateSourcesPanel extends HTMLElement {
     const body = src === "sacramento"
       ? {
         source_id: "sacramento",
+        lookback_days: Number(this._qs("#lookback_days").value),
+        lookahead_days: Number(this._qs("#lookahead_days").value),
+        ecourt_pause_seconds: Number(this._qs("#ecourt_pause_seconds").value),
         sacramento_portal_user: (this._qs("#sacramento_portal_user") || {}).value || "",
         sacramento_portal_password: (this._qs("#sacramento_portal_password") || {}).value || "",
       }
@@ -841,7 +844,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       this._data = await this._hass.callApi("POST", "placer_probate_monitor/sources", body);
       this._renderList();
       this._renderBody();
-      this._flash(src === "sacramento" ? "Sacramento portal login saved." : "Placer import settings saved.", true);
+      this._flash(src === "sacramento" ? "Sacramento import settings saved." : "Placer import settings saved.", true);
     } catch (err) {
       this._flash(ppmText(err), false);
     }

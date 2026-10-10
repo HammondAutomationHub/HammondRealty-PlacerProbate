@@ -39,6 +39,9 @@ CONF_FUB_VERIFY_PERSON_ID = "fub_verify_person_id"
 CONF_SOURCE_ENABLED = "source_enabled"
 CONF_SACRAMENTO_PORTAL_USER = "sacramento_portal_user"
 CONF_SACRAMENTO_PORTAL_PASSWORD = "sacramento_portal_password"
+CONF_SACRAMENTO_LOOKBACK_DAYS = "sacramento_lookback_days"
+CONF_SACRAMENTO_LOOKAHEAD_DAYS = "sacramento_lookahead_days"
+CONF_SACRAMENTO_ECOURT_PAUSE = "sacramento_ecourt_pause_seconds"
 
 FUB_LEAD_SOURCE_BY_COUNTY = {
     "placer": "probate",
@@ -103,6 +106,9 @@ DEFAULTS = {
     CONF_SOURCE_ENABLED: {"placer": True, "sacramento": False},
     CONF_SACRAMENTO_PORTAL_USER: "",
     CONF_SACRAMENTO_PORTAL_PASSWORD: "",
+    CONF_SACRAMENTO_LOOKBACK_DAYS: 21,
+    CONF_SACRAMENTO_LOOKAHEAD_DAYS: 21,
+    CONF_SACRAMENTO_ECOURT_PAUSE: 1.2,
 }
 
 ATTR_LAST_RUN = "last_run"

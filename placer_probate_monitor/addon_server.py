@@ -44,6 +44,9 @@ DEFAULTS = {
     "skip_portal": False,
     "generate_pdf": True,
     "ecourt_pause_seconds": 1.2,
+    "sacramento_lookback_days": 21,
+    "sacramento_lookahead_days": 21,
+    "sacramento_ecourt_pause_seconds": 1.2,
     "max_search_pages": 10,
     "fub_enabled": False,
     "fub_api_url": "https://api.followupboss.com/v1",
@@ -101,9 +104,18 @@ def load_settings() -> dict:
         merged["smtp_port"] = int(merged.get("smtp_port") or 587)
         merged["lookback_days"] = int(merged.get("lookback_days") or 21)
         merged["lookahead_days"] = int(merged.get("lookahead_days") or 21)
+        merged["sacramento_lookback_days"] = int(
+            merged.get("sacramento_lookback_days") or 21
+        )
+        merged["sacramento_lookahead_days"] = int(
+            merged.get("sacramento_lookahead_days") or 21
+        )
         merged["monthly_day"] = int(merged.get("monthly_day") or 1)
         merged["max_search_pages"] = int(merged.get("max_search_pages") or 10)
         merged["ecourt_pause_seconds"] = float(merged.get("ecourt_pause_seconds") or 1.2)
+        merged["sacramento_ecourt_pause_seconds"] = float(
+            merged.get("sacramento_ecourt_pause_seconds") or 1.2
+        )
         return merged
 
 
@@ -241,6 +253,9 @@ def apply_env(settings: dict) -> None:
     )
     os.environ["PROBATE_MAX_PAGES"] = str(int(settings.get("max_search_pages") or 10))
     os.environ["ECOURT_PAUSE"] = str(float(settings.get("ecourt_pause_seconds") or 1.2))
+    os.environ["SACRAMENTO_PORTAL_PAUSE"] = str(
+        float(settings.get("sacramento_ecourt_pause_seconds") or 1.2)
+    )
     os.environ["SACRAMENTO_PORTAL_USER"] = str(
         settings.get("sacramento_portal_user") or ""
     ).strip()

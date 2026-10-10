@@ -295,6 +295,81 @@ class FubTagTests(unittest.TestCase):
             ["sacramento"],
         )
 
+    def test_sacramento_window_independent_of_placer(self):
+        from fub_client import (
+            apply_sacramento_source_settings,
+            source_window_settings,
+            sources_payload,
+        )
+        from sacramento_probate_monitor import portal_pause_seconds
+
+        placer_only = {
+            "lookback_days": 7,
+            "lookahead_days": 3,
+            "ecourt_pause_seconds": 2.5,
+        }
+        payload = sources_payload(placer_only)
+        self.assertEqual(payload["placer"]["lookback_days"], 7)
+        self.assertEqual(payload["placer"]["ecourt_pause_seconds"], 2.5)
+        self.assertEqual(payload["sacramento"]["lookback_days"], 21)
+        self.assertEqual(payload["sacramento"]["lookahead_days"], 21)
+        self.assertEqual(payload["sacramento"]["ecourt_pause_seconds"], 1.2)
+
+        saved = apply_sacramento_source_settings(
+            placer_only,
+            {
+                "lookback_days": 30,
+                "lookahead_days": 10,
+                "ecourt_pause_seconds": 0.8,
+            },
+        )
+        self.assertEqual(saved["lookback_days"], 7)
+        self.assertEqual(saved["lookahead_days"], 3)
+        self.assertEqual(saved["ecourt_pause_seconds"], 2.5)
+        self.assertEqual(saved["sacramento_lookback_days"], 30)
+        self.assertEqual(saved["sacramento_lookahead_days"], 10)
+        self.assertEqual(saved["sacramento_ecourt_pause_seconds"], 0.8)
+
+        sac = source_window_settings(saved, "sacramento")
+        placer = source_window_settings(saved, "placer")
+        self.assertEqual(sac["lookback_days"], 30)
+        self.assertEqual(sac["lookahead_days"], 10)
+        self.assertEqual(sac["ecourt_pause_seconds"], 0.8)
+        self.assertEqual(placer["lookback_days"], 7)
+        self.assertEqual(placer["ecourt_pause_seconds"], 2.5)
+
+        shown = sources_payload(saved)["sacramento"]
+        self.assertEqual(shown["lookback_days"], 30)
+        self.assertEqual(shown["ecourt_pause_seconds"], 0.8)
+
+        with self.assertRaises(ValueError):
+            apply_sacramento_source_settings({}, {"lookback_days": 0})
+        with self.assertRaises(ValueError):
+            apply_sacramento_source_settings({}, {"lookahead_days": 121})
+        with self.assertRaises(ValueError):
+            apply_sacramento_source_settings({}, {"ecourt_pause_seconds": 0.1})
+
+        flags_only = apply_sacramento_source_settings(saved, {"enabled": True})
+        self.assertEqual(flags_only["sacramento_lookback_days"], 30)
+
+        previous = {
+            "SACRAMENTO_PORTAL_PAUSE": os.environ.get("SACRAMENTO_PORTAL_PAUSE"),
+            "ECOURT_PAUSE": os.environ.get("ECOURT_PAUSE"),
+        }
+        try:
+            os.environ["SACRAMENTO_PORTAL_PAUSE"] = "0.8"
+            os.environ.pop("ECOURT_PAUSE", None)
+            self.assertEqual(portal_pause_seconds(), 0.8)
+            os.environ.pop("SACRAMENTO_PORTAL_PAUSE", None)
+            os.environ["ECOURT_PAUSE"] = "2.5"
+            self.assertEqual(portal_pause_seconds(), 2.5)
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
 
 class PortalParseTests(unittest.TestCase):
     def test_search_hit(self):

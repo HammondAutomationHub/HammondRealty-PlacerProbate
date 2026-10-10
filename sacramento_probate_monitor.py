@@ -91,6 +91,14 @@ INTRO = (
 )
 
 
+def portal_pause_seconds() -> float:
+    raw = os.environ.get("SACRAMENTO_PORTAL_PAUSE") or os.environ.get("ECOURT_PAUSE") or "1.2"
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 1.2
+
+
 def extract_sacramento_case(text: str) -> str:
     matches = SAC_CASE_RE.findall(text or "")
     if matches:
@@ -166,7 +174,7 @@ def enrich_notices(notices: list[Notice], docs_dir: Path | None = None) -> list[
         )
         from sacramento_portal import SacramentoPortal
 
-    client = SacramentoPortal(pause=float(os.environ.get("ECOURT_PAUSE") or 1.2))
+    client = SacramentoPortal(pause=portal_pause_seconds())
     rows = []
     total = len(notices)
     for index, notice in enumerate(notices, 1):
