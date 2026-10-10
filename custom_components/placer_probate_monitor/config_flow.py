@@ -19,6 +19,7 @@ from .const import (
     CONF_FUB_STAGE,
     CONF_FUB_ENABLED,
     CONF_FUB_EVENT_TYPE,
+    CONF_FUB_GO_REQUIRED_FIELDS,
     CONF_FUB_SOURCE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
@@ -46,8 +47,10 @@ from .const import (
     CONF_SMTP_USER,
     CONF_TIMEZONE,
     CONF_WEEKLY_DAY,
+    DEFAULT_FUB_GO_REQUIRED_FIELDS,
     DEFAULTS,
     DOMAIN,
+    FUB_GO_GATE_FIELDS,
     FREQUENCIES,
     FUB_EVENT_TYPES,
     WEEKDAYS,
@@ -209,6 +212,16 @@ def _sacramento_schema(defaults: dict) -> vol.Schema:
     )
 
 
+def _go_required_default(defaults: dict) -> list[str]:
+    stored = defaults.get(CONF_FUB_GO_REQUIRED_FIELDS)
+    if stored is not None:
+        return list(stored)
+    fields = list(DEFAULT_FUB_GO_REQUIRED_FIELDS)
+    if defaults.get(CONF_FUB_STRICT_PROPERTY) and "decedent_residence" not in fields:
+        fields.append("decedent_residence")
+    return fields
+
+
 def _fub_schema(defaults: dict) -> vol.Schema:
     return vol.Schema(
         {
@@ -244,10 +257,19 @@ def _fub_schema(defaults: dict) -> vol.Schema:
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Required(
-                CONF_FUB_STRICT_PROPERTY,
-                default=bool(defaults.get(CONF_FUB_STRICT_PROPERTY, False)),
-            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_FUB_GO_REQUIRED_FIELDS,
+                default=_go_required_default(defaults),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {"value": item["key"], "label": item["label"]}
+                        for item in FUB_GO_GATE_FIELDS
+                    ],
+                    multiple=True,
+                    mode=selector.SelectSelectorMode.LIST,
+                )
+            ),
             vol.Required(
                 CONF_FUB_VERIFY_ONLY,
                 default=bool(defaults.get(CONF_FUB_VERIFY_ONLY, True)),
@@ -286,6 +308,15 @@ def _normalize(user_input: dict[str, Any], previous: dict | None = None) -> dict
         data[CONF_ECOURT_PAUSE] = float(data[CONF_ECOURT_PAUSE])
     if CONF_SACRAMENTO_ECOURT_PAUSE in data:
         data[CONF_SACRAMENTO_ECOURT_PAUSE] = float(data[CONF_SACRAMENTO_ECOURT_PAUSE])
+    if CONF_FUB_GO_REQUIRED_FIELDS in data:
+        from .fub_client import normalize_fub_go_required_fields
+
+        data[CONF_FUB_GO_REQUIRED_FIELDS] = normalize_fub_go_required_fields(
+            data.get(CONF_FUB_GO_REQUIRED_FIELDS)
+        )
+        data[CONF_FUB_STRICT_PROPERTY] = (
+            "decedent_residence" in data[CONF_FUB_GO_REQUIRED_FIELDS]
+        )
     return data
 
 

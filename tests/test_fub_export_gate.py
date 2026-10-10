@@ -76,6 +76,7 @@ class FubCreateGateTests(unittest.TestCase):
                 "FUB_UPDATE_EXISTING",
                 "FUB_VERIFY_EXISTING",
                 "FUB_STRICT_PROPERTY",
+                "FUB_GO_REQUIRED_FIELDS",
                 "FUB_DATA_SOURCE",
                 "PPM_PROGRESS_PATH",
             )
@@ -86,6 +87,7 @@ class FubCreateGateTests(unittest.TestCase):
         os.environ["FUB_UPDATE_EXISTING"] = "0"
         os.environ["FUB_VERIFY_EXISTING"] = "0"
         os.environ["FUB_STRICT_PROPERTY"] = "0"
+        os.environ.pop("FUB_GO_REQUIRED_FIELDS", None)
         os.environ["PPM_PROGRESS_PATH"] = str(ROOT / "tests" / "_progress_gate.json")
 
     def tearDown(self):
@@ -234,6 +236,62 @@ class FubCreateGateTests(unittest.TestCase):
         self.assertEqual(summary["updated"], 1)
         posted.assert_not_called()
         updated.assert_called_once()
+
+    def test_default_gate_still_requires_mailing(self):
+        row = {
+            "source_id": "placer",
+            "case_number": "S-PR-0014448",
+            "petitioner": "John Henderson",
+        }
+        self.assertEqual(
+            gate_reason(
+                row,
+                {"cases": {}},
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+            ),
+            "missing_petitioner_address",
+        )
+        row["mailing_address"] = "51 Ashby Hills Ct, Henderson, NV 89012"
+        self.assertIsNone(
+            gate_reason(
+                row,
+                {"cases": {}},
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+            )
+        )
+
+    def test_custom_required_skips_mailing_when_unchecked(self):
+        row = {
+            "source_id": "sacramento",
+            "case_number": "26PR001581",
+            "petitioner": "Wayne Row",
+        }
+        custom = ["case_number", "petitioner_first", "petitioner_last"]
+        self.assertIsNone(
+            gate_reason(
+                row,
+                {"cases": {}},
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+                required_fields=custom,
+            )
+        )
+        self.assertEqual(
+            gate_reason(
+                dict(row, petitioner="Wayne"),
+                {"cases": {}},
+                MAPPING,
+                strict_property=True,
+                existing_id=None,
+                required_fields=custom,
+            ),
+            "petitioner_name_incomplete",
+        )
 
 
 if __name__ == "__main__":

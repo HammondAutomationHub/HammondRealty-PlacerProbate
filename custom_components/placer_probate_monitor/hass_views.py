@@ -23,6 +23,7 @@ from .const import (
     CONF_FUB_STAGE,
     CONF_FUB_ENABLED,
     CONF_FUB_EVENT_TYPE,
+    CONF_FUB_GO_REQUIRED_FIELDS,
     CONF_FUB_SOURCE,
     CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
@@ -51,14 +52,17 @@ from .fub_client import (
     inspect_fub_person,
     mapping_payload,
     apply_sacramento_source_settings,
+    fub_go_required_from_settings,
+    normalize_fub_go_required_fields,
     normalize_source_enabled,
     petition_file_token,
     petition_safe_case,
     save_mapping,
     sources_payload,
+    FUB_GO_GATE_FIELDS,
 )
 
-PANEL_JS_VERSION = "1.3.73"
+PANEL_JS_VERSION = "1.3.74"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -86,6 +90,7 @@ FUB_KEYS = {
     CONF_FUB_STAGE,
     CONF_FUB_EVENT_TYPE,
     CONF_FUB_STRICT_PROPERTY,
+    CONF_FUB_GO_REQUIRED_FIELDS,
     CONF_FUB_VERIFY_ONLY,
     CONF_FUB_UPDATE_EXISTING,
     CONF_FUB_VERIFY_EXISTING,
@@ -171,7 +176,25 @@ def _coerce(key: str, value):
         return int(value)
     if key in {CONF_ECOURT_PAUSE, CONF_SACRAMENTO_ECOURT_PAUSE}:
         return float(value)
+    if key == CONF_FUB_GO_REQUIRED_FIELDS:
+        return normalize_fub_go_required_fields(value)
     return value
+
+
+def _persist_go_required(merged: dict, body: dict) -> None:
+    if CONF_FUB_GO_REQUIRED_FIELDS in body:
+        fields = normalize_fub_go_required_fields(body.get(CONF_FUB_GO_REQUIRED_FIELDS))
+        merged[CONF_FUB_GO_REQUIRED_FIELDS] = fields
+        merged[CONF_FUB_STRICT_PROPERTY] = "decedent_residence" in fields
+        return
+    if CONF_FUB_STRICT_PROPERTY in body:
+        fields = fub_go_required_from_settings(merged)
+        if merged.get(CONF_FUB_STRICT_PROPERTY):
+            if "decedent_residence" not in fields:
+                fields.append("decedent_residence")
+        else:
+            fields = [key for key in fields if key != "decedent_residence"]
+        merged[CONF_FUB_GO_REQUIRED_FIELDS] = fields
 
 
 def _public_fub(settings: dict) -> dict:
@@ -188,7 +211,10 @@ def _public_fub(settings: dict) -> dict:
         CONF_FUB_ASSIGNED_TO: settings.get(CONF_FUB_ASSIGNED_TO) or "Blake Hammond",
         CONF_FUB_STAGE: str(settings.get(CONF_FUB_STAGE) or "").strip(),
         CONF_FUB_EVENT_TYPE: settings.get(CONF_FUB_EVENT_TYPE) or "Seller Inquiry",
-        CONF_FUB_STRICT_PROPERTY: bool(settings.get(CONF_FUB_STRICT_PROPERTY)),
+        CONF_FUB_GO_REQUIRED_FIELDS: fub_go_required_from_settings(settings),
+        "fub_go_gate_fields": list(FUB_GO_GATE_FIELDS),
+        CONF_FUB_STRICT_PROPERTY: "decedent_residence"
+        in fub_go_required_from_settings(settings),
         CONF_FUB_VERIFY_ONLY: bool(settings.get(CONF_FUB_VERIFY_ONLY, True)),
         CONF_FUB_UPDATE_EXISTING: bool(settings.get(CONF_FUB_UPDATE_EXISTING, False)),
         CONF_FUB_VERIFY_EXISTING: bool(settings.get(CONF_FUB_VERIFY_EXISTING, False)),
@@ -237,8 +263,12 @@ class FubMappingView(HomeAssistantView):
         _apply_key(self.hass)
         path = mapping_file(self.hass)
         source_id = str(request.query.get("source") or "placer")
+        entry = _entry(self.hass)
+        settings = _merged(entry) if entry else dict(DEFAULTS)
         payload = await self.hass.async_add_executor_job(
-            lambda: mapping_payload(path, fetch_fub=True, source_id=source_id)
+            lambda: mapping_payload(
+                path, fetch_fub=True, source_id=source_id, settings=settings
+            )
         )
         return self.json(payload)
 
@@ -249,10 +279,14 @@ class FubMappingView(HomeAssistantView):
             return self.json({"error": "Expected a JSON object."}, status_code=400)
         path = mapping_file(self.hass)
         source_id = str(body.get("source_id") or "placer")
+        entry = _entry(self.hass)
+        settings = _merged(entry) if entry else dict(DEFAULTS)
 
         def _save():
             save_mapping(body, path)
-            return mapping_payload(path, fetch_fub=True, source_id=source_id)
+            return mapping_payload(
+                path, fetch_fub=True, source_id=source_id, settings=settings
+            )
 
         try:
             payload = await self.hass.async_add_executor_job(_save)
@@ -328,6 +362,7 @@ class SourcesView(HomeAssistantView):
                 except (TypeError, ValueError):
                     return self.json({"error": f"Invalid {key}."}, status_code=400)
             merged["county"] = "Placer"
+        _persist_go_required(merged, body)
         self.hass.config_entries.async_update_entry(entry, options=merged)
         return self.json(sources_payload(merged))
 
@@ -369,6 +404,7 @@ class FubSettingsView(HomeAssistantView):
                 merged[key] = _coerce(key, body[key])
             except (TypeError, ValueError):
                 return self.json({"error": f"Invalid {key}."}, status_code=400)
+        _persist_go_required(merged, body)
         self.hass.config_entries.async_update_entry(entry, options=merged)
         return self.json(_public_fub(merged))
 

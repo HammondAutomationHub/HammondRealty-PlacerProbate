@@ -32,6 +32,7 @@ CONF_FUB_ASSIGNED_TO = "fub_assigned_to"
 CONF_FUB_STAGE = "fub_stage"
 CONF_FUB_EVENT_TYPE = "fub_event_type"
 CONF_FUB_STRICT_PROPERTY = "fub_strict_property"
+CONF_FUB_GO_REQUIRED_FIELDS = "fub_go_required_fields"
 CONF_FUB_VERIFY_ONLY = "fub_verify_only"
 CONF_FUB_UPDATE_EXISTING = "fub_update_existing"
 CONF_FUB_VERIFY_EXISTING = "fub_verify_existing"
@@ -55,6 +56,22 @@ FUB_EVENT_TYPES = [
     "Property Inquiry",
     "Inquiry",
     "Registration",
+]
+
+# Selectable Go-gate keys that already exist in gate_reason / SOURCE_GO_NO_GO.
+FUB_GO_GATE_FIELDS = [
+    {"key": "case_number", "label": "Case number"},
+    {"key": "petitioner_first", "label": "Petitioner first name"},
+    {"key": "petitioner_last", "label": "Petitioner last name"},
+    {"key": "mailing_address", "label": "Petitioner mailing address"},
+    {"key": "decedent_residence", "label": "Estate location (decedent residence)"},
+]
+FUB_GO_GATE_FIELD_KEYS = [item["key"] for item in FUB_GO_GATE_FIELDS]
+DEFAULT_FUB_GO_REQUIRED_FIELDS = [
+    "case_number",
+    "petitioner_first",
+    "petitioner_last",
+    "mailing_address",
 ]
 
 FREQUENCIES = ["hourly", "daily", "weekdays", "weekly", "monthly"]
@@ -99,6 +116,7 @@ DEFAULTS = {
     CONF_FUB_STAGE: "",
     CONF_FUB_EVENT_TYPE: "Seller Inquiry",
     CONF_FUB_STRICT_PROPERTY: False,
+    CONF_FUB_GO_REQUIRED_FIELDS: None,
     CONF_FUB_VERIFY_ONLY: True,
     CONF_FUB_UPDATE_EXISTING: False,
     CONF_FUB_VERIFY_EXISTING: False,

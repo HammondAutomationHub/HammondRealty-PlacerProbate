@@ -72,6 +72,31 @@ class PlacerSourcePathTests(unittest.TestCase):
             gate_reason(row, {"cases": {}}, {}, strict_property=False, existing_id=None)
         )
 
+    def test_custom_required_skips_mailing_when_unchecked(self):
+        spec = go_no_go_for_source(
+            "placer",
+            required_fields=["case_number", "petitioner_first", "petitioner_last"],
+        )
+        required = {item["key"] for item in spec["required"]}
+        optional = {item["key"] for item in spec["optional"]}
+        self.assertNotIn("mailing_address", required)
+        self.assertIn("mailing_address", optional)
+        row = {
+            "source_id": "placer",
+            "case_number": "S-PR-0014448",
+            "petitioner": "John Henderson",
+        }
+        self.assertIsNone(
+            gate_reason(
+                row,
+                {"cases": {}},
+                {},
+                strict_property=False,
+                existing_id=None,
+                required_fields=["case_number", "petitioner_first", "petitioner_last"],
+            )
+        )
+
     def test_placer_portal_url_stays_on_node_45(self):
         url = "https://webportal.placerco.org/eCourtPublic/?q=node/45/1234567"
         self.assertEqual(case_portal_url({"court_url": url}), url)

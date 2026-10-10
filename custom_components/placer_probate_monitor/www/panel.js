@@ -219,7 +219,7 @@ function ppmGoNoGoInner(spec, sourceName) {
     ? `<ul>${rules.map((line) => `<li>${ppmEsc(line)}</li>`).join("")}</ul>`
     : "";
   return `
-    <p class="ppm-note">${ppmEsc(sourceName || "This source")} only becomes a go-case when every required field is present. Missing required data is skipped, not sent as a partial Follow Up Boss person.</p>
+    <p class="ppm-note">${ppmEsc(sourceName || "This source")} only becomes a go-case when every required field is present. Change the checklist on Follow Up Boss → Required for Go. Missing required data is skipped, not sent as a partial Follow Up Boss person.</p>
     <table>
       <thead><tr><th></th><th>Field</th><th>From</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -1055,7 +1055,9 @@ class PlacerProbateFubPanel extends HTMLElement {
             <input id="fub_stage" placeholder="Must match a Follow Up Boss stage name (leave blank for FUB default)" />
             <label>Event type</label>
             <select id="fub_event_type"></select>
-            <label class="ppm-toggle"><input id="fub_strict_property" type="checkbox" /><span>Require decedent residence before upload</span></label>
+            <h2 style="margin-top:16px;">Required for Go</h2>
+            <p class="ppm-note">A case is exported only when every checked field is present. Unchecked fields stay optional. This list is the Go process for Placer and Sacramento. Save with Save FUB connection.</p>
+            <div id="fub-go-required"></div>
             <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: update one person per run</span></label>
             <label class="ppm-toggle"><input id="fub_update_existing" type="checkbox" /><span>Update all existing Follow Up Boss people on this run</span></label>
             <p class="ppm-note">Turn Verify only off and turn Update all existing on, then Run Placer job. That PUTs every matched person (addresses, notes, DE-111) even if they were skipped as unchanged. Turn Update all existing back off after the catch-up so daily runs stay quiet.</p>
@@ -1159,11 +1161,38 @@ class PlacerProbateFubPanel extends HTMLElement {
       .map((item) => `<option value="${ppmEsc(item)}">${ppmEsc(item)}</option>`)
       .join("");
     this._qs("#fub_event_type").value = data.fub_event_type || "Seller Inquiry";
-    this._qs("#fub_strict_property").checked = !!data.fub_strict_property;
+    this._renderGoRequired(data);
     this._qs("#fub_verify_only").checked = data.fub_verify_only !== false;
     this._qs("#fub_update_existing").checked = !!data.fub_update_existing;
     this._qs("#fub_verify_existing").checked = !!data.fub_verify_existing;
     this._qs("#fub_verify_person_id").value = data.fub_verify_person_id || "";
+  }
+
+  _renderGoRequired(data) {
+    const el = this._qs("#fub-go-required");
+    if (!el) return;
+    const fields = (data && data.fub_go_gate_fields) || [
+      { key: "case_number", label: "Case number" },
+      { key: "petitioner_first", label: "Petitioner first name" },
+      { key: "petitioner_last", label: "Petitioner last name" },
+      { key: "mailing_address", label: "Petitioner mailing address" },
+      { key: "decedent_residence", label: "Estate location (decedent residence)" },
+    ];
+    const selected = new Set(
+      (data && data.fub_go_required_fields)
+        || ["case_number", "petitioner_first", "petitioner_last", "mailing_address"]
+    );
+    if (data && data.fub_strict_property) selected.add("decedent_residence");
+    el.innerHTML = fields.map((item) => `
+      <label class="ppm-toggle">
+        <input type="checkbox" data-go-required value="${ppmEsc(item.key)}" ${selected.has(item.key) ? "checked" : ""} />
+        <span>${ppmEsc(item.label)}</span>
+      </label>`).join("");
+  }
+
+  _goRequiredFields() {
+    return [...this.querySelectorAll("#fub-go-required [data-go-required]:checked")]
+      .map((el) => el.value);
   }
 
   _renderVerify(st) {
@@ -1356,7 +1385,7 @@ class PlacerProbateFubPanel extends HTMLElement {
       fub_assigned_to: this._qs("#fub_assigned_to").value.trim(),
       fub_stage: this._qs("#fub_stage").value.trim(),
       fub_event_type: this._qs("#fub_event_type").value,
-      fub_strict_property: this._qs("#fub_strict_property").checked,
+      fub_go_required_fields: this._goRequiredFields(),
       fub_verify_only: this._qs("#fub_verify_only").checked,
       fub_update_existing: this._qs("#fub_update_existing").checked,
       fub_verify_existing: this._qs("#fub_verify_existing").checked,

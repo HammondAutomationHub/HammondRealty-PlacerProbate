@@ -813,7 +813,7 @@ SOURCE_GO_NO_GO = {
                 "key": "decedent_residence",
                 "label": "Estate location (3.a.(2))",
                 "from": "DE-111 item 3.a.(2) street; never 'at (place)'",
-                "when": "Required only if “Require decedent residence” is on",
+                "when": "Required only if checked on Follow Up Boss → Required for Go",
             },
             {
                 "key": "court_url",
@@ -862,7 +862,7 @@ SOURCE_GO_NO_GO = {
                 "key": "decedent_residence",
                 "label": "Estate location (3.a.(2))",
                 "from": "DE-111 item 3.a.(2) street; never 'at (place)'",
-                "when": "Required only if “Require decedent residence” is on",
+                "when": "Required only if checked on Follow Up Boss → Required for Go",
             },
             {
                 "key": "court_url",
@@ -888,18 +888,137 @@ SOURCE_GO_NO_GO = {
     },
 }
 
+# Gate keys that already exist in gate_reason / SOURCE_GO_NO_GO. Do not invent new ones.
+FUB_GO_GATE_FIELDS = [
+    {"key": "case_number", "label": "Case number"},
+    {"key": "petitioner_first", "label": "Petitioner first name"},
+    {"key": "petitioner_last", "label": "Petitioner last name"},
+    {"key": "mailing_address", "label": "Petitioner mailing address"},
+    {"key": "decedent_residence", "label": "Estate location (decedent residence)"},
+]
+FUB_GO_GATE_FIELD_KEYS = tuple(item["key"] for item in FUB_GO_GATE_FIELDS)
+DEFAULT_FUB_GO_REQUIRED_FIELDS = (
+    "case_number",
+    "petitioner_first",
+    "petitioner_last",
+    "mailing_address",
+)
 
-def go_no_go_for_source(source_id: str) -> dict:
+
+def normalize_fub_go_required_fields(value) -> list[str]:
+    """Keep only known Go-gate keys, in catalog order."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw = [part.strip() for part in value.replace(";", ",").split(",") if part.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        raw = [str(item).strip() for item in value if str(item).strip()]
+    else:
+        raw = []
+    wanted = {item.lower().replace("-", "_") for item in raw}
+    return [key for key in FUB_GO_GATE_FIELD_KEYS if key in wanted]
+
+
+def resolve_fub_go_required_fields(
+    required_fields=None,
+    *,
+    strict_property: bool | None = None,
+    settings: dict | None = None,
+) -> list[str]:
+    """Saved checklist is the source of truth. Missing list uses production defaults.
+
+    Production defaults: case number, petitioner first, petitioner last, mailing.
+    Decedent residence is included only when the saved list has it, or when an
+    older ``fub_strict_property`` / FUB_STRICT_PROPERTY toggle is on and no list
+    has been saved yet.
+    """
+    if required_fields is not None:
+        return normalize_fub_go_required_fields(required_fields)
+    if settings is not None:
+        stored = settings.get("fub_go_required_fields", None)
+        if stored is not None:
+            return normalize_fub_go_required_fields(stored)
+        strict = bool(
+            settings.get("fub_strict_property")
+            if strict_property is None
+            else strict_property
+        )
+        fields = list(DEFAULT_FUB_GO_REQUIRED_FIELDS)
+        if strict and "decedent_residence" not in fields:
+            fields.append("decedent_residence")
+        return fields
+    if "FUB_GO_REQUIRED_FIELDS" in os.environ:
+        return normalize_fub_go_required_fields(os.environ.get("FUB_GO_REQUIRED_FIELDS"))
+    strict = (
+        _env_bool("FUB_STRICT_PROPERTY") if strict_property is None else bool(strict_property)
+    )
+    fields = list(DEFAULT_FUB_GO_REQUIRED_FIELDS)
+    if strict and "decedent_residence" not in fields:
+        fields.append("decedent_residence")
+    return fields
+
+
+def fub_go_required_from_settings(settings: dict | None = None) -> list[str]:
+    return resolve_fub_go_required_fields(settings=settings or {})
+
+
+def apply_fub_go_required_env(settings: dict | None = None) -> list[str]:
+    fields = fub_go_required_from_settings(settings)
+    os.environ["FUB_GO_REQUIRED_FIELDS"] = ",".join(fields)
+    os.environ["FUB_STRICT_PROPERTY"] = (
+        "1" if "decedent_residence" in fields else "0"
+    )
+    return fields
+
+
+def go_no_go_for_source(source_id: str, required_fields=None) -> dict:
     key = str(source_id or "placer")
     spec = SOURCE_GO_NO_GO.get(key) or {
         "required": [],
         "optional": [],
         "rules": ["Go/no-go is not defined for this source yet."],
     }
+    base_required = list(spec.get("required") or [])
+    base_optional = list(spec.get("optional") or [])
+    if key not in {"placer", "sacramento"}:
+        return {
+            "source_id": key,
+            "required": base_required,
+            "optional": base_optional,
+            "rules": list(spec.get("rules") or []),
+        }
+    required_keys = set(resolve_fub_go_required_fields(required_fields))
+    combined: list[dict] = []
+    seen: set[str] = set()
+    for item in base_required + base_optional:
+        item_key = str(item.get("key") or "")
+        if not item_key or item_key in seen:
+            continue
+        seen.add(item_key)
+        combined.append(dict(item))
+    required: list[dict] = []
+    optional: list[dict] = []
+    for item in combined:
+        item_key = str(item.get("key") or "")
+        row = dict(item)
+        if item_key in FUB_GO_GATE_FIELD_KEYS:
+            row.pop("when", None)
+            if item_key in required_keys:
+                required.append(row)
+            else:
+                row["when"] = (
+                    "Optional unless checked on Follow Up Boss → Required for Go"
+                )
+                optional.append(row)
+            continue
+        if any(entry.get("key") == item_key for entry in base_required):
+            required.append(row)
+        else:
+            optional.append(row)
     return {
         "source_id": key,
-        "required": list(spec.get("required") or []),
-        "optional": list(spec.get("optional") or []),
+        "required": required,
+        "optional": optional,
         "rules": list(spec.get("rules") or []),
     }
 
@@ -1173,8 +1292,13 @@ def sources_payload(settings: dict | None = None) -> dict:
         },
         "fields": source_field_catalog("placer"),
         "source_fields": {item["id"]: source_field_catalog(item["id"]) for item in DATA_SOURCES},
+        "fub_go_required_fields": fub_go_required_from_settings(settings),
+        "fub_go_gate_fields": list(FUB_GO_GATE_FIELDS),
         "source_go_no_go": {
-            item["id"]: go_no_go_for_source(item["id"]) for item in DATA_SOURCES
+            item["id"]: go_no_go_for_source(
+                item["id"], fub_go_required_from_settings(settings)
+            )
+            for item in DATA_SOURCES
         },
     }
 
@@ -1190,6 +1314,8 @@ def mapping_catalog() -> dict:
         "source_go_no_go": {
             item["id"]: go_no_go_for_source(item["id"]) for item in DATA_SOURCES
         },
+        "fub_go_gate_fields": list(FUB_GO_GATE_FIELDS),
+        "fub_go_required_fields": resolve_fub_go_required_fields(),
         "default_custom_fields": {
             "petitioner_first": "firstName",
             "petitioner_last": "lastName",
@@ -1945,12 +2071,19 @@ def _fetch_person_notes(person_id) -> str:
         return ""
 
 
-def mapping_payload(path: Path | None = None, *, fetch_fub: bool = True, source_id: str = "placer") -> dict:
+def mapping_payload(
+    path: Path | None = None,
+    *,
+    fetch_fub: bool = True,
+    source_id: str = "placer",
+    settings: dict | None = None,
+) -> dict:
     mapping = load_mapping(path)
     live = list_fub_custom_fields() if fetch_fub else {"fields": [], "error": None}
     written = resolve_mapping_path(path)
     source_id = str(source_id or "placer")
     source_fields = {item["id"]: source_field_catalog(item["id"]) for item in DATA_SOURCES}
+    required = fub_go_required_from_settings(settings) if settings is not None else resolve_fub_go_required_fields()
     return {
         "mapping": mapping,
         "path": str(written),
@@ -1959,8 +2092,10 @@ def mapping_payload(path: Path | None = None, *, fetch_fub: bool = True, source_
         "data_sources": DATA_SOURCES,
         "source_id": source_id,
         "source_fields": source_fields,
+        "fub_go_required_fields": required,
+        "fub_go_gate_fields": list(FUB_GO_GATE_FIELDS),
         "source_go_no_go": {
-            item["id"]: go_no_go_for_source(item["id"]) for item in DATA_SOURCES
+            item["id"]: go_no_go_for_source(item["id"], required) for item in DATA_SOURCES
         },
         "source_custom_fields": custom_fields_for_source(mapping, source_id),
         "fub_custom_fields": live.get("fields") or [],
@@ -2317,21 +2452,31 @@ def gate_reason(
     strict_property: bool,
     existing_id: int | None,
     allow_seen_without_fub: bool = True,
+    required_fields=None,
 ) -> str | None:
     """Data-quality gate only.
 
     Presence in seen_cases / seen_cases_sacramento without a Follow Up Boss
     person id is not a skip. Callers must POST/create those listings.
     ``allow_seen_without_fub`` is kept for callers and always treated as true.
+    Required fields come from the saved Follow Up Boss “Required for Go” list.
     """
     del state, allow_seen_without_fub
+    required = set(
+        resolve_fub_go_required_fields(
+            required_fields, strict_property=strict_property
+        )
+    )
     key = case_key(row)
-    if not key:
+    if "case_number" in required and not key:
         return "missing_case_number"
     petitioner = portal_petitioner(row)
     first, last = split_person_name(petitioner)
-    if not first or not last:
-        return "petitioner_name_incomplete"
+    if "petitioner_first" in required or "petitioner_last" in required:
+        missing_first = "petitioner_first" in required and not first
+        missing_last = "petitioner_last" in required and not last
+        if missing_first or missing_last:
+            return "petitioner_name_incomplete"
     skip_bits = [str(x).lower() for x in mapping.get("skip_petitioner_contains") or []]
     low = petitioner.lower()
     if any(bit in low for bit in skip_bits if bit):
@@ -2339,13 +2484,17 @@ def gate_reason(
     source = str(
         row.get("source_id") or os.environ.get("FUB_DATA_SOURCE") or "placer"
     ).strip().lower()
-    if source in {"placer", "sacramento"} and not str(
-        _row_contact(row).get("mailing_address") or row.get("mailing_address") or ""
-    ).strip():
+    if (
+        "mailing_address" in required
+        and source in {"placer", "sacramento"}
+        and not str(
+            _row_contact(row).get("mailing_address") or row.get("mailing_address") or ""
+        ).strip()
+    ):
         return "missing_petitioner_address"
     if (
-        existing_id is None
-        and strict_property
+        "decedent_residence" in required
+        and existing_id is None
         and not str(row.get("decedent_residence") or "").strip()
     ):
         return "missing_decedent_residence"

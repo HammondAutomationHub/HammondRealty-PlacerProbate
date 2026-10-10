@@ -45,7 +45,6 @@ from .const import (
     CONF_FUB_ENABLED,
     CONF_FUB_EVENT_TYPE,
     CONF_FUB_SOURCE,
-    CONF_FUB_STRICT_PROPERTY,
     CONF_FUB_VERIFY_ONLY,
     CONF_FUB_UPDATE_EXISTING,
     CONF_FUB_VERIFY_EXISTING,
@@ -131,9 +130,9 @@ def apply_env(
     os.environ["PROBATE_KEYWORDS"] = str(settings.get(CONF_KEYWORDS) or DEFAULTS[CONF_KEYWORDS])
     os.environ["PROBATE_MAX_PAGES"] = str(int(settings.get(CONF_MAX_PAGES) or 10))
     try:
-        from .fub_client import source_window_settings
+        from .fub_client import apply_fub_go_required_env, source_window_settings
     except ImportError:
-        from fub_client import source_window_settings
+        from fub_client import apply_fub_go_required_env, source_window_settings
 
     placer_window = source_window_settings(settings, "placer")
     sac_window = source_window_settings(settings, "sacramento")
@@ -159,9 +158,7 @@ def apply_env(
     os.environ["FUB_EVENT_TYPE"] = str(
         settings.get(CONF_FUB_EVENT_TYPE) or "Seller Inquiry"
     )
-    os.environ["FUB_STRICT_PROPERTY"] = (
-        "1" if settings.get(CONF_FUB_STRICT_PROPERTY) else "0"
-    )
+    apply_fub_go_required_env(settings)
     os.environ["FUB_VERIFY_ONLY"] = (
         "1" if settings.get(CONF_FUB_VERIFY_ONLY) else "0"
     )
