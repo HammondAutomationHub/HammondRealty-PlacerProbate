@@ -772,6 +772,7 @@ GO_NO_GO = [
     "Notes gets the per-case eCourt Public URL, a unique DE-111 PDF link, and a DE-147 duties link. Petitioner phone and email come from either form when present, never from the attorney caption.",
     "Only NEW cases are created on a full run. Verify can update a person ID you enter, reuse the last test person, or create one if none exist.",
     "Follow Up Boss person and event source is probate. Tags are probate plus the county name. Person updates use mergeTags=true so other tags are kept.",
+    "Skip Follow Up Boss when DE-111 item 2.b (name) identifies a professional fiduciary. Attorney-caption wording alone is not a skip.",
 ]
 
 SOURCE_GO_NO_GO = {
@@ -2488,6 +2489,8 @@ def gate_reason(
         missing_last = "petitioner_last" in required and not last
         if missing_first or missing_last:
             return "petitioner_name_incomplete"
+    if row.get("professional_fiduciary"):
+        return "professional_fiduciary"
     skip_bits = [str(x).lower() for x in mapping.get("skip_petitioner_contains") or []]
     low = petitioner.lower()
     if any(bit in low for bit in skip_bits if bit):

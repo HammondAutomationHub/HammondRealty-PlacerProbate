@@ -156,6 +156,16 @@ ITEM2_NAMES_RE = re.compile(
     r"Petitioner\s*\(name each\)\s*:?\s*(?P<names>.+?)\s*requests that",
     re.I | re.S,
 )
+ITEM2_SECTION_RE = re.compile(
+    r"2\.\s*Petitioner\s*\(name each\)(?P<body>.+?)"
+    r"(?=\n\s*3\.\s*(?:a\.)?\s*Decedent died|\n\s*3\.\s*Decedent)",
+    re.I | re.S,
+)
+ITEM2B_NAME_RE = re.compile(
+    r"\bb\.\s*\(\s*name\s*\)\s*:?\s*(?P<name>.+?)\s+be\s+appointed",
+    re.I | re.S,
+)
+PROFESSIONAL_FIDUCIARY_RE = re.compile(r"professional\s+fiduciary", re.I)
 ITEM8_RE = re.compile(
     r"8\.\s*Name and relationship to decedent(?P<header>.{0,500}?)Address(?P<body>.+?)"
     r"(?:Continued on Attachment 8|Number of pages attached|"
@@ -443,6 +453,55 @@ def _item2_names(text: str) -> str:
     return names
 
 
+def _item2_section(text: str) -> str:
+    match = ITEM2_SECTION_RE.search(text or "")
+    if match:
+        return match.group(0)
+    start = re.search(r"2\.\s*Petitioner\s*\(name each\)", text or "", re.I)
+    if not start:
+        return ""
+    at = start.start()
+    return (text or "")[at : at + 1800]
+
+
+def _item2b_name(text: str) -> str:
+    section = _item2_section(text) or text or ""
+    match = ITEM2B_NAME_RE.search(section)
+    if not match:
+        return ""
+    name = re.sub(r"\s+", " ", match.group("name")).strip(" :.")
+    name = re.split(
+        r"\b(?:\(\s*1\s*\)|executor|administrator with|administrator\b)",
+        name,
+        maxsplit=1,
+        flags=re.I,
+    )[0].strip(" :.,")
+    if len(name) > 160:
+        return name[:160]
+    return name
+
+
+def is_professional_fiduciary_item2(text: str) -> bool:
+    """True when DE-111 item 2.b (or the same person on item 2 names) is a professional fiduciary.
+
+    Attorney-caption text is ignored unless it is also the item 2.b / petitioner name.
+    """
+    section = _item2_section(text)
+    if not section:
+        return False
+    name2b = _item2b_name(section)
+    names = _item2_names(section) or _item2_names(text)
+    if PROFESSIONAL_FIDUCIARY_RE.search(name2b or ""):
+        return True
+    if not PROFESSIONAL_FIDUCIARY_RE.search(names or ""):
+        return False
+    if not name2b:
+        return True
+    left = _name_tokens(PROFESSIONAL_FIDUCIARY_RE.sub(" ", names))
+    right = _name_tokens(PROFESSIONAL_FIDUCIARY_RE.sub(" ", name2b))
+    return bool(left & right)
+
+
 def _estate_of_name(text: str) -> str:
     match = re.search(
         r"ESTATE\s+OF\s*\(\s*name\s*\)\s*:?\s*(?P<name>[^\n]{3,90})",
@@ -678,6 +737,11 @@ def parse_de111_text(text: str, petitioner_name: str = "") -> dict:
     names = _item2_names(text) or petitioner_name
     if names:
         out["petitioner_name"] = names
+    item2b = _item2b_name(text)
+    if item2b:
+        out["item2b_name"] = item2b
+    if is_professional_fiduciary_item2(text):
+        out["professional_fiduciary"] = True
     estate = _estate_of_name(text)
     if estate:
         out["decedent_name"] = estate
@@ -919,6 +983,9 @@ def looks_like_probate_petition(name: str) -> bool:
 
 def looks_like_duties_form(name: str) -> bool:
     low = (name or "").lower()
+    compact = re.sub(r"[^a-z0-9]", "", low)
+    if "de147s" in compact:
+        return False
     if "de-147" in low or "de147" in low:
         return True
     return "duties" in low and "personal representative" in low
