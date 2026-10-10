@@ -2384,10 +2384,19 @@ def stored_person_id(state: dict, key: str) -> int | None:
         return None
 
 
+def is_fub_removed(state: dict, key: str | None) -> bool:
+    if not key:
+        return False
+    record = (state.get("cases") or {}).get(key) or {}
+    return bool(record.get("fub_removed"))
+
+
 def needs_fub_create(state: dict, key: str | None) -> bool:
     """True when this listing has never been assigned a Follow Up Boss person id."""
     if not key:
         return True
+    if is_fub_removed(state, key):
+        return False
     return stored_person_id(state, key) is None
 
 
@@ -2461,13 +2470,15 @@ def gate_reason(
     ``allow_seen_without_fub`` is kept for callers and always treated as true.
     Required fields come from the saved Follow Up Boss “Required for Go” list.
     """
-    del state, allow_seen_without_fub
+    del allow_seen_without_fub
     required = set(
         resolve_fub_go_required_fields(
             required_fields, strict_property=strict_property
         )
     )
     key = case_key(row)
+    if is_fub_removed(state, key):
+        return "fub_removed"
     if "case_number" in required and not key:
         return "missing_case_number"
     petitioner = portal_petitioner(row)
@@ -2907,6 +2918,43 @@ def post_event(api_url: str, api_key: str, payload: dict, system: str) -> dict:
         return {}
 
 
+def _fub_payload_missing(payload) -> bool:
+    if payload is None:
+        return True
+    if not isinstance(payload, dict):
+        return False
+    err = str(payload.get("error") or payload.get("message") or "").lower()
+    if "not found" in err or "has been deleted" in err:
+        return True
+    person = payload.get("person") if isinstance(payload.get("person"), dict) else payload
+    if not isinstance(person, dict):
+        return False
+    if person.get("deleted") or person.get("isDeleted"):
+        return True
+    return str(person.get("status") or "").lower() == "deleted"
+
+
+def get_person(api_url: str, api_key: str, person_id: int, system: str) -> dict | None:
+    url = f"{_api_root(api_url)}/people/{int(person_id)}"
+    response = requests.get(
+        url,
+        auth=(api_key, ""),
+        headers=_fub_headers(system),
+        timeout=30,
+    )
+    if response.status_code in (404, 410):
+        return None
+    if response.status_code >= 400:
+        raise RuntimeError(f"FUB HTTP {response.status_code}: {response.text[:500]}")
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if _fub_payload_missing(payload):
+        return None
+    return payload if isinstance(payload, dict) else {}
+
+
 def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system: str) -> dict | None:
     body = _person_api_body(payload)
     url = f"{_api_root(api_url)}/people/{int(person_id)}?mergeTags=true"
@@ -2917,14 +2965,17 @@ def put_person(api_url: str, api_key: str, person_id: int, payload: dict, system
         headers=_fub_headers(system),
         timeout=30,
     )
-    if response.status_code == 404:
+    if response.status_code in (404, 410):
         return None
     if response.status_code >= 400:
         raise RuntimeError(f"FUB HTTP {response.status_code}: {response.text[:500]}")
     try:
-        return response.json()
+        parsed = response.json()
     except ValueError:
         return {}
+    if _fub_payload_missing(parsed):
+        return None
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def post_note(
@@ -3269,6 +3320,22 @@ def _remember_person(cases: dict, key: str, person_id: int, fingerprint: str) ->
     cases[key]["fub_person_id"] = int(person_id)
     cases[key]["fub_fingerprint"] = fingerprint
     cases[key]["fub_skip"] = None
+    cases[key].pop("fub_removed", None)
+
+
+def _mark_fub_removed(cases: dict, key: str, person_id: int | None) -> None:
+    if not key:
+        return
+    record = cases.setdefault(key, {})
+    if person_id not in (None, "", 0, "0"):
+        record["fub_person_id"] = int(person_id)
+    record["fub_removed"] = True
+    record["fub_skip"] = "fub_removed"
+    print(
+        f"FUB person_id={person_id} was deleted; "
+        f"marking {key} as fub_removed (will not recreate)",
+        flush=True,
+    )
 
 
 def _clear_fub_person(cases: dict, key: str) -> None:
@@ -3284,6 +3351,7 @@ def _clear_fub_person(cases: dict, key: str) -> None:
         "fub_de147_note_fp",
         "fub_court_note_url",
         "fub_skip",
+        "fub_removed",
     ):
         record.pop(field, None)
 
@@ -3387,6 +3455,15 @@ def export_new_leads(
                     print(f"FUB skip {key}: verify_only_limit")
                     _progress_fub(summary, "verify-only skip", key)
                     continue
+                live = get_person(
+                    settings["api_url"], api_key, existing_id, system
+                )
+                if live is None:
+                    _mark_fub_removed(cases, key, existing_id)
+                    summary["skipped"] += 1
+                    summary["skips"].append({"case": key, "reason": "fub_removed"})
+                    _progress_fub(summary, "fub_removed", key)
+                    continue
                 if should_skip_unchanged_person(
                     existing_id=existing_id,
                     record=record,
@@ -3411,20 +3488,11 @@ def export_new_leads(
                     settings["api_url"], api_key, existing_id, person, system
                 )
                 if body is None:
-                    print(
-                        f"FUB person_id={existing_id} was deleted; "
-                        f"creating a new person for {key}",
-                        flush=True,
-                    )
-                    _clear_fub_person(cases, key)
-                    existing_id = None
-                    person = build_person(
-                        row,
-                        mapping,
-                        settings,
-                        person_id=None,
-                        allowed_custom=allowed_custom,
-                    )
+                    _mark_fub_removed(cases, key, existing_id)
+                    summary["skipped"] += 1
+                    summary["skips"].append({"case": key, "reason": "fub_removed"})
+                    _progress_fub(summary, "fub_removed", key)
+                    continue
                 else:
                     pid = person_id_from_response(body) or existing_id
                     _remember_person(cases, key, pid, fingerprint)

@@ -162,25 +162,39 @@ class FubCreateGateTests(unittest.TestCase):
             )
         )
 
-    def _export_with_http(self, rows, state, *, posted_id=501):
+    def _export_with_http(
+        self,
+        rows,
+        state,
+        *,
+        posted_id=501,
+        live_ok=True,
+        put_ok=True,
+    ):
+        live = {"id": posted_id} if live_ok else None
+        put_body = {"id": posted_id} if put_ok else None
         with (
             patch("fub_client.post_event", return_value={"personId": posted_id}) as posted,
-            patch("fub_client.put_person", return_value={"id": posted_id}) as updated,
+            patch("fub_client.get_person", return_value=live) as loaded,
+            patch("fub_client.put_person", return_value=put_body) as updated,
             patch("fub_client.post_note"),
             patch("fub_client.post_court_portal_note", return_value={}),
             patch("fub_client.attach_de111_file", return_value={}),
             patch("fub_client.attach_de147_file", return_value={}),
         ):
             summary = export_new_leads(rows, state)
-        return summary, posted, updated
+        return summary, posted, updated, loaded
 
     def test_local_seen_placer_posts_when_export_enabled(self):
         key = PLACER_ROW["case_number"]
         state = {"cases": {key: {"first_seen": "2026-09-01", "last_seen": "2026-10-01"}}}
-        summary, posted, updated = self._export_with_http([PLACER_ROW], state, posted_id=701)
+        summary, posted, updated, loaded = self._export_with_http(
+            [PLACER_ROW], state, posted_id=701
+        )
         self.assertEqual(summary["posted"], 1)
         self.assertEqual(summary["updated"], 0)
         posted.assert_called_once()
+        loaded.assert_not_called()
         self.assertEqual(state["cases"][key]["fub_person_id"], 701)
         self.assertTrue(updated.called)
 
@@ -195,12 +209,13 @@ class FubCreateGateTests(unittest.TestCase):
                 }
             }
         }
-        summary, posted, _updated = self._export_with_http(
+        summary, posted, _updated, loaded = self._export_with_http(
             [SACRAMENTO_ROW], state, posted_id=802
         )
         self.assertEqual(summary["posted"], 1)
         self.assertEqual(summary.get("skips"), [])
         posted.assert_called_once()
+        loaded.assert_not_called()
         self.assertEqual(state["cases"][key]["fub_person_id"], 802)
 
     def test_exported_placer_skips_unchanged_without_update_all(self):
@@ -211,13 +226,15 @@ class FubCreateGateTests(unittest.TestCase):
                 key: {"fub_person_id": 44, "fub_fingerprint": fingerprint}
             }
         }
-        summary, posted, updated = self._export_with_http([PLACER_ROW], state)
+        summary, posted, updated, loaded = self._export_with_http([PLACER_ROW], state)
         self.assertEqual(summary["posted"], 0)
         self.assertEqual(summary["updated"], 0)
         self.assertEqual(summary["skipped"], 1)
         self.assertEqual(summary["skips"][0]["reason"], "unchanged")
         posted.assert_not_called()
         updated.assert_not_called()
+        loaded.assert_called_once()
+        self.assertNotIn("fub_removed", state["cases"][key])
 
     def test_exported_sacramento_updates_when_update_all(self):
         os.environ["FUB_DATA_SOURCE"] = "sacramento"
@@ -229,13 +246,80 @@ class FubCreateGateTests(unittest.TestCase):
                 key: {"fub_person_id": 55, "fub_fingerprint": fingerprint}
             }
         }
-        summary, posted, updated = self._export_with_http(
+        summary, posted, updated, loaded = self._export_with_http(
             [SACRAMENTO_ROW], state, posted_id=55
         )
         self.assertEqual(summary["posted"], 0)
         self.assertEqual(summary["updated"], 1)
         posted.assert_not_called()
         updated.assert_called_once()
+        loaded.assert_called_once()
+
+    def test_deleted_person_id_marked_removed_without_post(self):
+        key = PLACER_ROW["case_number"]
+        state = {
+            "cases": {
+                key: {"fub_person_id": 5120, "fub_fingerprint": "stale-fp"}
+            }
+        }
+        summary, posted, updated, loaded = self._export_with_http(
+            [PLACER_ROW],
+            state,
+            posted_id=5120,
+            live_ok=False,
+        )
+        self.assertEqual(summary["posted"], 0)
+        self.assertEqual(summary["updated"], 0)
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
+        posted.assert_not_called()
+        updated.assert_not_called()
+        loaded.assert_called_once()
+        rec = state["cases"][key]
+        self.assertTrue(rec["fub_removed"])
+        self.assertEqual(rec["fub_person_id"], 5120)
+
+    def test_put_404_marks_removed_without_post(self):
+        key = PLACER_ROW["case_number"]
+        state = {
+            "cases": {
+                key: {"fub_person_id": 5120, "fub_fingerprint": "stale-fp"}
+            }
+        }
+        summary, posted, updated, loaded = self._export_with_http(
+            [PLACER_ROW],
+            state,
+            posted_id=5120,
+            live_ok=True,
+            put_ok=False,
+        )
+        self.assertEqual(summary["posted"], 0)
+        self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
+        posted.assert_not_called()
+        updated.assert_called_once()
+        loaded.assert_called_once()
+        self.assertTrue(state["cases"][key]["fub_removed"])
+
+    def test_already_removed_skips_without_http(self):
+        key = PLACER_ROW["case_number"]
+        state = {
+            "cases": {
+                key: {
+                    "fub_person_id": 5120,
+                    "fub_removed": True,
+                    "fub_fingerprint": "stale-fp",
+                }
+            }
+        }
+        summary, posted, updated, loaded = self._export_with_http(
+            [PLACER_ROW], state, posted_id=5120
+        )
+        self.assertEqual(summary["posted"], 0)
+        self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
+        posted.assert_not_called()
+        updated.assert_not_called()
+        loaded.assert_not_called()
+        self.assertTrue(state["cases"][key]["fub_removed"])
 
     def test_default_gate_still_requires_mailing(self):
         row = {
