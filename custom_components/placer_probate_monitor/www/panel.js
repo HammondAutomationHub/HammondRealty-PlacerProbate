@@ -718,8 +718,8 @@ class PlacerProbateSourcesPanel extends HTMLElement {
             <button class="secondary" id="run-source" type="button">Run ${ppmEsc(label)} job</button>
           </div>
           <p class="ppm-note">${src.id === "sacramento"
-            ? "Preview and Run use Follow Up Boss like a live import. They only process Sacramento County (Journal Technologies public portal node/397). Turn the county off to leave it out of the scheduled job."
-            : "Preview and Run use Follow Up Boss like a live import. They only process Placer County (eCourt Public node/45). Turn the county off to leave it out of the scheduled job."}</p>
+            ? "Preview shows one Sacramento go-case and does not update Follow Up Boss. Run Sacramento job posts to FUB for this county only (Verify only limits that to one person). Turn the county off to leave it out of the scheduled job."
+            : "Preview shows one Placer go-case and does not update Follow Up Boss. Run Placer job posts to FUB for this county only (Verify only limits that to one person). Turn the county off to leave it out of the scheduled job."}</p>
         </section>
         <section class="ppm-card" id="source-preview">
           <h2>Last live extract</h2>
@@ -1025,7 +1025,7 @@ class PlacerProbateFubPanel extends HTMLElement {
               <div><label>Lead source name</label><input id="fub_source" /></div>
               <div><label>Assign to</label><input id="fub_assigned_to" /></div>
             </div>
-            <p class="ppm-note">County people use the read-only lead source on each Probate sources card (probate placer / probate sacramento). This field is a fallback for other events.</p>
+            <p class="ppm-note">County people use the read-only lead source on each Probate sources card (probate for every county). This field is a fallback for other events.</p>
             <label>Person stage</label>
             <input id="fub_stage" placeholder="Must match a Follow Up Boss stage name (leave blank for FUB default)" />
             <label>Event type</label>

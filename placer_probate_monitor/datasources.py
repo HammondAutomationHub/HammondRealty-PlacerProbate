@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Probate lead datasource for the Home Assistant / Follow Up Boss app.
 
-Both counties keep the existing Follow Up Boss tag ``probate``.
-Sacramento adds ``sacramento`` beside it. Callers must merge tags
-onto a person (Follow Up Boss ``mergeTags=true``). Sending tags
-without that flag replaces the person's whole tag list.
+Every county uses Follow Up Boss lead source ``probate`` and tags
+``probate`` plus the county name. Callers must merge tags onto a
+person (Follow Up Boss ``mergeTags=true``). Sending tags without
+that flag replaces the person's whole tag list.
 """
 
 from __future__ import annotations
@@ -14,16 +14,18 @@ from pathlib import Path
 from typing import Any
 
 FUB_TAG_PROBATE = "probate"
-FUB_TAG_SACRAMENTO = "sacramento"
+FUB_LEAD_SOURCE = "probate"
 
 COUNTY_FUB_TAGS = {
-    "placer": [FUB_TAG_PROBATE],
-    "sacramento": [FUB_TAG_PROBATE, FUB_TAG_SACRAMENTO],
+    "placer": [FUB_TAG_PROBATE, "placer"],
+    "sacramento": [FUB_TAG_PROBATE, "sacramento"],
+    "nevada": [FUB_TAG_PROBATE, "nevada"],
 }
 
 COUNTY_FUB_LEAD_SOURCES = {
-    "placer": "probate placer",
-    "sacramento": "probate sacramento",
+    "placer": FUB_LEAD_SOURCE,
+    "sacramento": FUB_LEAD_SOURCE,
+    "nevada": FUB_LEAD_SOURCE,
 }
 
 

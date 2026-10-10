@@ -211,16 +211,21 @@ class FubTagTests(unittest.TestCase):
     def test_sacramento_adds_tag_beside_probate(self):
         from datasources import fub_tags, stamp_fub_tags
 
-        self.assertEqual(fub_tags("Placer"), ["probate"])
+        self.assertEqual(fub_tags("Placer"), ["probate", "placer"])
         self.assertEqual(fub_tags("sacramento"), ["probate", "sacramento"])
+        self.assertEqual(fub_tags("nevada"), ["probate", "nevada"])
         rows = stamp_fub_tags([{"case_number": "26PR002445"}], "Sacramento")
         self.assertEqual(rows[0]["tags"], ["probate", "sacramento"])
         self.assertIn("probate", rows[0]["tags"])
-        self.assertEqual(rows[0]["lead_source"], "probate sacramento")
+        self.assertEqual(rows[0]["lead_source"], "probate")
         self.assertEqual(rows[0]["source_id"], "sacramento")
         placer = stamp_fub_tags([{"case_number": "S-PR-0014448"}], "placer")
-        self.assertEqual(placer[0]["tags"], ["probate"])
-        self.assertEqual(placer[0]["lead_source"], "probate placer")
+        self.assertEqual(placer[0]["tags"], ["probate", "placer"])
+        self.assertEqual(placer[0]["lead_source"], "probate")
+        nevada = stamp_fub_tags([{"case_number": "PR26-00001"}], "nevada")
+        self.assertEqual(nevada[0]["tags"], ["probate", "nevada"])
+        self.assertEqual(nevada[0]["lead_source"], "probate")
+        self.assertEqual(nevada[0]["source_id"], "nevada")
 
     def test_person_tags_and_merge_query(self):
         from fub_client import build_event, build_person, mapping_for_export, put_person
@@ -232,25 +237,26 @@ class FubTagTests(unittest.TestCase):
             {"assigned_to": "", "stage": "", "source": "probate"},
         )
         self.assertEqual(person["tags"], ["probate", "sacramento"])
-        self.assertEqual(person["source"], "probate sacramento")
+        self.assertEqual(person["source"], "probate")
         placer = build_person(
             {"petitioner": "Jane Doe", "source_id": "placer"},
             {"send": {"firstName": True, "lastName": True}, "custom_fields": {}},
             {"assigned_to": "", "stage": "", "source": "probate"},
         )
-        self.assertEqual(placer["tags"], ["probate"])
-        self.assertEqual(placer["source"], "probate placer")
+        self.assertEqual(placer["tags"], ["probate", "placer"])
+        self.assertEqual(placer["source"], "probate")
         event = build_event(
             {"petitioner": "Wayne Row", "source_id": "sacramento", "case_number": "26PR002445"},
             {"send": {"firstName": True, "lastName": True, "source": True}, "custom_fields": {}},
             {"assigned_to": "", "stage": "", "source": "probate", "event_type": "Seller Inquiry"},
         )
-        self.assertEqual(event["source"], "probate sacramento")
-        self.assertEqual(event["person"]["source"], "probate sacramento")
-        self.assertEqual(mapping_for_export({}, "placer")["lead_source"], "probate placer")
+        self.assertEqual(event["source"], "probate")
+        self.assertEqual(event["person"]["source"], "probate")
+        self.assertEqual(mapping_for_export({}, "placer")["lead_source"], "probate")
         self.assertEqual(
-            mapping_for_export({}, "sacramento")["lead_source"], "probate sacramento"
+            mapping_for_export({}, "sacramento")["lead_source"], "probate"
         )
+        self.assertEqual(mapping_for_export({}, "nevada")["lead_source"], "probate")
         self.assertIn("mergeTags=true", inspect.getsource(put_person))
 
     def test_sacramento_url_is_not_rewritten_to_placer(self):
@@ -273,8 +279,9 @@ class FubTagTests(unittest.TestCase):
         self.assertEqual(statuses["placer"], "live")
         self.assertEqual(statuses["sacramento"], "live")
         self.assertEqual(statuses["nevada"], "coming_soon")
-        self.assertEqual(names["placer"], "probate placer")
-        self.assertEqual(names["sacramento"], "probate sacramento")
+        self.assertEqual(names["placer"], "probate")
+        self.assertEqual(names["sacramento"], "probate")
+        self.assertEqual(names["nevada"], "probate")
         flags = normalize_source_enabled({})
         self.assertTrue(flags["placer"])
         self.assertFalse(flags["sacramento"])
@@ -514,15 +521,15 @@ class PetitionDocsAndPreviewTests(unittest.TestCase):
             ],
             "sacramento",
         )[0]
-        self.assertEqual(row["lead_source"], "probate sacramento")
+        self.assertEqual(row["lead_source"], "probate")
         self.assertEqual(
             mapping_for_export({}, "sacramento")["lead_source"],
-            "probate sacramento",
+            "probate",
         )
         preview = preview_one_record([row])
         rec = preview["verify_record"]
-        self.assertEqual(rec["lead_source"], "probate sacramento")
-        self.assertEqual(rec["mapped"]["lead_source"], "probate sacramento")
+        self.assertEqual(rec["lead_source"], "probate")
+        self.assertEqual(rec["mapped"]["lead_source"], "probate")
         self.assertEqual(rec["source_id"], "sacramento")
         blob = " ".join(item.get("source") or "" for item in rec["source_extract"])
         self.assertNotIn("node/45", blob)

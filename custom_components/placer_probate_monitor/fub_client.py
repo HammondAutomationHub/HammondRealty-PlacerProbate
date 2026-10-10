@@ -771,6 +771,7 @@ GO_NO_GO = [
     "Last residence is DE-111 text, not a verified APN.",
     "Notes gets the per-case eCourt Public URL, a unique DE-111 PDF link, and a DE-147 duties link. Petitioner phone and email come from either form when present, never from the attorney caption.",
     "Only NEW cases are created on a full run. Verify can update a person ID you enter, reuse the last test person, or create one if none exist.",
+    "Follow Up Boss person and event source is probate. Tags are probate plus the county name. Person updates use mergeTags=true so other tags are kept.",
 ]
 
 SOURCE_GO_NO_GO = {
@@ -873,7 +874,7 @@ SOURCE_GO_NO_GO = {
         "rules": GO_NO_GO + [
             "Court summaries stay on prod-portal-sacramento-ca.journaltech.com node/397. Do not rewrite them to Placer node/45.",
             "Public petition and duties PDFs are downloaded after portal login. Confidential Not Viewable documents, including DE-147S, are skipped.",
-            "Follow Up Boss tags are probate plus sacramento. Person updates use mergeTags=true so existing tags are kept.",
+            "Follow Up Boss tags are probate plus sacramento. Person updates use mergeTags=true so other tags are kept.",
             "The same Follow Up Boss mapping and Events import path as Placer. Turning this source off does not stop Placer.",
         ],
     },
@@ -882,6 +883,7 @@ SOURCE_GO_NO_GO = {
         "optional": [],
         "rules": [
             "Nevada County import is not live. Go/no-go data requirements will be listed here when this county is wired.",
+            "When live, Follow Up Boss tags will be probate plus nevada. Person updates use mergeTags=true so other tags are kept.",
         ],
     },
 }
@@ -925,7 +927,7 @@ DATA_SOURCES = [
         "status": "coming_soon",
         "description": "Queued after Sacramento County.",
         "extracts": "Not wired yet",
-        "lead_source": "",
+        "lead_source": COUNTY_FUB_LEAD_SOURCES["nevada"],
     },
 ]
 

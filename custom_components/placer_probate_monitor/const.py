@@ -41,8 +41,9 @@ CONF_SACRAMENTO_PORTAL_USER = "sacramento_portal_user"
 CONF_SACRAMENTO_PORTAL_PASSWORD = "sacramento_portal_password"
 
 FUB_LEAD_SOURCE_BY_COUNTY = {
-    "placer": "probate placer",
-    "sacramento": "probate sacramento",
+    "placer": "probate",
+    "sacramento": "probate",
+    "nevada": "probate",
 }
 
 FUB_EVENT_TYPES = [
