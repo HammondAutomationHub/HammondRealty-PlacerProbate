@@ -13,7 +13,14 @@ sys.path.insert(0, str(ROOT / "custom_components" / "placer_probate_monitor"))
 
 from bs4 import BeautifulSoup  # noqa: E402
 
-from placer_probate_monitor import extract_case, notice_fields  # noqa: E402
+from placer_probate_monitor import (  # noqa: E402
+    Notice,
+    cnpa_page_sequence,
+    extract_case,
+    notice_fields,
+    parse_cnpa_max_pages,
+    search_url,
+)
 from sacramento_portal import (  # noqa: E402
     document_is_blocked,
     login_form_payload,
@@ -24,7 +31,11 @@ from sacramento_portal import (  # noqa: E402
     _parse_search,
     _pane_rows,
 )
-from sacramento_probate_monitor import extract_sacramento_case  # noqa: E402
+from sacramento_probate_monitor import (  # noqa: E402
+    extract_sacramento_case,
+    is_sacramento_court_notice,
+    keep_sacramento_notices,
+)
 
 FOLSOM = """
 L0010608
@@ -610,6 +621,76 @@ class PetitionDocsAndPreviewTests(unittest.TestCase):
         self.assertNotIn("node/45", blob)
         self.assertNotIn("eCourt Public", blob)
         self.assertIn("node/397", blob)
+
+
+def _notice(**overrides) -> Notice:
+    fields = dict(
+        case_number="26PR002736",
+        decedent="Grace",
+        petitioner="Sam",
+        court_county="",
+        hearing="",
+        attorney="",
+        attorney_phone="",
+        newspaper="Folsom Telegraph",
+        post_date="2026-10-16",
+        publication_line="",
+        will_offered=False,
+        iaea_requested=False,
+        refcode="",
+        advert_id="Notices_1",
+        notice_url="https://www.capublicnotice.com/advert/-x",
+        snippet="",
+        raw_text="",
+    )
+    fields.update(overrides)
+    return Notice(**fields)
+
+
+class CnpaPaginationTests(unittest.TestCase):
+    def test_page_sequence_skips_duplicate_first_page(self):
+        self.assertEqual(cnpa_page_sequence(1), [0])
+        self.assertEqual(cnpa_page_sequence(2), [0, 2])
+        self.assertEqual(cnpa_page_sequence(5), [0, 2, 3, 4, 5])
+
+    def test_parse_cnpa_max_pages_from_loadmore_js(self):
+        html = "var maxPages = '1' || '1';\nconsole.log(nextPage+ \" of 1\");"
+        self.assertEqual(parse_cnpa_max_pages(html), 1)
+        self.assertEqual(parse_cnpa_max_pages("var maxPages = '89' || '1';"), 89)
+        self.assertIsNone(parse_cnpa_max_pages("<html></html>"))
+
+    def test_empty_county_omits_newspaper_filter(self):
+        from datetime import date
+
+        start, end = date(2026, 7, 12), date(2026, 12, 9)
+        bare = search_url(start, end, county="", keywords='"NOTICE OF PETITION"')
+        self.assertNotIn("county=", bare)
+        tagged = search_url(
+            start, end, county="Sacramento", keywords='"NOTICE OF PETITION"'
+        )
+        self.assertIn("county=Sacramento", tagged)
+
+    def test_keep_sacramento_court_after_unscoped_search(self):
+        scoped = _notice(case_number="26PR002736", advert_id="a")
+        placer = _notice(
+            case_number="",
+            advert_id="b",
+            court_county="PLACER",
+            raw_text="Superior Court of California, County of PLACER",
+        )
+        sac = _notice(
+            case_number="26PR001104",
+            advert_id="c",
+            court_county="SACRAMENTO",
+            raw_text="Superior Court of California, County of SACRAMENTO",
+        )
+        self.assertTrue(is_sacramento_court_notice(sac))
+        self.assertFalse(is_sacramento_court_notice(placer))
+        kept = keep_sacramento_notices(
+            [scoped, placer, sac], {scoped.case_number}
+        )
+        keys = {item.case_number or item.advert_id for item in kept}
+        self.assertEqual(keys, {"26PR002736", "26PR001104"})
 
 
 if __name__ == "__main__":

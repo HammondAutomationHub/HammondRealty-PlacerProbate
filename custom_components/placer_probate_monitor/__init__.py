@@ -331,11 +331,19 @@ def _source_job_cmd(data_dir: Path, settings: dict, source_id: str) -> list[str]
     ]
     if not settings.get(CONF_SEND_EMAIL):
         cmd.append("--no-email")
-    if settings.get(CONF_SKIP_PORTAL):
+    if settings.get(CONF_SKIP_PORTAL) and not settings.get("rescan_local"):
         cmd.append("--skip-portal")
     if not settings.get(CONF_GENERATE_PDF):
         cmd.append("--no-pdf")
-    if settings.get("fub_preview_one"):
+    if settings.get("rescan_local"):
+        cmd.append("--rescan-local")
+        if "--no-email" not in cmd:
+            cmd.append("--no-email")
+        if "--no-pdf" not in cmd:
+            cmd.append("--no-pdf")
+        if settings.get(CONF_FUB_VERIFY_ONLY):
+            cmd.append("--fub-verify-one")
+    elif settings.get("fub_preview_one"):
         cmd.append("--fub-preview-one")
         if "--no-email" not in cmd:
             cmd.append("--no-email")
@@ -686,10 +694,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.bus.async_fire(f"{DOMAIN}_run_finished", result)
 
+    async def _svc_rescan(_call: ServiceCall) -> None:
+        result = await _execute(
+            "rescan_local",
+            {
+                "rescan_local": True,
+                CONF_SEND_EMAIL: False,
+                CONF_GENERATE_PDF: False,
+            },
+        )
+        hass.bus.async_fire(f"{DOMAIN}_run_finished", result)
+
     hass.services.async_register(DOMAIN, "run_now", _svc_run)
     hass.services.async_register(DOMAIN, "test_email", _svc_test)
     hass.services.async_register(DOMAIN, "verify_fub", _svc_verify)
     hass.services.async_register(DOMAIN, "preview_one", _svc_preview)
+    hass.services.async_register(DOMAIN, "rescan_local", _svc_rescan)
     return True
 
 
@@ -712,6 +732,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "test_email")
         hass.services.async_remove(DOMAIN, "verify_fub")
         hass.services.async_remove(DOMAIN, "preview_one")
+        hass.services.async_remove(DOMAIN, "rescan_local")
         from .hass_views import async_unload_mapping_ui
 
         async_unload_mapping_ui(hass)

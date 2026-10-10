@@ -183,6 +183,10 @@
     "preview_one": {
       "name": "Preview one record",
       "description": "Retrieve one live go-case for display only. Ignores local seen/FUB status. Does not post to Follow Up Boss or update seen-cases."
+    },
+    "rescan_local": {
+      "name": "Rescan local files",
+      "description": "Re-parse on-disk DE-111/DE-147 PDFs for enabled counties. Does not search CNPA or contact court portals. Follow Up Boss export still runs if enabled."
     }
   }
 }

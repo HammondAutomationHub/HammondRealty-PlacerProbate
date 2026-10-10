@@ -715,11 +715,12 @@ class PlacerProbateSourcesPanel extends HTMLElement {
           <div class="ppm-actions">
             ${src.id === "placer" ? '<button id="save-source" type="button">Save Placer import</button>' : '<button id="save-source" type="button">Save Sacramento import</button>'}
             <button class="secondary" id="preview-source" type="button">Preview one extract</button>
+            <button class="secondary" id="rescan-source" type="button">Rescan local files</button>
             <button class="secondary" id="run-source" type="button">Run ${ppmEsc(label)} job</button>
           </div>
           <p class="ppm-note">${src.id === "sacramento"
-            ? "Preview shows one Sacramento go-case and does not update Follow Up Boss. Run Sacramento job posts to FUB for this county only (Verify only limits that to one person). Turn the county off to leave it out of the scheduled job."
-            : "Preview shows one Placer go-case and does not update Follow Up Boss. Run Placer job posts to FUB for this county only (Verify only limits that to one person). Turn the county off to leave it out of the scheduled job."}</p>
+            ? "Rescan local files re-parses Sacramento PDFs already on disk (no newspaper search, no court login). Preview still hits the portal for one case. Run Sacramento job searches CNPA, skips the court when a valid DE-111 is already saved, and posts to FUB for this county only (Verify only limits that to one person)."
+            : "Rescan local files re-parses Placer PDFs already on disk (no newspaper search, no court login). Preview still hits the portal for one case. Run Placer job searches CNPA, skips the court when a valid DE-111 is already saved, and posts to FUB for this county only (Verify only limits that to one person)."}</p>
         </section>
         <section class="ppm-card" id="source-preview">
           <h2>Last live extract</h2>
@@ -756,6 +757,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       if (saveBtn) saveBtn.addEventListener("click", () => this._save());
       this._qs("#source_enabled").addEventListener("change", (ev) => this._toggleEnabled(src.id, ev.target.checked));
       this._qs("#preview-source").addEventListener("click", () => this._preview(src.id));
+      this._qs("#rescan-source").addEventListener("click", () => this._rescan(src.id));
       this._qs("#run-source").addEventListener("click", () => this._run(src.id));
       const saveMap = this._qs("#save-source-map");
       if (saveMap) saveMap.addEventListener("click", () => this._saveSourceMap(src.id));
@@ -880,6 +882,26 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       });
       const ok = st.last_result !== "failed" && st.last_result !== "running";
       this._flash(ok ? ppmJobDoneMessage(st) : (ppmText(st.last_error) || `${label} job failed. Check last_run.log.`), ok);
+    } catch (err) {
+      this._flash(ppmText(err), false);
+    }
+  }
+
+  async _rescan(sourceId) {
+    const id = sourceId || "placer";
+    const label = id === "sacramento" ? "Sacramento" : "Placer";
+    this._flash(`Rescanning local ${label} PDFs… no court servers.`, "wait");
+    try {
+      const st = await ppmRunJob(this._hass, "rescan", { source_id: id }, (live) => {
+        this._flash(ppmJobLiveMessage(live) || `Rescanning ${label} files…`, "wait");
+      });
+      const ok = st.last_result !== "failed" && st.last_result !== "running";
+      this._flash(
+        ok
+          ? (ppmJobDoneMessage(st) || `${label} local rescan finished.`)
+          : (ppmText(st.last_error) || `${label} local rescan failed. Check last_run.log.`),
+        ok,
+      );
     } catch (err) {
       this._flash(ppmText(err), false);
     }

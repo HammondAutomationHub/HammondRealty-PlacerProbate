@@ -148,10 +148,33 @@ def search_url(
         "firstDate": start.strftime("%m/%d/%Y"),
         "lastDate": end.strftime("%m/%d/%Y"),
         "_categories": "1",
-        "county": county or os.environ.get("PROBATE_COUNTY", "Placer"),
         "ordering": "BY_DATE_DEC",
     }
+    # county="" omits CNPA's newspaper-county filter. None uses PROBATE_COUNTY.
+    if county is None:
+        params["county"] = os.environ.get("PROBATE_COUNTY", "Placer")
+    elif county != "":
+        params["county"] = county
     return f"{BASE_SEARCH}?{urlencode(params)}"
+
+
+def cnpa_page_sequence(max_fetch: int) -> list[int]:
+    """Unique CNPA query pages.
+
+    The site treats ``page=0`` and ``page=1`` as the same first result page.
+    Later unique pages are 2, 3, … matching ``loadMore()`` (hidden #page + 1).
+    """
+    fetch = max(1, int(max_fetch))
+    if fetch == 1:
+        return [0]
+    return [0] + list(range(2, fetch + 1))
+
+
+def parse_cnpa_max_pages(html_text: str) -> int | None:
+    match = re.search(r"var maxPages = ['\"](\d+)['\"]", html_text or "")
+    if not match:
+        return None
+    return max(1, int(match.group(1)))
 
 
 def fetch_page(url: str, timeout: int = 45) -> str:
@@ -352,35 +375,48 @@ def paginate(
     collected: list[Notice] = []
     urls: list[str] = []
     last_full = False
-    for page in range(max_pages):
+    site_max: int | None = None
+    fetched = 0
+    for page in cnpa_page_sequence(max_pages):
+        if site_max is not None and page > site_max:
+            break
         url = search_url(
             start, end, page=page, county=county, keywords=keywords
         )
         urls.append(url)
+        cap = site_max or max_pages
         _progress(
             "cnpa",
-            f"Searching CNPA notices (page {page + 1} of up to {max_pages})…",
-            cnpa_page=page + 1,
-            cnpa_max_pages=max_pages,
+            f"Searching CNPA notices (page {fetched + 1} of up to {cap})…",
+            cnpa_page=fetched + 1,
+            cnpa_max_pages=cap,
         )
         html_text = fetch_page(url)
+        if site_max is None:
+            site_max = parse_cnpa_max_pages(html_text)
         batch = parse_html(html_text, case_extractor=case_extractor)
         collected.extend(batch)
         soup = BeautifulSoup(html_text, "html.parser")
-        # Site uses 0-based page in query, hidden #page starts at 1 after first view.
         card_count = len(soup.select("div.panel.panel-result"))
         last_full = card_count >= 24
-        if card_count < 24:
+        fetched += 1
+        if card_count == 0:
             break
-        load_more = soup.select_one("#loadMore")
-        if load_more and "disabled" in (load_more.get("class") or []):
+        # Load More stays enabled in HTML until JS runs; honor CNPA maxPages.
+        if site_max is not None and page >= site_max:
             break
-    else:
-        if last_full:
-            print(
-                f"Warning: hit {max_pages}-page cap; later notices may be missing.",
-                file=sys.stderr,
-            )
+        if site_max is None and card_count < 24:
+            break
+    if last_full and site_max and fetched < min(max_pages, site_max):
+        print(
+            f"Warning: hit {max_pages}-page cap; later notices may be missing.",
+            file=sys.stderr,
+        )
+    elif last_full and site_max is None and fetched >= max_pages:
+        print(
+            f"Warning: hit {max_pages}-page cap; later notices may be missing.",
+            file=sys.stderr,
+        )
     return collected, urls
 
 
@@ -661,131 +697,124 @@ def guess_petition(portal: dict, notice: Notice) -> str:
     return "Letters / administration (see notice)"
 
 
-def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = None) -> list[dict]:
+def enrich_notices(
+    notices: list[Notice],
+    year: int,
+    docs_dir: Path | None = None,
+    *,
+    reuse_local: bool = True,
+    refresh_cases: list[str] | None = None,
+    listings_catalog: dict | None = None,
+) -> list[dict]:
     try:
+        from .datasources import (
+            apply_stored_petitions,
+            case_docs_folder,
+            case_safe_name,
+            is_valid_pdf,
+            overlay_prior_listing,
+            public_download_items,
+            should_reuse_local_case,
+        )
         from .ecourt_client import ECourtClient
-        from .petition_parse import (
-            contact_fields,
-            looks_like_duties_form,
-            looks_like_probate_petition,
-            merge_petitioner_contact,
-            parse_de111_pdf,
-            parse_de147_pdf,
-        )
     except ImportError:
-        from ecourt_client import ECourtClient
-        from petition_parse import (
-            contact_fields,
-            looks_like_duties_form,
-            looks_like_probate_petition,
-            merge_petitioner_contact,
-            parse_de111_pdf,
-            parse_de147_pdf,
+        from datasources import (
+            apply_stored_petitions,
+            case_docs_folder,
+            case_safe_name,
+            is_valid_pdf,
+            overlay_prior_listing,
+            public_download_items,
+            should_reuse_local_case,
         )
+        from ecourt_client import ECourtClient
 
-    client = ECourtClient(pause=float(os.environ.get("ECOURT_PAUSE", "1.2")))
+    client = None
+
+    def _client() -> ECourtClient:
+        nonlocal client
+        if client is None:
+            client = ECourtClient(pause=float(os.environ.get("ECOURT_PAUSE", "1.2")))
+        return client
+
     rows = []
     total = len(notices)
+    catalog = listings_catalog or {}
     for index, notice in enumerate(notices, 1):
+        reuse = should_reuse_local_case(
+            docs_dir,
+            notice.case_number,
+            reuse_local=reuse_local,
+            refresh_cases=refresh_cases,
+        )
         _progress(
             "ecourt",
-            f"eCourt {index}/{total}: {notice.case_number or 'no case number'}",
+            (
+                f"Reusing on-disk {notice.case_number} (skip court)"
+                if reuse
+                else f"eCourt {index}/{total}: {notice.case_number or 'no case number'}"
+            ),
             ecourt_index=index,
             ecourt_total=total,
             case_number=notice.case_number,
         )
-        portal = {"found": False}
-        if notice.case_number:
+        portal: dict = {"found": False}
+        if reuse:
+            portal = {
+                "found": True,
+                "reused_local": True,
+                "court_fetch": False,
+                "case_number": notice.case_number,
+            }
+            overlay_prior_listing(portal, catalog.get(notice.case_number))
+            print(f"Skipping court portal {notice.case_number}: complete local copy", flush=True)
+        elif notice.case_number:
             try:
-                portal = client.enrich(notice.case_number, year=year)
+                portal = _client().enrich(notice.case_number, year=year)
             except requests.RequestException as exc:
                 portal = {"found": False, "error": str(exc), "case_number": notice.case_number}
-        if not isinstance(portal, dict):
-            portal = {
-                "found": False,
-                "case_number": notice.case_number,
-                "error": "empty_portal",
-            }
-        if docs_dir and notice.case_number:
-            case_dir = docs_dir / re.sub(r"[^\w\-]+", "_", notice.case_number)
-            safe = re.sub(r"[^\w\-]+", "_", notice.case_number)
+            if not isinstance(portal, dict):
+                portal = {
+                    "found": False,
+                    "case_number": notice.case_number,
+                    "error": "empty_portal",
+                }
+            portal["court_fetch"] = True
+        if docs_dir and notice.case_number and not reuse:
+            case_dir = case_docs_folder(docs_dir, notice.case_number)
+            safe = case_safe_name(notice.case_number)
             skip_download = portal.get("error") == "ecourt_view_limit"
-            petition_item = None
-            duties_item = None
+            petition_item, duties_item = (None, None)
             if portal.get("found") and not skip_download:
-                for item in portal.get("document_files") or []:
-                    if not item.get("available"):
-                        continue
-                    name = item.get("name") or ""
-                    if looks_like_probate_petition(name) and petition_item is None:
-                        petition_item = item
-                    if looks_like_duties_form(name) and duties_item is None:
-                        duties_item = item
-            de111: dict = {}
-            de147: dict = {}
+                petition_item, duties_item = public_download_items(portal)
             dest111 = case_dir / f"{safe}_DE-111.pdf"
+            dest147 = case_dir / f"{safe}_DE-147.pdf"
             if petition_item and not skip_download:
                 try:
-                    time.sleep(client.pause)
-                    client.download(petition_item["url"], dest111)
+                    time.sleep(_client().pause)
+                    _client().download(petition_item["url"], dest111)
                     portal["petition_url"] = petition_item["url"]
                 except Exception as exc:  # noqa: BLE001
                     portal["petition_parse_error"] = str(exc)
-            if dest111.is_file() and dest111.stat().st_size > 4 and dest111.read_bytes()[:4] == b"%PDF":
-                try:
-                    de111 = parse_de111_pdf(dest111, petitioner=notice.petitioner)
-                    if de111.get("petitioner_name"):
-                        portal["petitioner"] = de111["petitioner_name"]
-                    if de111.get("decedent_name") and not portal.get("decedent"):
-                        portal["decedent"] = de111["decedent_name"]
-                    portal.update(de111)
-                    portal["petition_pdf"] = str(dest111)
-                    print(
-                        f"DE-111 {notice.case_number}: "
-                        f"mailing={de111.get('mailing_address') or '(empty)'} "
-                        f"phone={de111.get('petitioner_phone') or '(empty)'} "
-                        f"residence={de111.get('decedent_residence') or '(empty)'}",
-                        flush=True,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    portal["petition_parse_error"] = str(exc)
-            elif petition_item and dest111.is_file():
-                portal["petition_parse_error"] = "download was not a PDF"
-            dest147 = case_dir / f"{safe}_DE-147.pdf"
+                if dest111.is_file() and not is_valid_pdf(dest111):
+                    portal["petition_parse_error"] = "download was not a PDF"
             if duties_item and not skip_download:
                 try:
-                    time.sleep(client.pause)
-                    client.download(duties_item["url"], dest147)
+                    time.sleep(_client().pause)
+                    _client().download(duties_item["url"], dest147)
                     portal["duties_url"] = duties_item["url"]
                 except Exception as exc:  # noqa: BLE001
                     portal["duties_parse_error"] = str(exc)
-            if dest147.is_file() and dest147.stat().st_size > 4 and dest147.read_bytes()[:4] == b"%PDF":
-                try:
-                    de147 = parse_de147_pdf(dest147)
-                    portal["duties_pdf"] = str(dest147)
-                    print(
-                        f"DE-147 {notice.case_number}: "
-                        f"mailing={de147.get('mailing_address') or '(empty)'} "
-                        f"phone={de147.get('petitioner_phone') or '(empty)'} "
-                        f"email={de147.get('petitioner_email') or '(empty)'}",
-                        flush=True,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    portal["duties_parse_error"] = str(exc)
-            elif duties_item and dest147.is_file():
-                portal["duties_parse_error"] = "download was not a PDF"
-            portal["contact_de111"] = contact_fields(de111)
-            portal["contact_de147"] = contact_fields(de147)
-            contact = merge_petitioner_contact(de111, de147)
-            if contact:
-                portal.update(contact)
-                print(
-                    f"contact {notice.case_number}: "
-                    f"mailing={contact.get('mailing_address') or '(empty)'} "
-                    f"phone={contact.get('petitioner_phone') or '(empty)'} "
-                    f"email={contact.get('petitioner_email') or '(empty)'}",
-                    flush=True,
-                )
+                if dest147.is_file() and not is_valid_pdf(dest147):
+                    portal["duties_parse_error"] = "download was not a PDF"
+        if docs_dir and notice.case_number:
+            apply_stored_petitions(
+                portal,
+                docs_dir=docs_dir,
+                case_number=notice.case_number,
+                petitioner=notice.petitioner,
+                verbose=True,
+            )
         row = asdict(notice)
         merged = {k: v for k, v in portal.items() if v not in (None, "", [], {})}
         if "status" in merged and "court_status" not in merged:
@@ -797,6 +826,8 @@ def enrich_notices(notices: list[Notice], year: int, docs_dir: Path | None = Non
         row["first_seen"] = notice.first_seen
         row["found"] = bool(portal.get("found"))
         row["petition_guess"] = guess_petition(portal, notice)
+        row["court_fetch"] = bool(portal.get("court_fetch"))
+        row["reused_local"] = bool(portal.get("reused_local"))
         if not row.get("filed"):
             row["filed"] = portal.get("filed") or portal.get("filed_from_docket")
         rows.append(row)
@@ -898,6 +929,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Scrape and show one mapped go-case without posting to Follow Up Boss or updating seen state",
     )
+    p.add_argument(
+        "--rescan-local",
+        action="store_true",
+        help="Re-parse on-disk DE-111/DE-147 PDFs only; no CNPA search and no court portal",
+    )
+    p.add_argument(
+        "--refresh-case",
+        action="append",
+        default=[],
+        help="Force a court portal fetch for this case even if a local copy exists",
+    )
     p.add_argument("--env-file", default=".env")
     return p.parse_args()
 
@@ -915,6 +957,138 @@ def load_env_file(path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
+def _finish_fub(
+    args: argparse.Namespace,
+    rows: list[dict],
+    state: dict,
+    state_path: Path,
+    *,
+    source_id: str = "placer",
+) -> int:
+    if args.fub_preview_one:
+        try:
+            from .fub_client import preview_one_record
+        except ImportError:
+            from fub_client import preview_one_record
+
+        _progress("preview", "Previewing one live extract (not posting to Follow Up Boss)…")
+        preview = preview_one_record(
+            rows, mapping_path=state_path.parent / "fub_mapping.yaml"
+        )
+        payload = {
+            "posted": 0,
+            "updated": 0,
+            "skipped": len(preview.get("skips") or []),
+            "error": None,
+            "preview": True,
+            "verify_record": preview.get("verify_record"),
+            "verify_note": preview.get("verify_note"),
+        }
+        if source_id == "sacramento":
+            payload["source_id"] = "sacramento"
+        (state_path.parent / "fub_last.json").write_text(
+            json.dumps(payload, indent=2),
+            encoding="utf-8",
+        )
+        print("\nPreview only: Follow Up Boss not updated, seen-cases not updated.")
+        _progress(
+            "done",
+            "Preview finished (Follow Up Boss not updated).",
+            fub_posted=0,
+            fub_updated=0,
+            fub_skipped=len(preview.get("skips") or []),
+        )
+        return 0
+    if args.dry_run:
+        print("\nDry run: state and email not written.")
+        return 0
+    save_state(state_path, state)
+    try:
+        from .fub_client import export_new_leads
+    except ImportError:
+        from fub_client import export_new_leads
+
+    _progress("fub", "Importing go-cases into Follow Up Boss…")
+    fub_summary = export_new_leads(
+        rows, state, mapping_path=state_path.parent / "fub_mapping.yaml"
+    )
+    posted = int(fub_summary.get("posted") or 0)
+    updated = int(fub_summary.get("updated") or 0)
+    skipped = int(fub_summary.get("skipped") or 0)
+    _progress(
+        "fub_done",
+        f"Follow Up Boss: posted {posted}, updated {updated}, skipped {skipped}.",
+        fub_posted=posted,
+        fub_updated=updated,
+        fub_skipped=skipped,
+    )
+    save_state(state_path, state)
+    sidecar = {
+        "posted": fub_summary.get("posted"),
+        "updated": fub_summary.get("updated"),
+        "skipped": fub_summary.get("skipped"),
+        "error": fub_summary.get("error"),
+        "verify_case": fub_summary.get("verify_case"),
+        "verify_person_id": fub_summary.get("verify_person_id"),
+        "verify_record": fub_summary.get("verify_record"),
+        "verify_note": fub_summary.get("verify_note"),
+        "skips": fub_summary.get("skips") or [],
+    }
+    if source_id == "sacramento":
+        sidecar["source_id"] = "sacramento"
+    (state_path.parent / "fub_last.json").write_text(
+        json.dumps(sidecar, indent=2),
+        encoding="utf-8",
+    )
+    return 1  # continue to email unless caller stops
+
+
+def _run_rescan_local(args: argparse.Namespace, root: Path) -> int:
+    try:
+        from .datasources import rescan_local_rows, stamp_fub_tags
+    except ImportError:
+        from datasources import rescan_local_rows, stamp_fub_tags
+
+    state_path = Path(args.state_file)
+    if not state_path.is_absolute():
+        state_path = (root / args.state_file).resolve()
+    else:
+        state_path = state_path.resolve()
+    state = load_state(state_path)
+    os.environ.setdefault("PPM_PROGRESS_PATH", str(state_path.parent / "job_progress.json"))
+    out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = root / args.out_dir
+    docs_dir = out_dir / "docs"
+    run_date = today_local().isoformat()
+    listings_path = state_path.parent / "listings.json"
+    catalog = _read_listings_catalog(listings_path)
+    _progress(
+        "rescan",
+        f"Re-parsing on-disk Placer PDFs in {docs_dir} (no CNPA, no court)…",
+    )
+    rows = rescan_local_rows("placer", docs_dir, listings_catalog=catalog)
+    rows = stamp_fub_tags(rows, "Placer")
+    merge_listings(listings_path, rows, run_date)
+    print(
+        f"Placer local rescan — {run_date} — 0 new / {len(rows)} unique",
+        flush=True,
+    )
+    _progress(
+        "cnpa_done",
+        f"Local rescan found {len(rows)} on-disk cases.",
+        notices=len(rows),
+        notice_count=len(rows),
+        new_count=0,
+    )
+    result = _finish_fub(args, rows, state, state_path, source_id="placer")
+    if result == 0:
+        return 0
+    _progress("done", f"Placer local rescan finished. Cases {len(rows)}.")
+    print(f"\nSaved state to {state_path}. Email skipped (local rescan).")
+    return 0
+
+
 def main() -> int:
     args = parse_args()
     if hasattr(sys.stdout, "reconfigure"):
@@ -928,6 +1102,8 @@ def main() -> int:
         os.environ["FUB_PREVIEW_ONE"] = "1"
     if args.fub_verify_one:
         os.environ["FUB_VERIFY_ONLY"] = "1"
+    if args.rescan_local:
+        return _run_rescan_local(args, root)
 
     start, end = default_window(args.lookback_days, args.lookahead_days)
     try:
@@ -972,7 +1148,25 @@ def main() -> int:
             f"Looking up {len(unique)} cases on Placer eCourt Public…",
             ecourt_total=len(unique),
         )
-        rows = enrich_notices(unique, year=start.year, docs_dir=out_dir / "docs")
+        try:
+            from .datasources import preview_refresh_case
+        except ImportError:
+            from datasources import preview_refresh_case
+
+        docs_dir = out_dir / "docs"
+        refresh_cases = [str(item).strip() for item in (args.refresh_case or []) if str(item).strip()]
+        if args.fub_preview_one:
+            pick = preview_refresh_case(unique, docs_dir)
+            if pick and pick not in refresh_cases:
+                refresh_cases.append(pick)
+        rows = enrich_notices(
+            unique,
+            year=start.year,
+            docs_dir=docs_dir,
+            reuse_local=True,
+            refresh_cases=refresh_cases,
+            listings_catalog=_read_listings_catalog(state_path.parent / "listings.json"),
+        )
         (out_dir / f"dossiers-{stamp}.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
     else:
         _progress("ecourt_skip", "Skipping eCourt lookups.")

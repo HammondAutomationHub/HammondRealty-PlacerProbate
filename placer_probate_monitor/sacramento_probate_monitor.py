@@ -25,7 +25,7 @@ from pathlib import Path
 import requests
 
 try:
-    from .datasources import petition_docs_dir, stamp_fub_tags
+    from .datasources import petition_docs_dir, rescan_local_rows, stamp_fub_tags
     from .placer_probate_monitor import (
         Notice,
         build_html,
@@ -44,11 +44,13 @@ try:
         send_email,
         today_local,
         write_outputs,
+        _finish_fub,
         _progress,
+        _read_listings_catalog,
         get_tz,
     )
 except ImportError:
-    from datasources import petition_docs_dir, stamp_fub_tags
+    from datasources import petition_docs_dir, rescan_local_rows, stamp_fub_tags
     from placer_probate_monitor import (
         Notice,
         build_html,
@@ -67,13 +69,16 @@ except ImportError:
         send_email,
         today_local,
         write_outputs,
+        _finish_fub,
         _progress,
+        _read_listings_catalog,
         get_tz,
     )
 
 COUNTY = "Sacramento"
 KEYWORDS = '"NOTICE OF PETITION"'
 SAC_CASE_RE = re.compile(r"\b(\d{2})PR(\d{3,8})\b", re.I)
+SAC_COURT_RE = re.compile(r"COUNTY OF\s+SACRAMENTO", re.I)
 LEGACY_CASE_RE = re.compile(r"\b34-\d{4}-\d{5,8}\b")
 SOURCE_NOTE = (
     "Sources: capublicnotice.com keyword search in Sacramento County "
@@ -97,6 +102,77 @@ def portal_pause_seconds() -> float:
         return float(raw)
     except (TypeError, ValueError):
         return 1.2
+
+
+def is_sacramento_court_notice(notice: Notice) -> bool:
+    """True when the published notice names Sacramento Superior Court."""
+    court = re.sub(r"\s+", " ", str(notice.court_county or "")).strip().upper()
+    if court.startswith("SACRAMENTO"):
+        return True
+    blob = " ".join(
+        part for part in (notice.raw_text, notice.snippet, notice.court_county) if part
+    )
+    return bool(SAC_COURT_RE.search(blob))
+
+
+def collect_sacramento_cnpa_notices(
+    start,
+    end,
+    *,
+    max_pages: int | None = None,
+) -> tuple[list[Notice], list[str], set[str]]:
+    """Newspaper-county search plus an unscoped CNPA pass.
+
+    CNPA ``county=Sacramento`` is the *newspaper's* county, not the court.
+    That query is only one page of ads. A second pass omits ``county`` so
+    Sacramento court petitions printed in other papers are not dropped, then
+    callers keep those after hydrate via ``keep_sacramento_notices``.
+    """
+    if max_pages is None:
+        max_pages = int(os.environ.get("PROBATE_MAX_PAGES", "10"))
+    scoped, urls_a = paginate(
+        start,
+        end,
+        county=COUNTY,
+        keywords=KEYWORDS,
+        case_extractor=extract_sacramento_case,
+        max_pages=max_pages,
+    )
+    open_cap = max(int(max_pages), 80)
+    unscoped, urls_b = paginate(
+        start,
+        end,
+        county="",
+        keywords=KEYWORDS,
+        case_extractor=extract_sacramento_case,
+        max_pages=open_cap,
+    )
+    scoped_keys = {notice.case_number or notice.advert_id for notice in scoped}
+    merged = list(scoped)
+    seen = set(scoped_keys)
+    for notice in unscoped:
+        key = notice.case_number or notice.advert_id
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(notice)
+    print(
+        f"CNPA Sacramento newspaper-county ads {len(scoped)}; "
+        f"unscoped extra cards {len(unscoped)}.",
+        flush=True,
+    )
+    return merged, urls_a + urls_b, scoped_keys
+
+
+def keep_sacramento_notices(
+    notices: list[Notice], scoped_keys: set[str]
+) -> list[Notice]:
+    kept: list[Notice] = []
+    for notice in notices:
+        key = notice.case_number or notice.advert_id
+        if key in scoped_keys or is_sacramento_court_notice(notice):
+            kept.append(notice)
+    return kept
 
 
 def extract_sacramento_case(text: str) -> str:
@@ -152,103 +228,120 @@ def _petition_docs_dir(out_dir: Path | None = None) -> Path:
     return petition_docs_dir("sacramento", out_dir=out_dir)
 
 
-def enrich_notices(notices: list[Notice], docs_dir: Path | None = None) -> list[dict]:
+def enrich_notices(
+    notices: list[Notice],
+    docs_dir: Path | None = None,
+    *,
+    reuse_local: bool = True,
+    refresh_cases: list[str] | None = None,
+    listings_catalog: dict | None = None,
+) -> list[dict]:
     try:
-        from .petition_parse import (
-            contact_fields,
-            looks_like_duties_form,
-            looks_like_probate_petition,
-            merge_petitioner_contact,
-            parse_de111_pdf,
-            parse_de147_pdf,
+        from .datasources import (
+            apply_stored_petitions,
+            case_docs_folder,
+            case_safe_name,
+            is_valid_pdf,
+            overlay_prior_listing,
+            public_download_items,
+            should_reuse_local_case,
         )
         from .sacramento_portal import SacramentoPortal
     except ImportError:
-        from petition_parse import (
-            contact_fields,
-            looks_like_duties_form,
-            looks_like_probate_petition,
-            merge_petitioner_contact,
-            parse_de111_pdf,
-            parse_de147_pdf,
+        from datasources import (
+            apply_stored_petitions,
+            case_docs_folder,
+            case_safe_name,
+            is_valid_pdf,
+            overlay_prior_listing,
+            public_download_items,
+            should_reuse_local_case,
         )
         from sacramento_portal import SacramentoPortal
 
-    client = SacramentoPortal(pause=portal_pause_seconds())
+    client = None
+
+    def _client() -> SacramentoPortal:
+        nonlocal client
+        if client is None:
+            client = SacramentoPortal(pause=portal_pause_seconds())
+        return client
+
     rows = []
     total = len(notices)
+    catalog = listings_catalog or {}
     for index, notice in enumerate(notices, 1):
+        reuse = should_reuse_local_case(
+            docs_dir,
+            notice.case_number,
+            reuse_local=reuse_local,
+            refresh_cases=refresh_cases,
+        )
         _progress(
             "ecourt",
-            f"Sacramento portal {index} of {total}: {notice.case_number or 'no case'}…",
+            (
+                f"Reusing on-disk {notice.case_number} (skip court)"
+                if reuse
+                else f"Sacramento portal {index} of {total}: {notice.case_number or 'no case'}…"
+            ),
             ecourt_total=total,
             ecourt_index=index,
         )
-        portal = {"found": False}
-        if notice.case_number:
+        portal: dict = {"found": False}
+        if reuse:
+            portal = {
+                "found": True,
+                "reused_local": True,
+                "court_fetch": False,
+                "case_number": notice.case_number,
+            }
+            overlay_prior_listing(portal, catalog.get(notice.case_number))
+            print(f"Skipping court portal {notice.case_number}: complete local copy", flush=True)
+        elif notice.case_number:
             try:
-                portal = client.enrich(notice.case_number)
+                portal = _client().enrich(notice.case_number)
             except requests.RequestException as exc:
                 portal = {
                     "found": False,
                     "error": str(exc),
                     "case_number": notice.case_number,
                 }
-        if docs_dir and notice.case_number:
-            case_dir = docs_dir / re.sub(r"[^\w\-]+", "_", notice.case_number)
-            safe = re.sub(r"[^\w\-]+", "_", notice.case_number)
-            skip_download = not client.logged_in
-            petition_item = None
-            duties_item = None
+            portal["court_fetch"] = True
+        if docs_dir and notice.case_number and not reuse:
+            case_dir = case_docs_folder(docs_dir, notice.case_number)
+            safe = case_safe_name(notice.case_number)
+            skip_download = not _client().logged_in
+            petition_item, duties_item = (None, None)
             if portal.get("found") and not skip_download:
-                for item in portal.get("document_files") or []:
-                    if not item.get("available"):
-                        continue
-                    name = item.get("name") or ""
-                    if looks_like_probate_petition(name) and petition_item is None:
-                        petition_item = item
-                    if looks_like_duties_form(name) and duties_item is None:
-                        duties_item = item
-            de111: dict = {}
-            de147: dict = {}
+                petition_item, duties_item = public_download_items(portal)
             dest111 = case_dir / f"{safe}_DE-111.pdf"
+            dest147 = case_dir / f"{safe}_DE-147.pdf"
             if petition_item and petition_item.get("url") and not skip_download:
                 try:
-                    time.sleep(client.pause)
-                    client.download(petition_item["url"], dest111)
+                    time.sleep(_client().pause)
+                    _client().download(petition_item["url"], dest111)
                     portal["petition_url"] = petition_item["url"]
                 except Exception as exc:  # noqa: BLE001
                     portal["petition_parse_error"] = str(exc)
-            if dest111.is_file() and dest111.stat().st_size > 4 and dest111.read_bytes()[:4] == b"%PDF":
-                try:
-                    de111 = parse_de111_pdf(dest111, petitioner=notice.petitioner)
-                    if de111.get("petitioner_name"):
-                        portal["petitioner"] = de111["petitioner_name"]
-                    if de111.get("decedent_name") and not portal.get("decedent"):
-                        portal["decedent"] = de111["decedent_name"]
-                    portal.update(de111)
-                    portal["petition_pdf"] = str(dest111)
-                except Exception as exc:  # noqa: BLE001
-                    portal["petition_parse_error"] = str(exc)
-            dest147 = case_dir / f"{safe}_DE-147.pdf"
+                if dest111.is_file() and not is_valid_pdf(dest111):
+                    portal["petition_parse_error"] = "download was not a PDF"
             if duties_item and duties_item.get("url") and not skip_download:
                 try:
-                    time.sleep(client.pause)
-                    client.download(duties_item["url"], dest147)
+                    time.sleep(_client().pause)
+                    _client().download(duties_item["url"], dest147)
                     portal["duties_url"] = duties_item["url"]
                 except Exception as exc:  # noqa: BLE001
                     portal["duties_parse_error"] = str(exc)
-            if dest147.is_file() and dest147.stat().st_size > 4 and dest147.read_bytes()[:4] == b"%PDF":
-                try:
-                    de147 = parse_de147_pdf(dest147)
-                    portal["duties_pdf"] = str(dest147)
-                except Exception as exc:  # noqa: BLE001
-                    portal["duties_parse_error"] = str(exc)
-            portal["contact_de111"] = contact_fields(de111)
-            portal["contact_de147"] = contact_fields(de147)
-            contact = merge_petitioner_contact(de111, de147)
-            if contact:
-                portal.update(contact)
+                if dest147.is_file() and not is_valid_pdf(dest147):
+                    portal["duties_parse_error"] = "download was not a PDF"
+        if docs_dir and notice.case_number:
+            apply_stored_petitions(
+                portal,
+                docs_dir=docs_dir,
+                case_number=notice.case_number,
+                petitioner=notice.petitioner,
+                verbose=False,
+            )
         row = asdict(notice)
         note = getattr(notice, "source_note", "") or getattr(notice, "extra_flag", "")
         merged = {k: v for k, v in portal.items() if v not in (None, "", [], {})}
@@ -262,6 +355,8 @@ def enrich_notices(notices: list[Notice], docs_dir: Path | None = None) -> list[
         row["found"] = bool(portal.get("found"))
         row["petition_guess"] = guess_petition(portal, notice)
         row["source_id"] = "sacramento"
+        row["court_fetch"] = bool(portal.get("court_fetch"))
+        row["reused_local"] = bool(portal.get("reused_local"))
         if not row.get("filed"):
             row["filed"] = portal.get("filed") or portal.get("filed_from_docket")
         if note:
@@ -282,8 +377,63 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-pdf", action="store_true")
     parser.add_argument("--fub-verify-one", action="store_true")
     parser.add_argument("--fub-preview-one", action="store_true")
+    parser.add_argument(
+        "--rescan-local",
+        action="store_true",
+        help="Re-parse on-disk DE-111/DE-147 PDFs only; no CNPA search and no court portal",
+    )
+    parser.add_argument(
+        "--refresh-case",
+        action="append",
+        default=[],
+        help="Force a court portal fetch for this case even if a local copy exists",
+    )
     parser.add_argument("--env-file", default=".env")
     return parser.parse_args()
+
+
+def _run_rescan_local(args: argparse.Namespace, root: Path) -> int:
+    state_path = Path(args.state_file)
+    if not state_path.is_absolute():
+        state_path = (root / args.state_file).resolve()
+    else:
+        state_path = state_path.resolve()
+    state = load_state(state_path)
+    os.environ.setdefault("PPM_PROGRESS_PATH", str(state_path.parent / "job_progress.json"))
+    out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = root / args.out_dir
+    docs_dir = _petition_docs_dir(out_dir)
+    run_date = today_local().isoformat()
+    listings_path = state_path.parent / "listings.json"
+    sac_listings = state_path.parent / "listings_sacramento.json"
+    catalog = _read_listings_catalog(listings_path)
+    catalog.update(_read_listings_catalog(sac_listings))
+    _progress(
+        "rescan",
+        f"Re-parsing on-disk Sacramento PDFs in {docs_dir} (no CNPA, no court)…",
+    )
+    rows = rescan_local_rows("sacramento", docs_dir, listings_catalog=catalog)
+    rows = stamp_fub_tags(rows, COUNTY)
+    merge_listings(listings_path, rows, run_date)
+    merge_listings(sac_listings, rows, run_date)
+    print(
+        f"Sacramento local rescan — {run_date} — 0 new / {len(rows)} unique",
+        flush=True,
+    )
+    _progress(
+        "cnpa_done",
+        f"Local rescan found {len(rows)} on-disk Sacramento cases.",
+        notices=len(rows),
+        notice_count=len(rows),
+        new_count=0,
+    )
+    result = _finish_fub(args, rows, state, state_path, source_id="sacramento")
+    if result == 0:
+        return 0
+    _progress("done", f"Sacramento local rescan finished. Cases {len(rows)}.")
+    print(f"\nSaved state to {state_path}. Email skipped (local rescan).")
+    return 0
 
 
 def main() -> int:
@@ -301,28 +451,32 @@ def main() -> int:
         os.environ["FUB_PREVIEW_ONE"] = "1"
     if args.fub_verify_one:
         os.environ["FUB_VERIFY_ONLY"] = "1"
+    if args.rescan_local:
+        return _run_rescan_local(args, root)
 
     start, end = default_window(args.lookback_days, args.lookahead_days)
     try:
-        notices, urls = paginate(
-            start,
-            end,
-            county=COUNTY,
-            keywords=KEYWORDS,
-            case_extractor=extract_sacramento_case,
-        )
+        notices, urls, scoped_keys = collect_sacramento_cnpa_notices(start, end)
     except requests.RequestException as exc:
         print(f"Fetch failed: {exc}", file=sys.stderr)
         return 2
 
     unique = dedupe(notices)
+    candidates = [
+        notice
+        for notice in unique
+        if (notice.case_number or notice.advert_id) in scoped_keys
+        or "SACRAMENTO"
+        in f"{notice.raw_text} {notice.snippet} {notice.newspaper} {notice.court_county}".upper()
+    ]
     print(
-        f"Opening full advert pages for {sum(1 for n in unique if needs_advert(n))} shortened cards…",
+        f"Opening full advert pages for {sum(1 for n in candidates if needs_advert(n))} shortened cards…",
         flush=True,
     )
-    for notice in unique:
+    for notice in candidates:
         notice.source_note = hydrate_notice(notice)
         notice.extra_flag = notice.source_note
+    unique = keep_sacramento_notices(candidates, scoped_keys)
 
     state_path = Path(args.state_file)
     if not state_path.is_absolute():
@@ -359,7 +513,26 @@ def main() -> int:
         row["source_id"] = "sacramento"
     if not args.skip_portal:
         print("Looking up each case on the Sacramento public portal…", flush=True)
-        rows = enrich_notices(unique, docs_dir=_petition_docs_dir(out_dir))
+        try:
+            from .datasources import preview_refresh_case
+        except ImportError:
+            from datasources import preview_refresh_case
+
+        docs_dir = _petition_docs_dir(out_dir)
+        refresh_cases = [str(item).strip() for item in (args.refresh_case or []) if str(item).strip()]
+        if args.fub_preview_one:
+            pick = preview_refresh_case(unique, docs_dir)
+            if pick and pick not in refresh_cases:
+                refresh_cases.append(pick)
+        catalog = _read_listings_catalog(state_path.parent / "listings.json")
+        catalog.update(_read_listings_catalog(state_path.parent / "listings_sacramento.json"))
+        rows = enrich_notices(
+            unique,
+            docs_dir=docs_dir,
+            reuse_local=True,
+            refresh_cases=refresh_cases,
+            listings_catalog=catalog,
+        )
         (out_dir / f"sacramento-dossiers-{stamp}.json").write_text(
             json.dumps(rows, indent=2), encoding="utf-8"
         )

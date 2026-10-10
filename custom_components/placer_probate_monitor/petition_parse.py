@@ -919,6 +919,9 @@ def looks_like_probate_petition(name: str) -> bool:
 
 def looks_like_duties_form(name: str) -> bool:
     low = (name or "").lower()
+    compact = re.sub(r"[^a-z0-9]", "", low)
+    if "de147s" in compact:
+        return False
     if "de-147" in low or "de147" in low:
         return True
     return "duties" in low and "personal representative" in low

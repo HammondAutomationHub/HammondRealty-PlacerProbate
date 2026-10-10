@@ -290,6 +290,7 @@ def run_job(
     *,
     verify_one: bool = False,
     preview_one: bool = False,
+    rescan_local: bool = False,
 ) -> dict:
     if not _run_lock.acquire(blocking=False):
         return {"ok": False, "error": "A run is already in progress."}
@@ -316,13 +317,17 @@ def run_job(
         "--out-dir",
         str(reports_dir()),
     ]
-    if preview_one or verify_one or not settings.get("send_email"):
+    if preview_one or verify_one or rescan_local or not settings.get("send_email"):
         cmd.append("--no-email")
-    if settings.get("skip_portal"):
+    if settings.get("skip_portal") and not rescan_local:
         cmd.append("--skip-portal")
-    if preview_one or not settings.get("generate_pdf"):
+    if preview_one or rescan_local or not settings.get("generate_pdf"):
         cmd.append("--no-pdf")
-    if preview_one:
+    if rescan_local:
+        cmd.append("--rescan-local")
+        if verify_one or settings.get("fub_verify_only"):
+            cmd.append("--fub-verify-one")
+    elif preview_one:
         cmd.append("--fub-preview-one")
     elif verify_one or settings.get("fub_verify_only"):
         cmd.append("--fub-verify-one")
@@ -469,6 +474,15 @@ def api_verify_fub():
 @app.post("/api/preview-one")
 def api_preview_one():
     result = run_job("preview_one", preview_one=True)
+    code = 200 if result.get("ok") else 409 if "already" in str(result.get("error") or "") else 500
+    if result.get("ok"):
+        code = 200
+    return jsonify(result), code
+
+
+@app.post("/api/rescan-local")
+def api_rescan_local():
+    result = run_job("rescan_local", rescan_local=True)
     code = 200 if result.get("ok") else 409 if "already" in str(result.get("error") or "") else 500
     if result.get("ok"):
         code = 200

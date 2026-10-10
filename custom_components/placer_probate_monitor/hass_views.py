@@ -58,7 +58,7 @@ from .fub_client import (
     sources_payload,
 )
 
-PANEL_JS_VERSION = "1.3.71"
+PANEL_JS_VERSION = "1.3.73"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -595,6 +595,18 @@ class JobView(HomeAssistantView):
                     {
                         "fub_preview_one": True,
                         CONF_FUB_VERIFY_ONLY: False,
+                        CONF_SEND_EMAIL: False,
+                        CONF_GENERATE_PDF: False,
+                        **extra,
+                    },
+                )
+            )
+        elif action == "rescan":
+            self.hass.async_create_task(
+                runner(
+                    "rescan_local",
+                    {
+                        "rescan_local": True,
                         CONF_SEND_EMAIL: False,
                         CONF_GENERATE_PDF: False,
                         **extra,
