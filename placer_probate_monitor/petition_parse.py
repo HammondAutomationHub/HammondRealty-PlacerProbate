@@ -165,7 +165,32 @@ ITEM2B_NAME_RE = re.compile(
     r"\bb\.\s*\(\s*name\s*\)\s*:?\s*(?P<name>.+?)\s+be\s+appointed",
     re.I | re.S,
 )
-PROFESSIONAL_FIDUCIARY_RE = re.compile(r"professional\s+fiduciary", re.I)
+# TEMP: also skip Public Administrator / Public Guardian / Licensed PF / PF # on item 2.b
+PROFESSIONAL_FIDUCIARY_RE = re.compile(
+    r"licensed\s+professional\s+fiduciary|"
+    r"professional\s+fiduciary|"
+    r"public\s+administrator|"
+    r"public\s+guardian|"
+    r"\bpf\s*(?:#|no\.?|number)\s*\d*|"
+    r"fiduciary\s*(?:license|lic\.?|#)\s*\d*",
+    re.I,
+)
+POBOX_OCR_RE = re.compile(r"P\.\s*[O0]\.\s*Box", re.I)
+POBOX_ADDR_RE = re.compile(
+    rf"(?P<street>P\.O\.\s*Box\s+\d+)\s*,\s*{_ADDR_TAIL}",
+    re.I,
+)
+ITEM8_ROW_RE = re.compile(
+    r"(?P<name>[A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){0,5})"
+    r"(?:\s*,?\s*(?:son|daughter|spouse|wife|husband|child|mother|father|"
+    r"brother|sister|friend|niece|nephew|grandchild|cousin|partner|parent)s?)?"
+    r"\s+(?:Adult|Minor|\d{1,3})\s+"
+    r"(?P<street>(?:P\.O\.\s*Box\s+\d+|\d[\dA-Za-z.'#/\- ]{1,80}?))"
+    r"(?:\s*\n\s*|\s*,\s*)"
+    r"(?P<cityline>[A-Za-z][A-Za-z .'-]+,\s*(?:[A-Z]{2}|[A-Za-z]{3,})\s*,?\s*"
+    r"\d{5}(?:-\d{4})?)",
+    re.I,
+)
 ITEM8_RE = re.compile(
     r"8\.\s*Name and relationship to decedent(?P<header>.{0,500}?)Address(?P<body>.+?)"
     r"(?:Continued on Attachment 8|Number of pages attached|"
@@ -245,10 +270,15 @@ def _state_code(raw: str) -> str:
 def split_de111_address(line: str) -> dict:
     """Parse DE-111 §3c lines like '1728 6th Street, Lincoln, Placer County, California 95648'."""
     text = re.sub(r"[ \t]+", " ", (line or "").replace("\n", " ")).strip(" .")
+    text = POBOX_OCR_RE.sub("P.O. Box", text)
     text = re.sub(r"\s+,", ",", text)
     if not text:
         return {}
-    match = ITEM3C_ADDR_RE.search(text) or US_LINE_RE.search(text)
+    match = (
+        POBOX_ADDR_RE.search(text)
+        or ITEM3C_ADDR_RE.search(text)
+        or US_LINE_RE.search(text)
+    )
     if not match:
         stripped = _strip_county_noise(text)
         match = ITEM3C_ADDR_RE.search(stripped) or US_LINE_RE.search(stripped)
@@ -325,6 +355,8 @@ def extract_pdf_text(path: Path) -> str:
 
 
 def _address_from_groups(street: str, city: str, state: str, zipp: str, *, prefix: str) -> dict:
+    street = POBOX_OCR_RE.sub("P.O. Box", street or "")
+    street = re.sub(r"\b(?:Adult|Minor|Age)\b", " ", street, flags=re.I)
     street = re.sub(r"\s+", " ", street).strip(" ,.")
     city = _usable_city(city)
     if not street or not city or city.lower() in {"road", "street", "lane", "drive", "way", "court"}:
@@ -470,21 +502,41 @@ def _item2b_name(text: str) -> str:
     if not match:
         return ""
     name = re.sub(r"\s+", " ", match.group("name")).strip(" :.")
-    name = re.split(
+    placeholders = (
+        (r"licensed\s+professional\s+fiduciary", "\x00LICPF\x00"),
+        (r"professional\s+fiduciary", "\x00PF\x00"),
+        (r"public\s+administrator", "\x00PUBADMIN\x00"),
+        (r"public\s+guardian", "\x00PUBGUARD\x00"),
+    )
+    protected = name
+    for pattern, token in placeholders:
+        protected = re.sub(pattern, token, protected, flags=re.I)
+    protected = re.split(
         r"\b(?:\(\s*1\s*\)|executor|administrator with|administrator\b)",
-        name,
+        protected,
         maxsplit=1,
         flags=re.I,
-    )[0].strip(" :.,")
+    )[0]
+    restore = {
+        "\x00LICPF\x00": "Licensed Professional Fiduciary",
+        "\x00PF\x00": "Professional Fiduciary",
+        "\x00PUBADMIN\x00": "Public Administrator",
+        "\x00PUBGUARD\x00": "Public Guardian",
+    }
+    for token, label in restore.items():
+        protected = protected.replace(token, label)
+    name = protected.strip(" :.,")
     if len(name) > 160:
         return name[:160]
     return name
 
 
 def is_professional_fiduciary_item2(text: str) -> bool:
-    """True when DE-111 item 2.b (or the same person on item 2 names) is a professional fiduciary.
+    """True when DE-111 item 2.b (or the same person on item 2 names) is a skip office.
 
-    Attorney-caption text is ignored unless it is also the item 2.b / petitioner name.
+    TEMP: Professional Fiduciary, Licensed Professional Fiduciary / PF #,
+    Public Administrator, or Public Guardian. Attorney-caption text is ignored
+    unless it is also the item 2.b / petitioner name.
     """
     section = _item2_section(text)
     if not section:
@@ -545,7 +597,11 @@ def _iter_us_addresses(blob: str, *, prefix: str) -> list[dict]:
     seen: set[str] = set()
     search_from = 0
     while True:
-        hit = ITEM3C_ADDR_RE.search(blob, search_from) or US_LINE_RE.search(blob, search_from)
+        hit = (
+            POBOX_ADDR_RE.search(blob, search_from)
+            or ITEM3C_ADDR_RE.search(blob, search_from)
+            or US_LINE_RE.search(blob, search_from)
+        )
         if not hit:
             break
         search_from = hit.end()
@@ -577,27 +633,78 @@ def _item8_people(header: str) -> list[str]:
     return people
 
 
+def _normalize_item8_blob(blob: str) -> str:
+    """Join street / city ZIP line-breaks and strip DE-111 Age-column crumbs."""
+    text = POBOX_OCR_RE.sub("P.O. Box", blob or "")
+    text = re.sub(
+        rf"((?:P\.O\.\s*Box\s+\d+|\d[^\n]{{0,80}}{ROAD}{UNIT}?\.?))\s*\n\s*(?=[A-Za-z])",
+        r"\1, ",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\b(?:Adult|Minor)\b", " ", text, flags=re.I)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text
+
+
+def _item8_table_rows(body: str) -> list[tuple[str, dict]]:
+    blob = POBOX_OCR_RE.sub("P.O. Box", body or "")
+    rows: list[tuple[str, dict]] = []
+    for match in ITEM8_ROW_RE.finditer(blob):
+        street = re.sub(r"\s+", " ", match.group("street")).strip(" ,.")
+        cityline = re.sub(r"\s+", " ", match.group("cityline")).strip(" ,.")
+        parsed = _first_parsed_address(f"{street}, {cityline}", prefix="mailing")
+        if not parsed:
+            parsed = _parse_address(f"{street}, {cityline}", prefix="mailing")
+        if parsed:
+            name = re.sub(r"\s+", " ", match.group("name")).strip(" ,.")
+            rows.append((name, parsed))
+    return rows
+
+
+def _item8_pick_for_petitioner(
+    people_addrs: list[tuple[str, dict]],
+    petitioner_name: str,
+) -> dict:
+    tokens = _name_tokens(petitioner_name)
+    if tokens:
+        first = (petitioner_name.split() or [""])[0].lower()
+        for person, addr in people_addrs:
+            person_tokens = _name_tokens(person)
+            if first and len(first) > 2 and first not in person_tokens:
+                continue
+            if tokens & person_tokens:
+                return addr
+    if len(people_addrs) == 1:
+        return people_addrs[0][1]
+    return {}
+
+
 def _item8_petitioner_address(text: str, petitioner_name: str = "") -> dict:
     match = ITEM8_RE.search(text)
     if not match:
         return {}
     header = match.group("header") or ""
     body = match.group("body") or ""
-    addrs = _iter_us_addresses(body, prefix="mailing")
+    rows = _item8_table_rows(body) or _item8_table_rows(f"{header}\n{body}")
+    picked = _item8_pick_for_petitioner(rows, petitioner_name)
+    if picked:
+        return picked
+    blob = _normalize_item8_blob(body)
+    addrs = _iter_us_addresses(blob, prefix="mailing")
     if not addrs:
         return {}
     tokens = _name_tokens(petitioner_name)
     people = _item8_people(header)
     if tokens and people:
-        for idx, person in enumerate(people):
-            overlap = tokens & _name_tokens(person)
-            first = (petitioner_name.split() or [""])[0].lower()
-            if first and len(first) > 2 and first not in _name_tokens(person):
-                continue
-            if overlap and idx < len(addrs):
-                return addrs[idx]
+        paired = list(zip(people, addrs))
+        picked = _item8_pick_for_petitioner(paired, petitioner_name)
+        if picked:
+            return picked
         if tokens & _name_tokens(header) and addrs:
             return addrs[0]
+        return {}
+    if rows:
         return {}
     return addrs[0]
 

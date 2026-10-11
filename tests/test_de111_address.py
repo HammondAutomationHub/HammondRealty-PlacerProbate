@@ -149,5 +149,68 @@ class De111PdfGoldens(unittest.TestCase):
         self.assertEqual(out.get("death_place"), "Roseville, California")
 
 
+ITEM8_TABLE = """
+2. Petitioner (name each): Victoria Farrell
+requests that
+b. (name): Victoria Farrell be appointed
+(3) x administrator
+and Letters issue upon qualification.
+3. a. Decedent died on (date): 05/31/2026 at (place): Auburn
+8. Name and relationship to decedent Age Address
+Yan Ling Liu spouse Adult 8300 Country Club Lane
+Auburn, CA 95602
+Victoria Farrell daughter Adult 72 Joost Ave.
+San Francisco, CA 94131
+I declare under penalty
+"""
+
+ITEM8_LINEBREAK = """
+2. Petitioner (name each): Crystal Moon
+requests that
+b. (name): Crystal Moon be appointed
+(3) x administrator
+and Letters issue upon qualification.
+3. a. Decedent died on (date): 05/31/2026 at (place): Colfax
+8. Name and relationship to decedent Age Address
+Crystal Ann Moon Adult 1055 Dusty Road
+Colfax, CA 95713
+I declare under penalty
+"""
+
+ITEM8_POBOX_ADULT = """
+2. Petitioner (name each): Jessica L. Palmer
+requests that
+b. (name): Jessica L. Palmer be appointed
+(3) x administrator
+and Letters issue upon qualification.
+3. a. Decedent died on (date): 05/31/2026 at (place): Tahoe
+8. Name and relationship to decedent Age Address
+Jessica L. Palmer, Daughter Adult P. 0. Box 7089, South Lake Tahoe, CA 96158
+I declare under penalty
+"""
+
+
+class Item8MailingTemp(unittest.TestCase):
+    def test_item8_table_picks_petitioner_not_first_heir(self):
+        out = parse_de111_text(ITEM8_TABLE, petitioner_name="Victoria Farrell")
+        self.assertIn("72 Joost", out.get("mailing_address") or "")
+        self.assertNotIn("8300", out.get("mailing_address") or "")
+        self.assertNotIn("Adult", out.get("mailing_address") or "")
+
+    def test_item8_street_linebreak_then_city_zip(self):
+        out = parse_de111_text(ITEM8_LINEBREAK, petitioner_name="Crystal Moon")
+        self.assertIn("1055 Dusty Road", out.get("mailing_address") or "")
+        self.assertIn("Colfax", out.get("mailing_address") or "")
+        self.assertNotIn("Adult", out.get("mailing_address") or "")
+
+    def test_item8_strips_adult_and_ocr_po_box(self):
+        out = parse_de111_text(ITEM8_POBOX_ADULT, petitioner_name="Jessica L. Palmer")
+        mail = out.get("mailing_address") or ""
+        self.assertIn("P.O. Box 7089", mail)
+        self.assertIn("South Lake Tahoe", mail)
+        self.assertNotIn("Adult", mail)
+        self.assertFalse(mail.startswith("5 "))
+
+
 if __name__ == "__main__":
     unittest.main()

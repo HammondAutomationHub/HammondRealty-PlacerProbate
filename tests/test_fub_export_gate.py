@@ -22,6 +22,7 @@ from fub_client import (  # noqa: E402
     person_fingerprint,
     should_skip_unchanged_person,
 )
+from placer_probate_monitor import load_state, save_state  # noqa: E402
 
 PLACER_ROW = {
     "source_id": "placer",
@@ -256,70 +257,106 @@ class FubCreateGateTests(unittest.TestCase):
         loaded.assert_called_once()
 
     def test_deleted_person_id_marked_removed_without_post(self):
-        key = PLACER_ROW["case_number"]
-        state = {
-            "cases": {
-                key: {"fub_person_id": 5120, "fub_fingerprint": "stale-fp"}
-            }
-        }
-        summary, posted, updated, loaded = self._export_with_http(
-            [PLACER_ROW],
-            state,
-            posted_id=5120,
-            live_ok=False,
-        )
-        self.assertEqual(summary["posted"], 0)
-        self.assertEqual(summary["updated"], 0)
-        self.assertEqual(summary["skipped"], 1)
-        self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
-        posted.assert_not_called()
-        updated.assert_not_called()
-        loaded.assert_called_once()
-        rec = state["cases"][key]
-        self.assertTrue(rec["fub_removed"])
-        self.assertEqual(rec["fub_person_id"], 5120)
+        for row in (PLACER_ROW, SACRAMENTO_ROW):
+            with self.subTest(source_id=row["source_id"]):
+                os.environ["FUB_DATA_SOURCE"] = row["source_id"]
+                key = row["case_number"]
+                state = {
+                    "cases": {
+                        key: {"fub_person_id": 5120, "fub_fingerprint": "stale-fp"}
+                    }
+                }
+                summary, posted, updated, loaded = self._export_with_http(
+                    [row],
+                    state,
+                    posted_id=5120,
+                    live_ok=False,
+                )
+                self.assertEqual(summary["posted"], 0)
+                self.assertEqual(summary["updated"], 0)
+                self.assertEqual(summary["skipped"], 1)
+                self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
+                posted.assert_not_called()
+                updated.assert_not_called()
+                loaded.assert_called_once()
+                rec = state["cases"][key]
+                self.assertTrue(rec["fub_removed"])
+                self.assertEqual(rec["fub_person_id"], 5120)
+                self.assertFalse(needs_fub_create(state, key))
 
     def test_put_404_marks_removed_without_post(self):
-        key = PLACER_ROW["case_number"]
-        state = {
-            "cases": {
-                key: {"fub_person_id": 5120, "fub_fingerprint": "stale-fp"}
-            }
-        }
-        summary, posted, updated, loaded = self._export_with_http(
-            [PLACER_ROW],
-            state,
-            posted_id=5120,
-            live_ok=True,
-            put_ok=False,
-        )
-        self.assertEqual(summary["posted"], 0)
-        self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
-        posted.assert_not_called()
-        updated.assert_called_once()
-        loaded.assert_called_once()
-        self.assertTrue(state["cases"][key]["fub_removed"])
+        for row in (PLACER_ROW, SACRAMENTO_ROW):
+            with self.subTest(source_id=row["source_id"]):
+                os.environ["FUB_DATA_SOURCE"] = row["source_id"]
+                key = row["case_number"]
+                state = {
+                    "cases": {
+                        key: {"fub_person_id": 5120, "fub_fingerprint": "stale-fp"}
+                    }
+                }
+                summary, posted, updated, loaded = self._export_with_http(
+                    [row],
+                    state,
+                    posted_id=5120,
+                    live_ok=True,
+                    put_ok=False,
+                )
+                self.assertEqual(summary["posted"], 0)
+                self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
+                posted.assert_not_called()
+                updated.assert_called_once()
+                loaded.assert_called_once()
+                self.assertTrue(state["cases"][key]["fub_removed"])
+                self.assertFalse(needs_fub_create(state, key))
 
     def test_already_removed_skips_without_http(self):
-        key = PLACER_ROW["case_number"]
-        state = {
-            "cases": {
-                key: {
-                    "fub_person_id": 5120,
-                    "fub_removed": True,
-                    "fub_fingerprint": "stale-fp",
+        for row in (PLACER_ROW, SACRAMENTO_ROW):
+            with self.subTest(source_id=row["source_id"]):
+                os.environ["FUB_DATA_SOURCE"] = row["source_id"]
+                key = row["case_number"]
+                state = {
+                    "cases": {
+                        key: {
+                            "fub_person_id": 5120,
+                            "fub_removed": True,
+                            "fub_fingerprint": "stale-fp",
+                        }
+                    }
                 }
-            }
-        }
-        summary, posted, updated, loaded = self._export_with_http(
-            [PLACER_ROW], state, posted_id=5120
-        )
-        self.assertEqual(summary["posted"], 0)
-        self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
-        posted.assert_not_called()
-        updated.assert_not_called()
-        loaded.assert_not_called()
-        self.assertTrue(state["cases"][key]["fub_removed"])
+                summary, posted, updated, loaded = self._export_with_http(
+                    [row], state, posted_id=5120
+                )
+                self.assertEqual(summary["posted"], 0)
+                self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
+                posted.assert_not_called()
+                updated.assert_not_called()
+                loaded.assert_not_called()
+                self.assertTrue(state["cases"][key]["fub_removed"])
+                self.assertFalse(needs_fub_create(state, key))
+
+    def test_seen_cases_files_persist_fub_removed(self):
+        import tempfile
+
+        for filename in ("seen_cases.json", "seen_cases_sacramento.json"):
+            with self.subTest(filename=filename):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / filename
+                    save_state(
+                        path,
+                        {
+                            "cases": {
+                                "S-PR-0014448": {
+                                    "fub_person_id": 5120,
+                                    "fub_removed": True,
+                                    "fub_skip": "fub_removed",
+                                }
+                            }
+                        },
+                    )
+                    loaded = load_state(path)
+                    rec = loaded["cases"]["S-PR-0014448"]
+                    self.assertTrue(rec["fub_removed"])
+                    self.assertEqual(rec["fub_person_id"], 5120)
 
     def test_default_gate_still_requires_mailing(self):
         row = {

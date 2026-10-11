@@ -63,6 +63,34 @@ and Letters issue upon qualification.
 3. a. Decedent died on (date): 05/31/2026 at (place): Residence
 """
 
+PUBLIC_ADMIN_ITEM2 = """
+2. Petitioner (name each): Placer County Public Administrator
+requests that
+a. decedent's will and codicils, if any, be admitted to probate.
+b. (name): Placer County Public Administrator be appointed
+(3) x administrator
+and Letters issue upon qualification.
+3. a. Decedent died on (date): 05/31/2026 at (place): Residence
+"""
+
+PUBLIC_GUARDIAN_ITEM2 = """
+2. Petitioner (name each): Sacramento County Public Guardian
+requests that
+b. (name): Sacramento County Public Guardian be appointed
+(3) x administrator
+and Letters issue upon qualification.
+3. a. Decedent died on (date): 05/31/2026 at (place): Residence
+"""
+
+LICENSED_PF_ITEM2 = """
+2. Petitioner (name each): Jane Roe, Licensed Professional Fiduciary PF #12345
+requests that
+b. (name): Jane Roe, Licensed Professional Fiduciary PF #12345 be appointed
+(3) x administrator
+and Letters issue upon qualification.
+3. a. Decedent died on (date): 05/31/2026 at (place): Residence
+"""
+
 
 def _row(**extra):
     row = {
@@ -96,6 +124,19 @@ class ProfessionalFiduciaryParseTests(unittest.TestCase):
 
     def test_petitioner_line_same_person_as_2b(self):
         out = parse_de111_text(PETITIONER_LINE_SAME_PERSON)
+        self.assertTrue(out.get("professional_fiduciary"))
+
+    def test_item2b_public_administrator(self):
+        out = parse_de111_text(PUBLIC_ADMIN_ITEM2)
+        self.assertIn("Public Administrator", out.get("item2b_name") or "")
+        self.assertTrue(out.get("professional_fiduciary"))
+
+    def test_item2b_public_guardian(self):
+        out = parse_de111_text(PUBLIC_GUARDIAN_ITEM2)
+        self.assertTrue(out.get("professional_fiduciary"))
+
+    def test_item2b_licensed_pf_number(self):
+        out = parse_de111_text(LICENSED_PF_ITEM2)
         self.assertTrue(out.get("professional_fiduciary"))
 
 
