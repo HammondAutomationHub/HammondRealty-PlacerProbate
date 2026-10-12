@@ -59,6 +59,8 @@ from .const import (
     CONF_RECIPIENTS,
     CONF_RUN_ON_START,
     CONF_RUN_TIME,
+    CONF_NEVADA_PORTAL_PASSWORD,
+    CONF_NEVADA_PORTAL_USER,
     CONF_SACRAMENTO_PORTAL_PASSWORD,
     CONF_SACRAMENTO_PORTAL_USER,
     CONF_SEND_EMAIL,
@@ -143,6 +145,12 @@ def apply_env(
     ).strip()
     os.environ["SACRAMENTO_PORTAL_PASSWORD"] = str(
         settings.get(CONF_SACRAMENTO_PORTAL_PASSWORD) or ""
+    )
+    os.environ["NEVADA_PORTAL_USER"] = str(
+        settings.get(CONF_NEVADA_PORTAL_USER) or ""
+    ).strip()
+    os.environ["NEVADA_PORTAL_PASSWORD"] = str(
+        settings.get(CONF_NEVADA_PORTAL_PASSWORD) or ""
     )
     os.environ["FUB_ENABLED"] = "1" if settings.get(CONF_FUB_ENABLED) else "0"
     os.environ["FUB_API_URL"] = str(

@@ -1113,6 +1113,19 @@ def source_window_settings(settings: dict | None, source_id: str = "placer") -> 
     }
 
 
+def apply_nevada_portal_settings(settings: dict, body: dict) -> dict:
+    """Copy Nevada portal login from a sources POST. Blank password keeps saved."""
+    out = dict(settings or {})
+    payload = body or {}
+    if "nevada_portal_user" in payload:
+        out["nevada_portal_user"] = str(payload.get("nevada_portal_user") or "").strip()
+    if "nevada_portal_password" in payload:
+        value = str(payload.get("nevada_portal_password") or "").strip()
+        if value and value not in {"••••••••", "********"}:
+            out["nevada_portal_password"] = value
+    return out
+
+
 def apply_sacramento_source_settings(settings: dict, body: dict) -> dict:
     """Copy Sacramento window fields from a sources POST onto HA options.
 
@@ -1289,6 +1302,13 @@ def sources_payload(settings: dict | None = None) -> dict:
             "sacramento_portal_user": str((settings or {}).get("sacramento_portal_user") or ""),
             "sacramento_portal_password_set": bool(
                 str((settings or {}).get("sacramento_portal_password") or "").strip()
+            ),
+        },
+        "nevada": {
+            "county": "Nevada",
+            "nevada_portal_user": str((settings or {}).get("nevada_portal_user") or ""),
+            "nevada_portal_password_set": bool(
+                str((settings or {}).get("nevada_portal_password") or "").strip()
             ),
         },
         "fields": source_field_catalog("placer"),

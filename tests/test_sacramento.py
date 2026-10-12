@@ -381,6 +381,39 @@ class FubTagTests(unittest.TestCase):
                 else:
                     os.environ[key] = value
 
+    def test_nevada_portal_password_not_echoed(self):
+        from fub_client import apply_nevada_portal_settings, sources_payload
+
+        payload = sources_payload(
+            {
+                "nevada_portal_user": "jason.hammond@gmail.com",
+                "nevada_portal_password": "secret-value",
+            }
+        )
+        nevada = payload["nevada"]
+        self.assertEqual(nevada["nevada_portal_user"], "jason.hammond@gmail.com")
+        self.assertTrue(nevada["nevada_portal_password_set"])
+        self.assertNotIn("nevada_portal_password", nevada)
+
+        kept = apply_nevada_portal_settings(
+            {
+                "nevada_portal_user": "old@example.com",
+                "nevada_portal_password": "keep-me",
+            },
+            {"nevada_portal_user": "new@example.com", "nevada_portal_password": ""},
+        )
+        self.assertEqual(kept["nevada_portal_user"], "new@example.com")
+        self.assertEqual(kept["nevada_portal_password"], "keep-me")
+
+        changed = apply_nevada_portal_settings(
+            {"nevada_portal_password": "keep-me"},
+            {"nevada_portal_password": "next-secret"},
+        )
+        self.assertEqual(changed["nevada_portal_password"], "next-secret")
+        empty = sources_payload({})
+        self.assertFalse(empty["nevada"]["nevada_portal_password_set"])
+        self.assertEqual(empty["nevada"]["nevada_portal_user"], "")
+
 
 class PortalParseTests(unittest.TestCase):
     def test_search_hit(self):

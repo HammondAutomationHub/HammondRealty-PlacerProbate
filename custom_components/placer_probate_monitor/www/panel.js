@@ -776,12 +776,24 @@ class PlacerProbateSourcesPanel extends HTMLElement {
         && this._mapData.mapping.source_mappings[src.id]
         && this._mapData.mapping.source_mappings[src.id].custom_fields) || {});
       const fubFields = this._mapData.fub_custom_fields || [];
+      const nevada = this._data.nevada || {};
+      const nevadaLogin = src.id === "nevada" ? `
+          <h2 style="margin-top:16px;">Court portal login</h2>
+          <p class="ppm-note">Email and password for the Nevada Journal Technologies public portal. Jobs cannot scrape Google reCAPTCHA the way Sacramento scrapes math CAPTCHA. Leave the password blank to keep the saved password. Confidential and Not Viewable filings are never downloaded.</p>
+          <label>Portal email</label>
+          <input id="nevada_portal_user" type="email" autocomplete="username" value="${ppmEsc(nevada.nevada_portal_user || "")}" />
+          <label>Portal password</label>
+          <input id="nevada_portal_password" type="password" autocomplete="new-password" placeholder="${nevada.nevada_portal_password_set ? "unchanged if blank" : ""}" />
+          <p class="ppm-note">${nevada.nevada_portal_password_set ? "A portal password is already saved." : "No portal password saved yet."}</p>
+          <div class="ppm-actions"><button id="save-source" type="button">Save Nevada portal login</button></div>
+      ` : "";
       body.innerHTML = `
         <section class="ppm-card">
           <h2>${ppmEsc(src.name)}</h2>
           <p>${ppmEsc(src.description)}</p>
           ${src.lead_source ? `<div><label>Lead source name</label><input value="${ppmEsc(src.lead_source)}" disabled /></div>` : ""}
           <p class="ppm-note">Import is not live yet. You can still map this source’s future fields to Follow Up Boss custom fields.</p>
+          ${nevadaLogin}
         </section>
         ${ppmGoNoGoCard(ppmSourceGoNoGo(this._data, this._mapData, src.id), src.name)}
         <section class="ppm-card">
@@ -796,6 +808,8 @@ class PlacerProbateSourcesPanel extends HTMLElement {
         </section>`;
       const saveBtn = this._qs("#save-source-map");
       if (saveBtn) saveBtn.addEventListener("click", () => this._saveSourceMap(src.id));
+      const savePortal = this._qs("#save-source");
+      if (savePortal) savePortal.addEventListener("click", () => this._save());
       this._bindExamplePerson();
       const shot = this._qs(".fub-person-shot");
       if (shot && this._fubPerson) shot.innerHTML = ppmPersonSnapshot(this._fubPerson);
@@ -832,6 +846,12 @@ class PlacerProbateSourcesPanel extends HTMLElement {
         sacramento_portal_user: (this._qs("#sacramento_portal_user") || {}).value || "",
         sacramento_portal_password: (this._qs("#sacramento_portal_password") || {}).value || "",
       }
+      : src === "nevada"
+      ? {
+        source_id: "nevada",
+        nevada_portal_user: (this._qs("#nevada_portal_user") || {}).value || "",
+        nevada_portal_password: (this._qs("#nevada_portal_password") || {}).value || "",
+      }
       : {
         source_id: "placer",
         lookback_days: Number(this._qs("#lookback_days").value),
@@ -846,7 +866,14 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       this._data = await this._hass.callApi("POST", "placer_probate_monitor/sources", body);
       this._renderList();
       this._renderBody();
-      this._flash(src === "sacramento" ? "Sacramento import settings saved." : "Placer import settings saved.", true);
+      this._flash(
+        src === "sacramento"
+          ? "Sacramento import settings saved."
+          : src === "nevada"
+            ? "Nevada portal login saved."
+            : "Placer import settings saved.",
+        true,
+      );
     } catch (err) {
       this._flash(ppmText(err), false);
     }

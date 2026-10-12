@@ -45,6 +45,14 @@
           "sacramento_portal_password": "Sacramento portal password"
         }
       },
+      "nevada": {
+        "title": "Nevada court portal",
+        "description": "Optional Journal Technologies login for Nevada County. Username is the portal email. Leave the password blank in options to keep the saved password. Nevada login uses Google reCAPTCHA, not Sacramento’s math CAPTCHA.",
+        "data": {
+          "nevada_portal_user": "Nevada portal email",
+          "nevada_portal_password": "Nevada portal password"
+        }
+      },
       "fub": {
         "title": "Follow Up Boss",
         "description": "CRM connection and verification only. Field mapping is the Follow Up Boss sidebar. County extracts are under Probate sources.",
@@ -114,6 +122,14 @@
           "sacramento_ecourt_pause_seconds": "Portal pause (seconds)",
           "sacramento_portal_user": "Sacramento portal email",
           "sacramento_portal_password": "Sacramento portal password"
+        }
+      },
+      "nevada": {
+        "title": "Nevada court portal",
+        "description": "Optional Journal Technologies login for Nevada County. Username is the portal email. Leave the password blank in options to keep the saved password. Nevada login uses Google reCAPTCHA, not Sacramento’s math CAPTCHA.",
+        "data": {
+          "nevada_portal_user": "Nevada portal email",
+          "nevada_portal_password": "Nevada portal password"
         }
       },
       "fub": {
