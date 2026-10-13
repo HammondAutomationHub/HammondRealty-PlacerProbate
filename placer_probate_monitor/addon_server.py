@@ -60,8 +60,6 @@ DEFAULTS = {
     "fub_verify_only": True,
     "sacramento_portal_user": "",
     "sacramento_portal_password": "",
-    "nevada_portal_user": "",
-    "nevada_portal_password": "",
 }
 
 WEEKDAYS = [
@@ -266,12 +264,6 @@ def apply_env(settings: dict) -> None:
     ).strip()
     os.environ["SACRAMENTO_PORTAL_PASSWORD"] = str(
         settings.get("sacramento_portal_password") or ""
-    )
-    os.environ["NEVADA_PORTAL_USER"] = str(
-        settings.get("nevada_portal_user") or ""
-    ).strip()
-    os.environ["NEVADA_PORTAL_PASSWORD"] = str(
-        settings.get("nevada_portal_password") or ""
     )
     os.environ["FUB_ENABLED"] = "1" if settings.get("fub_enabled") else "0"
     os.environ["FUB_API_URL"] = str(

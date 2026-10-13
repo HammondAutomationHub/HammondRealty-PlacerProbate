@@ -20,13 +20,11 @@ FUB_LEAD_SOURCE = "probate"
 COUNTY_FUB_TAGS = {
     "placer": [FUB_TAG_PROBATE, "placer"],
     "sacramento": [FUB_TAG_PROBATE, "sacramento"],
-    "nevada": [FUB_TAG_PROBATE, "nevada"],
 }
 
 COUNTY_FUB_LEAD_SOURCES = {
     "placer": FUB_LEAD_SOURCE,
     "sacramento": FUB_LEAD_SOURCE,
-    "nevada": FUB_LEAD_SOURCE,
 }
 
 

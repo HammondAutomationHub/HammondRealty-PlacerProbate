@@ -37,8 +37,6 @@ from .const import (
     CONF_SACRAMENTO_ECOURT_PAUSE,
     CONF_SACRAMENTO_LOOKAHEAD_DAYS,
     CONF_SACRAMENTO_LOOKBACK_DAYS,
-    CONF_NEVADA_PORTAL_PASSWORD,
-    CONF_NEVADA_PORTAL_USER,
     CONF_SACRAMENTO_PORTAL_PASSWORD,
     CONF_SACRAMENTO_PORTAL_USER,
     CONF_SEND_EMAIL,
@@ -214,24 +212,6 @@ def _sacramento_schema(defaults: dict) -> vol.Schema:
     )
 
 
-def _nevada_schema(defaults: dict) -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Optional(
-                CONF_NEVADA_PORTAL_USER,
-                default=defaults.get(CONF_NEVADA_PORTAL_USER, ""),
-            ): selector.TextSelector(
-                selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
-            ),
-            vol.Optional(
-                CONF_NEVADA_PORTAL_PASSWORD, default=""
-            ): selector.TextSelector(
-                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
-            ),
-        }
-    )
-
-
 def _go_required_default(defaults: dict) -> list[str]:
     stored = defaults.get(CONF_FUB_GO_REQUIRED_FIELDS)
     if stored is not None:
@@ -313,10 +293,6 @@ def _normalize(user_input: dict[str, Any], previous: dict | None = None) -> dict
         data[CONF_SACRAMENTO_PORTAL_PASSWORD] = previous.get(
             CONF_SACRAMENTO_PORTAL_PASSWORD, ""
         )
-    if not data.get(CONF_NEVADA_PORTAL_PASSWORD) and previous:
-        data[CONF_NEVADA_PORTAL_PASSWORD] = previous.get(
-            CONF_NEVADA_PORTAL_PASSWORD, ""
-        )
     for key in (
         CONF_SMTP_PORT,
         CONF_LOOKBACK_DAYS,
@@ -367,17 +343,9 @@ class PlacerProbateMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_sacramento(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
             self._data = _normalize(user_input, self._data)
-            return await self.async_step_nevada()
-        return self.async_show_form(
-            step_id="sacramento", data_schema=_sacramento_schema(self._data)
-        )
-
-    async def async_step_nevada(self, user_input: dict[str, Any] | None = None):
-        if user_input is not None:
-            self._data = _normalize(user_input, self._data)
             return await self.async_step_fub()
         return self.async_show_form(
-            step_id="nevada", data_schema=_nevada_schema(self._data)
+            step_id="sacramento", data_schema=_sacramento_schema(self._data)
         )
 
     async def async_step_fub(self, user_input: dict[str, Any] | None = None):
@@ -427,18 +395,9 @@ class PlacerProbateMonitorOptionsFlow(config_entries.OptionsFlow):
         defaults = self._defaults()
         if user_input is not None:
             self._data = _normalize(user_input, defaults)
-            return await self.async_step_nevada()
-        return self.async_show_form(
-            step_id="sacramento", data_schema=_sacramento_schema(defaults)
-        )
-
-    async def async_step_nevada(self, user_input: dict[str, Any] | None = None):
-        defaults = self._defaults()
-        if user_input is not None:
-            self._data = _normalize(user_input, defaults)
             return await self.async_step_fub()
         return self.async_show_form(
-            step_id="nevada", data_schema=_nevada_schema(defaults)
+            step_id="sacramento", data_schema=_sacramento_schema(defaults)
         )
 
     async def async_step_fub(self, user_input: dict[str, Any] | None = None):

@@ -38,8 +38,6 @@ from .const import (
     CONF_SACRAMENTO_ECOURT_PAUSE,
     CONF_SACRAMENTO_LOOKAHEAD_DAYS,
     CONF_SACRAMENTO_LOOKBACK_DAYS,
-    CONF_NEVADA_PORTAL_PASSWORD,
-    CONF_NEVADA_PORTAL_USER,
     CONF_SACRAMENTO_PORTAL_PASSWORD,
     CONF_SACRAMENTO_PORTAL_USER,
     CONF_SEND_EMAIL,
@@ -53,7 +51,6 @@ from .datasources import petition_docs_dir
 from .fub_client import (
     inspect_fub_person,
     mapping_payload,
-    apply_nevada_portal_settings,
     apply_sacramento_source_settings,
     fub_go_required_from_settings,
     normalize_fub_go_required_fields,
@@ -65,7 +62,7 @@ from .fub_client import (
     FUB_GO_GATE_FIELDS,
 )
 
-PANEL_JS_VERSION = "1.3.78"
+PANEL_JS_VERSION = "1.3.79"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -356,8 +353,6 @@ class SourcesView(HomeAssistantView):
                     {"error": "Invalid Sacramento lookback, lookahead, or portal pause."},
                     status_code=400,
                 )
-        if source_id == "nevada":
-            merged = apply_nevada_portal_settings(merged, body)
         if source_id in {"", "placer"}:
             for key in SOURCE_KEYS:
                 if key not in body:

@@ -79,7 +79,7 @@
     function renderBody() {
       const src = (data.sources || []).find((item) => item.id === current) || {};
       if (src.status !== "live") {
-        $("source-body").innerHTML = `<section class="card"><h2>${esc(src.name)}</h2><p>${esc(src.description)}</p><p class="note">Not importable yet. Placer is live. Sacramento is next, then Nevada County.</p></section>`;
+        $("source-body").innerHTML = `<section class="card"><h2>${esc(src.name)}</h2><p>${esc(src.description)}</p><p class="note">Not importable yet. Placer and Sacramento are the live sources.</p></section>`;
         return;
       }
       const p = data.placer || {};

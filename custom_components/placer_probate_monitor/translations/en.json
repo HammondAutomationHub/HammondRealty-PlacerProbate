@@ -22,7 +22,7 @@
       },
       "search": {
         "title": "Placer County data source",
-        "description": "Import window for Placer notices. Sacramento and Nevada County will be separate source screens.",
+        "description": "Import window for Placer notices. Sacramento County is a separate source screen.",
         "data": {
           "lookback_days": "Lookback days",
           "lookahead_days": "Lookahead days",
@@ -43,14 +43,6 @@
           "sacramento_ecourt_pause_seconds": "Portal pause (seconds)",
           "sacramento_portal_user": "Sacramento portal email",
           "sacramento_portal_password": "Sacramento portal password"
-        }
-      },
-      "nevada": {
-        "title": "Nevada court portal",
-        "description": "Optional Journal Technologies login for Nevada County. Username is the portal email. Leave the password blank in options to keep the saved password. Nevada login uses Google reCAPTCHA, not Sacramento’s math CAPTCHA.",
-        "data": {
-          "nevada_portal_user": "Nevada portal email",
-          "nevada_portal_password": "Nevada portal password"
         }
       },
       "fub": {
@@ -101,7 +93,7 @@
       },
       "search": {
         "title": "Placer County data source",
-        "description": "Import window for Placer notices. Sacramento and Nevada County will be separate source screens.",
+        "description": "Import window for Placer notices. Sacramento County is a separate source screen.",
         "data": {
           "lookback_days": "Lookback days",
           "lookahead_days": "Lookahead days",
@@ -122,14 +114,6 @@
           "sacramento_ecourt_pause_seconds": "Portal pause (seconds)",
           "sacramento_portal_user": "Sacramento portal email",
           "sacramento_portal_password": "Sacramento portal password"
-        }
-      },
-      "nevada": {
-        "title": "Nevada court portal",
-        "description": "Optional Journal Technologies login for Nevada County. Username is the portal email. Leave the password blank in options to keep the saved password. Nevada login uses Google reCAPTCHA, not Sacramento’s math CAPTCHA.",
-        "data": {
-          "nevada_portal_user": "Nevada portal email",
-          "nevada_portal_password": "Nevada portal password"
         }
       },
       "fub": {

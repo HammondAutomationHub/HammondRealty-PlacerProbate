@@ -879,14 +879,6 @@ SOURCE_GO_NO_GO = {
             "The same Follow Up Boss mapping and Events import path as Placer. Turning this source off does not stop Placer.",
         ],
     },
-    "nevada": {
-        "required": [],
-        "optional": [],
-        "rules": [
-            "Nevada County import is not live. Go/no-go data requirements will be listed here when this county is wired.",
-            "When live, Follow Up Boss tags will be probate plus nevada. Person updates use mergeTags=true so other tags are kept.",
-        ],
-    },
 }
 
 # Gate keys that already exist in gate_reason / SOURCE_GO_NO_GO. Do not invent new ones.
@@ -1041,14 +1033,6 @@ DATA_SOURCES = [
         "extracts": "CNPA notice, Sacramento portal summary, public petition and duties PDFs",
         "lead_source": COUNTY_FUB_LEAD_SOURCES["sacramento"],
     },
-    {
-        "id": "nevada",
-        "name": "Nevada County",
-        "status": "coming_soon",
-        "description": "Queued after Sacramento County.",
-        "extracts": "Not wired yet",
-        "lead_source": COUNTY_FUB_LEAD_SOURCES["nevada"],
-    },
 ]
 
 SOURCE_SETTING_KEYS = [
@@ -1111,19 +1095,6 @@ def source_window_settings(settings: dict | None, source_id: str = "placer") -> 
         "lookahead_days": lookahead,
         "ecourt_pause_seconds": pause,
     }
-
-
-def apply_nevada_portal_settings(settings: dict, body: dict) -> dict:
-    """Copy Nevada portal login from a sources POST. Blank password keeps saved."""
-    out = dict(settings or {})
-    payload = body or {}
-    if "nevada_portal_user" in payload:
-        out["nevada_portal_user"] = str(payload.get("nevada_portal_user") or "").strip()
-    if "nevada_portal_password" in payload:
-        value = str(payload.get("nevada_portal_password") or "").strip()
-        if value and value not in {"••••••••", "********"}:
-            out["nevada_portal_password"] = value
-    return out
 
 
 def apply_sacramento_source_settings(settings: dict, body: dict) -> dict:
@@ -1251,7 +1222,7 @@ def normalize_source_enabled(settings: dict | None = None) -> dict[str, bool]:
     raw = (settings or {}).get("source_enabled") or {}
     if not isinstance(raw, dict):
         raw = {}
-    flags = {"placer": True, "sacramento": False, "nevada": False}
+    flags = {"placer": True, "sacramento": False}
     for key in flags:
         if key in raw:
             flags[key] = bool(raw[key])
@@ -1302,13 +1273,6 @@ def sources_payload(settings: dict | None = None) -> dict:
             "sacramento_portal_user": str((settings or {}).get("sacramento_portal_user") or ""),
             "sacramento_portal_password_set": bool(
                 str((settings or {}).get("sacramento_portal_password") or "").strip()
-            ),
-        },
-        "nevada": {
-            "county": "Nevada",
-            "nevada_portal_user": str((settings or {}).get("nevada_portal_user") or ""),
-            "nevada_portal_password_set": bool(
-                str((settings or {}).get("nevada_portal_password") or "").strip()
             ),
         },
         "fields": source_field_catalog("placer"),

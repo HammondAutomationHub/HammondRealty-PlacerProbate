@@ -224,7 +224,8 @@ class FubTagTests(unittest.TestCase):
 
         self.assertEqual(fub_tags("Placer"), ["probate", "placer"])
         self.assertEqual(fub_tags("sacramento"), ["probate", "sacramento"])
-        self.assertEqual(fub_tags("nevada"), ["probate", "nevada"])
+        with self.assertRaises(ValueError):
+            fub_tags("nevada")
         rows = stamp_fub_tags([{"case_number": "26PR002445"}], "Sacramento")
         self.assertEqual(rows[0]["tags"], ["probate", "sacramento"])
         self.assertIn("probate", rows[0]["tags"])
@@ -233,10 +234,6 @@ class FubTagTests(unittest.TestCase):
         placer = stamp_fub_tags([{"case_number": "S-PR-0014448"}], "placer")
         self.assertEqual(placer[0]["tags"], ["probate", "placer"])
         self.assertEqual(placer[0]["lead_source"], "probate")
-        nevada = stamp_fub_tags([{"case_number": "PR26-00001"}], "nevada")
-        self.assertEqual(nevada[0]["tags"], ["probate", "nevada"])
-        self.assertEqual(nevada[0]["lead_source"], "probate")
-        self.assertEqual(nevada[0]["source_id"], "nevada")
 
     def test_person_tags_and_merge_query(self):
         from fub_client import build_event, build_person, mapping_for_export, put_person
@@ -267,7 +264,7 @@ class FubTagTests(unittest.TestCase):
         self.assertEqual(
             mapping_for_export({}, "sacramento")["lead_source"], "probate"
         )
-        self.assertEqual(mapping_for_export({}, "nevada")["lead_source"], "probate")
+        self.assertEqual(mapping_for_export({}, "nevada")["lead_source"], "")
         self.assertIn("mergeTags=true", inspect.getsource(put_person))
 
     def test_sacramento_url_is_not_rewritten_to_placer(self):
@@ -289,13 +286,13 @@ class FubTagTests(unittest.TestCase):
         names = {item["id"]: item.get("lead_source") for item in DATA_SOURCES}
         self.assertEqual(statuses["placer"], "live")
         self.assertEqual(statuses["sacramento"], "live")
-        self.assertEqual(statuses["nevada"], "coming_soon")
+        self.assertNotIn("nevada", statuses)
         self.assertEqual(names["placer"], "probate")
         self.assertEqual(names["sacramento"], "probate")
-        self.assertEqual(names["nevada"], "probate")
         flags = normalize_source_enabled({})
         self.assertTrue(flags["placer"])
         self.assertFalse(flags["sacramento"])
+        self.assertNotIn("nevada", flags)
         self.assertEqual(enabled_live_sources({}), ["placer"])
         self.assertEqual(
             enabled_live_sources({"source_enabled": {"placer": True, "sacramento": True}}),
@@ -381,38 +378,16 @@ class FubTagTests(unittest.TestCase):
                 else:
                     os.environ[key] = value
 
-    def test_nevada_portal_password_not_echoed(self):
-        from fub_client import apply_nevada_portal_settings, sources_payload
+    def test_nevada_is_not_a_source(self):
+        from fub_client import DATA_SOURCES, sources_payload
 
-        payload = sources_payload(
-            {
-                "nevada_portal_user": "jason.hammond@gmail.com",
-                "nevada_portal_password": "secret-value",
-            }
+        self.assertEqual([item["id"] for item in DATA_SOURCES], ["placer", "sacramento"])
+        payload = sources_payload({})
+        self.assertNotIn("nevada", payload)
+        self.assertNotIn("nevada", payload["source_enabled"])
+        self.assertEqual(
+            [item["id"] for item in payload["sources"]], ["placer", "sacramento"]
         )
-        nevada = payload["nevada"]
-        self.assertEqual(nevada["nevada_portal_user"], "jason.hammond@gmail.com")
-        self.assertTrue(nevada["nevada_portal_password_set"])
-        self.assertNotIn("nevada_portal_password", nevada)
-
-        kept = apply_nevada_portal_settings(
-            {
-                "nevada_portal_user": "old@example.com",
-                "nevada_portal_password": "keep-me",
-            },
-            {"nevada_portal_user": "new@example.com", "nevada_portal_password": ""},
-        )
-        self.assertEqual(kept["nevada_portal_user"], "new@example.com")
-        self.assertEqual(kept["nevada_portal_password"], "keep-me")
-
-        changed = apply_nevada_portal_settings(
-            {"nevada_portal_password": "keep-me"},
-            {"nevada_portal_password": "next-secret"},
-        )
-        self.assertEqual(changed["nevada_portal_password"], "next-secret")
-        empty = sources_payload({})
-        self.assertFalse(empty["nevada"]["nevada_portal_password_set"])
-        self.assertEqual(empty["nevada"]["nevada_portal_user"], "")
 
 
 class PortalParseTests(unittest.TestCase):
