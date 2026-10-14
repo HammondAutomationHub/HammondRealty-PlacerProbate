@@ -47,7 +47,13 @@ from .const import (
     DOMAIN,
     FUB_EVENT_TYPES,
 )
-from .datasources import all_stored_docs_inventory, petition_docs_dir
+from .datasources import (
+    STORED_DOCS_ZIP_URL,
+    all_stored_docs_inventory,
+    build_stored_pdfs_zip,
+    petition_docs_dir,
+    resolve_stored_pdf_file,
+)
 from .fub_client import (
     inspect_fub_person,
     mapping_payload,
@@ -62,7 +68,7 @@ from .fub_client import (
     FUB_GO_GATE_FIELDS,
 )
 
-PANEL_JS_VERSION = "1.3.80"
+PANEL_JS_VERSION = "1.3.81"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -706,7 +712,75 @@ def _stored_docs_payload(hass: HomeAssistant, source_id: str | None) -> dict:
         payload["pdf_count"] = sum(
             int(item.get("pdf_count") or 0) for item in payload["counties"]
         )
+        payload["download_zip"] = f"{STORED_DOCS_ZIP_URL}?source_id={wanted}"
     return payload
+
+
+class StoredDocsZipView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/stored_docs/zip"
+    name = "api:placer_probate_monitor:stored_docs_zip"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        wanted = str(request.query.get("source_id") or "").strip().lower()
+        if wanted and wanted not in {"placer", "sacramento"}:
+            payload, status = _api_error("Unknown data source.")
+            return self.json(payload, status_code=status)
+        source_id = wanted or None
+
+        def _build() -> bytes:
+            return build_stored_pdfs_zip(
+                Path(self.hass.config.path(DOMAIN)), source_id
+            )
+
+        blob = await self.hass.async_add_executor_job(_build)
+        if not blob:
+            payload, status = _api_error("No stored PDFs found.", status=404)
+            return self.json(payload, status_code=status)
+        filename = (
+            f"probate-stored-pdfs-{wanted}.zip"
+            if wanted
+            else "probate-stored-pdfs.zip"
+        )
+        return web.Response(
+            body=blob,
+            content_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+
+class StoredDocsFileView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/stored_docs/file"
+    name = "api:placer_probate_monitor:stored_docs_file"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        source_id = str(request.query.get("source_id") or "").strip().lower()
+        case = str(request.query.get("case") or "").strip()
+        name = str(request.query.get("name") or "").strip()
+        path = await self.hass.async_add_executor_job(
+            resolve_stored_pdf_file,
+            Path(self.hass.config.path(DOMAIN)),
+            source_id,
+            case,
+            name,
+        )
+        if not path:
+            payload, status = _api_error("not found", status=404)
+            return self.json(payload, status_code=status)
+        return FileResponse(
+            path,
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Disposition": f'attachment; filename="{path.name}"',
+            },
+        )
 
 
 class ListingsView(HomeAssistantView):
@@ -801,6 +875,8 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(DutiesPdfView(hass))
     hass.http.register_view(JobView(hass))
     hass.http.register_view(StoredDocsView(hass))
+    hass.http.register_view(StoredDocsZipView(hass))
+    hass.http.register_view(StoredDocsFileView(hass))
     hass.http.register_view(ListingsView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 

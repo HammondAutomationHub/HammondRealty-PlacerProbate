@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,9 +17,12 @@ sys.path.insert(0, str(ROOT / "custom_components" / "placer_probate_monitor"))
 
 from datasources import (  # noqa: E402
     all_stored_docs_inventory,
+    build_stored_pdfs_zip,
     is_de147s_name,
     local_case_complete,
     rescan_local_rows,
+    resolve_stored_pdf_file,
+    safe_extract_stored_zip,
 )
 from fub_client import gate_reason, needs_fub_create, score_stored_rows  # noqa: E402
 from placer_probate_monitor import _finish_stored_test  # noqa: E402
@@ -256,6 +261,59 @@ class StoredDocsInventoryTests(unittest.TestCase):
             self.assertIn(f"{placer}_DE-111.pdf", names)
             self.assertIn(f"{placer}_DE-147.pdf", names)
             self.assertFalse(any("147S" in name.upper() for name in names))
+            self.assertEqual(
+                placer_inv["download_zip"],
+                "/api/placer_probate_monitor/stored_docs/zip?source_id=placer",
+            )
+            self.assertEqual(
+                payload["download_zip"],
+                "/api/placer_probate_monitor/stored_docs/zip",
+            )
+
+    def test_zip_and_file_lookup_skip_de147s_and_traversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            placer = "S-PR-0014195"
+            sac = "26PR001581"
+            _pdf(root / "reports" / "docs" / placer / f"{placer}_DE-111.pdf")
+            _pdf(root / "reports" / "docs" / placer / f"{placer}_DE-147.pdf")
+            _pdf(root / "reports" / "docs" / placer / f"{placer}_DE-147S.pdf")
+            _pdf(root / "reports" / "sacramento" / "docs" / sac / f"{sac}_DE-111.pdf")
+            blob = build_stored_pdfs_zip(root)
+            names = zipfile.ZipFile(io.BytesIO(blob)).namelist()
+            self.assertIn(f"reports/docs/{placer}/{placer}_DE-111.pdf", names)
+            self.assertIn(f"reports/docs/{placer}/{placer}_DE-147.pdf", names)
+            self.assertIn(f"reports/sacramento/docs/{sac}/{sac}_DE-111.pdf", names)
+            self.assertFalse(any("147S" in name.upper() for name in names))
+            placer_only = build_stored_pdfs_zip(root, "placer")
+            placer_names = zipfile.ZipFile(io.BytesIO(placer_only)).namelist()
+            self.assertTrue(all(name.startswith("reports/docs/") for name in placer_names))
+            self.assertEqual(build_stored_pdfs_zip(root / "missing"), b"")
+            found = resolve_stored_pdf_file(
+                root, "placer", placer, f"{placer}_DE-111.pdf"
+            )
+            self.assertIsNotNone(found)
+            self.assertIsNone(
+                resolve_stored_pdf_file(root, "placer", placer, f"{placer}_DE-147S.pdf")
+            )
+            self.assertIsNone(
+                resolve_stored_pdf_file(
+                    root, "placer", placer, f"../{placer}_DE-111.pdf"
+                )
+            )
+            dest = Path(tmp) / "laptop-data"
+            written = safe_extract_stored_zip(blob, dest)
+            self.assertEqual(len(written), 3)
+            self.assertTrue(
+                (dest / "reports" / "docs" / placer / f"{placer}_DE-111.pdf").is_file()
+            )
+            evil = io.BytesIO()
+            with zipfile.ZipFile(evil, "w") as archive:
+                archive.writestr("../secret.pdf", b"%PDF")
+                archive.writestr("reports/docs/ok/ok_DE-111.pdf", b"%PDF-1.4\n%%EOF\n")
+            extracted = safe_extract_stored_zip(evil.getvalue(), dest)
+            self.assertEqual(extracted, ["reports/docs/ok/ok_DE-111.pdf"])
+            self.assertFalse((dest.parent / "secret.pdf").exists())
 
 
 class StoredTestScoreTests(unittest.TestCase):

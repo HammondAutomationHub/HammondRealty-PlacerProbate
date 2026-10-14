@@ -188,12 +188,42 @@ function ppmStoredDocsCard(data, sourceId) {
   const table = rows
     ? `<div class="ppm-table-wrap"><table><thead><tr><th>Case</th><th>Forms</th><th>Files</th></tr></thead><tbody>${rows}</tbody></table></div>`
     : "<p class='ppm-note'>No public petition PDFs in this county folder yet.</p>";
+  const count = county.pdf_count || 0;
   return `<section class="ppm-card" id="stored-docs">
     <h2>Stored PDFs on this Home Assistant</h2>
     <p class="ppm-note">${ppmEsc(hint)}</p>
-    <p class="ppm-note">${ppmEsc(county.ha_path)} · ${county.case_count || 0} case${county.case_count === 1 ? "" : "s"} · ${county.pdf_count || 0} PDF${county.pdf_count === 1 ? "" : "s"}. Laptop copy target: ${ppmEsc(county.laptop_path)}</p>
+    <p class="ppm-note">${ppmEsc(county.ha_path)} · ${county.case_count || 0} case${county.case_count === 1 ? "" : "s"} · ${count} PDF${count === 1 ? "" : "s"}. Laptop copy target: ${ppmEsc(county.laptop_path)}</p>
+    <div class="ppm-actions">
+      <button class="secondary" id="download-stored-zip" type="button"${count ? "" : " disabled"}>Download ${ppmEsc(sourceId)} PDFs as zip</button>
+    </div>
     ${table}
   </section>`;
+}
+
+async function ppmDownloadStoredZip(hass, sourceId) {
+  const token = hass && hass.auth && hass.auth.data && hass.auth.data.access_token;
+  if (!token) throw new Error("Not signed in.");
+  const qs = sourceId ? `?source_id=${encodeURIComponent(sourceId)}` : "";
+  const resp = await fetch(`/api/placer_probate_monitor/stored_docs/zip${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) {
+    let message = `Download failed (${resp.status}).`;
+    try {
+      const payload = await resp.json();
+      message = payload.message || payload.error || message;
+    } catch (_) { /* keep status message */ }
+    throw new Error(message);
+  }
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = sourceId ? `probate-stored-pdfs-${sourceId}.zip` : "probate-stored-pdfs.zip";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function ppmStoredTestCard(st) {
@@ -839,6 +869,8 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       this._qs("#test-stored").addEventListener("click", () => this._testStored(src.id));
       this._qs("#rescan-source").addEventListener("click", () => this._rescan(src.id));
       this._qs("#run-source").addEventListener("click", () => this._run(src.id));
+      const zipBtn = this._qs("#download-stored-zip");
+      if (zipBtn) zipBtn.addEventListener("click", () => this._downloadStoredZip(src.id));
       const saveMap = this._qs("#save-source-map");
       if (saveMap) saveMap.addEventListener("click", () => this._saveSourceMap(src.id));
       this._bindExamplePerson();
@@ -971,6 +1003,18 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       });
       const ok = st.last_result !== "failed" && st.last_result !== "running";
       this._flash(ok ? ppmJobDoneMessage(st) : (ppmText(st.last_error) || `${label} job failed. Check last_run.log.`), ok);
+    } catch (err) {
+      this._flash(ppmText(err), false);
+    }
+  }
+
+  async _downloadStoredZip(sourceId) {
+    const id = sourceId || "placer";
+    const label = id === "sacramento" ? "Sacramento" : "Placer";
+    this._flash(`Downloading stored ${label} PDFs…`, "wait");
+    try {
+      await ppmDownloadStoredZip(this._hass, id);
+      this._flash(`Saved ${label} stored PDFs zip.`, true);
     } catch (err) {
       this._flash(ppmText(err), false);
     }

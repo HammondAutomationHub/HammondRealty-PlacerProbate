@@ -9,8 +9,10 @@ that flag replaces the person's whole tag list.
 
 from __future__ import annotations
 
+import io
 import os
 import re
+import zipfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -415,6 +417,136 @@ def listed_case_pdfs(docs_dir: Path | None, case_number: str) -> list[str]:
     return names
 
 
+STORED_DOCS_RELATIVE = {
+    "placer": "reports/docs",
+    "sacramento": "reports/sacramento/docs",
+}
+STORED_DOCS_ZIP_URL = "/api/placer_probate_monitor/stored_docs/zip"
+STORED_DOCS_FILE_URL = "/api/placer_probate_monitor/stored_docs/file"
+
+
+def _posix_join(*parts: str) -> str:
+    return "/".join(str(part).replace("\\", "/").strip("/") for part in parts if str(part).strip("/"))
+
+
+def iter_stored_pdf_members(
+    data_dir: Path, source_id: str | None = None
+) -> list[tuple[str, Path]]:
+    """Public stored PDFs as (zip member path, absolute file)."""
+    root = Path(data_dir).resolve()
+    wanted = str(source_id or "").strip().lower()
+    keys = [wanted] if wanted in STORED_DOCS_RELATIVE else list(STORED_DOCS_RELATIVE)
+    members: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    for key in keys:
+        relative = STORED_DOCS_RELATIVE[key]
+        docs = petition_docs_dir(key, data_dir=root).resolve()
+        try:
+            docs.relative_to(root)
+        except ValueError:
+            continue
+        for case in iter_local_case_numbers(docs):
+            safe = case_safe_name(case)
+            if not safe:
+                continue
+            for name in listed_case_pdfs(docs, case):
+                filename = Path(name).name
+                if filename != name or is_de147s_name(filename):
+                    continue
+                path = None
+                for candidate in (docs / safe / filename, docs / filename):
+                    try:
+                        resolved = candidate.resolve()
+                        resolved.relative_to(docs)
+                    except (OSError, ValueError):
+                        continue
+                    if is_valid_pdf(resolved):
+                        path = resolved
+                        break
+                if path is None:
+                    continue
+                member = _posix_join(relative, safe, filename)
+                if member in seen:
+                    continue
+                seen.add(member)
+                members.append((member, path))
+    return members
+
+
+def build_stored_pdfs_zip(data_dir: Path, source_id: str | None = None) -> bytes:
+    """Zip public stored petition PDFs. Empty bytes when nothing is on disk."""
+    members = iter_stored_pdf_members(data_dir, source_id)
+    if not members:
+        return b""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
+        for member, path in members:
+            archive.write(path, arcname=member)
+    return buf.getvalue()
+
+
+def resolve_stored_pdf_file(
+    data_dir: Path, source_id: str, case_number: str, filename: str
+) -> Path | None:
+    """One inventoried public PDF. Rejects path traversal and DE-147S files."""
+    key = str(source_id or "").strip().lower()
+    if key not in STORED_DOCS_RELATIVE:
+        return None
+    name = Path(str(filename or "")).name
+    raw = str(filename or "")
+    if name != raw or not name.lower().endswith(".pdf") or is_de147s_name(name):
+        return None
+    root = Path(data_dir).resolve()
+    docs = petition_docs_dir(key, data_dir=root).resolve()
+    try:
+        docs.relative_to(root)
+    except ValueError:
+        return None
+    if name not in listed_case_pdfs(docs, case_number):
+        return None
+    safe = case_safe_name(case_number)
+    if not safe:
+        return None
+    for candidate in (docs / safe / name, docs / name):
+        try:
+            path = candidate.resolve()
+            path.relative_to(docs)
+        except (OSError, ValueError):
+            continue
+        if is_valid_pdf(path):
+            return path
+    return None
+
+
+def safe_extract_stored_zip(blob: bytes, dest_dir: Path) -> list[str]:
+    """Extract ``reports/*.pdf`` zip members into dest_dir. Returns relative paths."""
+    dest = Path(dest_dir).resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            name = info.filename.replace("\\", "/")
+            parts = Path(name).parts
+            if not name or ".." in parts or name.startswith("/"):
+                continue
+            if not name.startswith("reports/") or not name.lower().endswith(".pdf"):
+                continue
+            if is_de147s_name(Path(name).name):
+                continue
+            target = (dest / name).resolve()
+            try:
+                target.relative_to(dest)
+            except ValueError:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info) as src, target.open("wb") as out:
+                out.write(src.read())
+            written.append(name)
+    return written
+
+
 def stored_docs_inventory(docs_dir: Path | None, source_id: str, *, relative_dir: str) -> dict:
     """Case/PDF inventory for one county docs folder. No court or CNPA."""
     cases: list[dict[str, Any]] = []
@@ -430,11 +562,13 @@ def stored_docs_inventory(docs_dir: Path | None, source_id: str, *, relative_dir
                 "has_de147": local_de147_pdf(docs_dir, case) is not None,
             }
         )
+    key = str(source_id or "").strip().lower() or "placer"
     return {
-        "id": str(source_id or "").strip().lower() or "placer",
+        "id": key,
         "relative_dir": relative_dir,
         "ha_path": f"config/placer_probate_monitor/{relative_dir}",
         "laptop_path": f"data/{relative_dir}",
+        "download_zip": f"{STORED_DOCS_ZIP_URL}?source_id={key}",
         "case_count": len(cases),
         "pdf_count": pdf_count,
         "cases": cases,
@@ -458,12 +592,14 @@ def all_stored_docs_inventory(data_dir: Path) -> dict:
     ]
     return {
         "ha_root": "config/placer_probate_monitor",
+        "download_zip": STORED_DOCS_ZIP_URL,
         "copy_hint": (
-            "These PDFs are already on Home Assistant under "
-            "config/placer_probate_monitor/. Copy reports/docs and "
-            "reports/sacramento/docs into a laptop checkout at data/reports/ "
-            "to run parsers there. Test stored data on this box reads the same "
-            "files in place and does not scrape CNPA or court portals."
+            "These PDFs are already on Home Assistant. Download the zip from "
+            "this page (signed in) or run scripts/pull_stored_pdfs.py with a "
+            "long-lived access token. Extract into the laptop data/ folder so "
+            "parsers read data/reports/docs and data/reports/sacramento/docs. "
+            "Test stored data on this box reads the same files in place and "
+            "does not scrape CNPA or court portals."
         ),
         "counties": counties,
         "case_count": sum(int(item.get("case_count") or 0) for item in counties),
