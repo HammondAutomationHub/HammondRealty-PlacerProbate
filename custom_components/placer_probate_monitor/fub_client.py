@@ -2335,6 +2335,25 @@ def listings_share_status(
     return None
 
 
+def listings_share_http_error(status: str) -> tuple[dict, int]:
+    if status == "missing":
+        return {"error": "unauthorized", "message": "Missing share token."}, 401
+    if status == "expired":
+        return {"error": "expired", "message": "Share link expired."}, 403
+    return {"error": "forbidden", "message": "Invalid share token."}, 403
+
+
+def listings_share_payload(base: str, secret: str | None = None) -> dict:
+    token = listings_share_token(secret)
+    query = f"token={token}"
+    root = str(base or "").rstrip("/")
+    return {
+        "share_path": LISTINGS_SHARE_PATH,
+        "share_token": token,
+        "share_url": f"{root}{LISTINGS_SHARE_PATH}?{query}" if root else "",
+    }
+
+
 def petition_public_uri(case: str) -> str:
     return form_public_uri(case, "de111")
 

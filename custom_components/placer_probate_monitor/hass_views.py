@@ -65,8 +65,9 @@ from .fub_client import (
     mapping_payload,
     apply_sacramento_source_settings,
     fub_go_required_from_settings,
+    listings_share_http_error,
+    listings_share_payload,
     listings_share_status,
-    listings_share_token,
     LISTINGS_SHARE_PATH,
     normalize_fub_go_required_fields,
     normalize_source_enabled,
@@ -77,7 +78,7 @@ from .fub_client import (
     FUB_GO_GATE_FIELDS,
 )
 
-PANEL_JS_VERSION = "1.3.85"
+PANEL_JS_VERSION = "1.3.86"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -919,22 +920,10 @@ def _external_base(hass: HomeAssistant) -> str:
 
 def _listings_share_meta(hass: HomeAssistant) -> dict:
     entry = _entry(hass)
-    token = listings_share_token(entry.entry_id if entry else None)
-    base = _external_base(hass)
-    query = f"token={token}"
-    return {
-        "share_path": LISTINGS_SHARE_PATH,
-        "share_token": token,
-        "share_url": f"{base}{LISTINGS_SHARE_PATH}?{query}" if base else "",
-    }
-
-
-def _listings_share_http_error(status: str):
-    if status == "missing":
-        return {"error": "unauthorized", "message": "Missing share token."}, 401
-    if status == "expired":
-        return {"error": "expired", "message": "Share link expired."}, 403
-    return {"error": "forbidden", "message": "Invalid share token."}, 403
+    return listings_share_payload(
+        _external_base(hass),
+        entry.entry_id if entry else None,
+    )
 
 
 def _listing_fub_cell(row: dict) -> str:
@@ -1044,10 +1033,8 @@ class ListingsPublicView(HomeAssistantView):
             exp=request.query.get("exp"),
         )
         if status:
-            payload = _listings_share_http_error(status)[0]
-            if status == "missing":
-                return self.json(payload, status_code=401)
-            return self.json(payload, status_code=403)
+            payload, code = listings_share_http_error(status)
+            return self.json(payload, status_code=code)
         data = await self.hass.async_add_executor_job(_listings_payload, self.hass)
         want_json = str(request.query.get("format") or "").lower() == "json" or (
             "application/json" in str(request.headers.get("Accept") or "").lower()
@@ -1089,26 +1076,45 @@ def _register_panel(hass: HomeAssistant, url_path: str, title: str, icon: str, e
         frontend.async_register_built_in_panel(hass, **kwargs)
 
 
-def async_setup_mapping_views(hass: HomeAssistant) -> None:
-    if hass.data.setdefault(DOMAIN, {}).get("_fub_views"):
+def _mapping_http_views(hass: HomeAssistant) -> list:
+    # Register /listings/public before /listings so aiohttp cannot treat the
+    # public share path as a missing subroute of the authenticated list.
+    return [
+        FubMapPageView(),
+        FubPanelJsView(),
+        FubMappingView(hass),
+        FubPersonView(hass),
+        SourcesView(hass),
+        FubSettingsView(hass),
+        PetitionPdfView(hass),
+        DutiesPdfView(hass),
+        JobView(hass),
+        StoredDocsView(hass),
+        StoredDocsZipView(hass),
+        StoredDocsFileView(hass),
+        LogsView(hass),
+        ListingsPublicView(hass),
+        ListingsCsvView(hass),
+        ListingsXlsxView(hass),
+        ListingsView(hass),
+    ]
+
+
+def _register_http_view(hass: HomeAssistant, view) -> None:
+    http = getattr(hass, "http", None)
+    register = getattr(http, "register_view", None)
+    if register is None:
         return
-    hass.http.register_view(FubMapPageView())
-    hass.http.register_view(FubPanelJsView())
-    hass.http.register_view(FubMappingView(hass))
-    hass.http.register_view(FubPersonView(hass))
-    hass.http.register_view(SourcesView(hass))
-    hass.http.register_view(FubSettingsView(hass))
-    hass.http.register_view(PetitionPdfView(hass))
-    hass.http.register_view(DutiesPdfView(hass))
-    hass.http.register_view(JobView(hass))
-    hass.http.register_view(StoredDocsView(hass))
-    hass.http.register_view(StoredDocsZipView(hass))
-    hass.http.register_view(StoredDocsFileView(hass))
-    hass.http.register_view(LogsView(hass))
-    hass.http.register_view(ListingsView(hass))
-    hass.http.register_view(ListingsCsvView(hass))
-    hass.http.register_view(ListingsXlsxView(hass))
-    hass.http.register_view(ListingsPublicView(hass))
+    try:
+        register(view)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def async_setup_mapping_views(hass: HomeAssistant) -> None:
+    hass.data.setdefault(DOMAIN, {})
+    for view in _mapping_http_views(hass):
+        _register_http_view(hass, view)
     hass.data[DOMAIN]["_fub_views"] = True
 
 

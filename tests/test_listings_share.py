@@ -12,6 +12,8 @@ sys.path.insert(0, str(ROOT / "custom_components" / "placer_probate_monitor"))
 
 from fub_client import (  # noqa: E402
     LISTINGS_SHARE_PATH,
+    listings_share_http_error,
+    listings_share_payload,
     listings_share_status,
     listings_share_token,
     petition_file_token,
@@ -52,6 +54,34 @@ class ListingsShareTokenTests(unittest.TestCase):
         )
         self.assertNotEqual(token, listings_share_token(SECRET))
 
+    def test_missing_token_is_401(self):
+        self.assertEqual(listings_share_status(None, SECRET), "missing")
+        self.assertEqual(listings_share_status("", SECRET), "missing")
+        body, code = listings_share_http_error("missing")
+        self.assertEqual(code, 401)
+        self.assertEqual(body["error"], "unauthorized")
+
+    def test_bad_token_is_403(self):
+        token = listings_share_token(SECRET)
+        self.assertEqual(listings_share_status("0" * len(token), SECRET), "invalid")
+        body, code = listings_share_http_error("invalid")
+        self.assertEqual(code, 403)
+        self.assertEqual(body["error"], "forbidden")
+        expired_body, expired_code = listings_share_http_error("expired")
+        self.assertEqual(expired_code, 403)
+        self.assertEqual(expired_body["error"], "expired")
+
+    def test_listings_json_includes_share_url(self):
+        meta = listings_share_payload("https://ha.example:8123", SECRET)
+        token = listings_share_token(SECRET)
+        self.assertEqual(meta["share_path"], LISTINGS_SHARE_PATH)
+        self.assertEqual(meta["share_token"], token)
+        self.assertEqual(
+            meta["share_url"],
+            f"https://ha.example:8123{LISTINGS_SHARE_PATH}?token={token}",
+        )
+        self.assertTrue(meta["share_url"].startswith("https://ha.example:8123/api/placer_probate_monitor/listings/public?token="))
+
 
 class ListingsShareViewContractTests(unittest.TestCase):
     def test_public_route_and_panel(self):
@@ -70,18 +100,37 @@ class ListingsShareViewContractTests(unittest.TestCase):
         self.assertIn('url = LISTINGS_SHARE_PATH', src)
         self.assertIn("class ListingsPublicView", src)
         self.assertIn("requires_auth = False", src)
-        self.assertIn("hass.http.register_view(ListingsPublicView(hass))", src)
-        self.assertIn("status_code=401", src)
-        self.assertIn("status_code=403", src)
-        self.assertIn("_listings_share_http_error", src)
+        self.assertIn("ListingsPublicView(hass)", src)
+        self.assertIn("listings_share_http_error", src)
+        self.assertIn("payload.update(_listings_share_meta(self.hass))", src)
+        self.assertIn("listings_share_payload", src)
+        setup = src.split("def async_setup_mapping_views", 1)[1].split("\ndef ", 1)[0]
+        self.assertNotIn('get("_fub_views")', setup)
+        self.assertNotRegex(setup, r"if .+:\n\s+return")
+        self.assertIn("for view in _mapping_http_views(hass)", setup)
+        self.assertIn("def _register_http_view", src)
+        self.assertIn("except Exception", src.split("def _register_http_view", 1)[1].split("\ndef ", 1)[0])
+        views_fn = src.split("def _mapping_http_views", 1)[1].split("\ndef ", 1)[0]
+        self.assertLess(
+            views_fn.find("ListingsPublicView(hass)"),
+            views_fn.find("ListingsCsvView(hass)"),
+        )
+        self.assertLess(
+            views_fn.find("ListingsCsvView(hass)"),
+            views_fn.find("ListingsXlsxView(hass)"),
+        )
+        self.assertLess(
+            views_fn.find("ListingsXlsxView(hass)"),
+            views_fn.find("ListingsView(hass)"),
+        )
         self.assertIn("Copy share link", panel)
         self.assertIn("ppmListingsShareUrl", panel)
         self.assertIn("ppmPublicBase", panel)
         self.assertIn("hassUrl", panel)
         share_fn = panel.split("function ppmListingsShareUrl", 1)[1].split("function ", 1)[0]
         self.assertNotIn("access_token", share_fn)
-        self.assertEqual(manifest["version"], "1.3.85")
-        self.assertIn('PANEL_JS_VERSION = "1.3.85"', src)
+        self.assertEqual(manifest["version"], "1.3.86")
+        self.assertIn('PANEL_JS_VERSION = "1.3.86"', src)
         self.assertIn("<th>Added</th>", src)
         self.assertIn("<th>FUB</th>", src)
         self.assertIn('url = "/api/placer_probate_monitor/listings"', src)

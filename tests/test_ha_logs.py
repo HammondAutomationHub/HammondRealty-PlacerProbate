@@ -60,7 +60,8 @@ class PayloadAndViewTests(unittest.TestCase):
         self.assertIn("url = HA_LOGS_URL", src)
         self.assertIn("name = HA_LOGS_VIEW_NAME", src)
         self.assertIn("requires_auth = HA_LOGS_REQUIRES_AUTH", src)
-        self.assertIn("hass.http.register_view(LogsView(hass))", src)
+        self.assertIn("LogsView(hass)", src)
+        self.assertIn("_register_http_view", src)
         self.assertEqual(HA_LOGS_VIEW_NAME, "api:placer_probate_monitor:logs")
 
     def test_payload_redacts_and_caps(self):

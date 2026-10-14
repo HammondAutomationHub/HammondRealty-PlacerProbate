@@ -156,12 +156,12 @@ class ListingsPayloadAndExportTests(unittest.TestCase):
                 ROOT / "custom_components" / "placer_probate_monitor" / "manifest.json"
             ).read_text(encoding="utf-8")
         )
-        self.assertEqual(manifest["version"], "1.3.85")
-        self.assertIn('PANEL_JS_VERSION = "1.3.85"', src)
+        self.assertEqual(manifest["version"], "1.3.86")
+        self.assertIn('PANEL_JS_VERSION = "1.3.86"', src)
         self.assertIn('url = "/api/placer_probate_monitor/listings.csv"', src)
         self.assertIn('url = "/api/placer_probate_monitor/listings.xlsx"', src)
-        self.assertIn("hass.http.register_view(ListingsCsvView(hass))", src)
-        self.assertIn("hass.http.register_view(ListingsPublicView(hass))", src)
+        self.assertIn("ListingsCsvView(hass)", src)
+        self.assertIn("ListingsPublicView(hass)", src)
         panel = (
             ROOT / "custom_components" / "placer_probate_monitor" / "www" / "panel.js"
         ).read_text(encoding="utf-8")
