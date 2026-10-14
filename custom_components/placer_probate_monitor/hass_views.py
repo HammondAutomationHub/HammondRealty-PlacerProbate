@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path
@@ -64,6 +65,9 @@ from .fub_client import (
     mapping_payload,
     apply_sacramento_source_settings,
     fub_go_required_from_settings,
+    listings_share_status,
+    listings_share_token,
+    LISTINGS_SHARE_PATH,
     normalize_fub_go_required_fields,
     normalize_source_enabled,
     petition_file_token,
@@ -73,7 +77,7 @@ from .fub_client import (
     FUB_GO_GATE_FIELDS,
 )
 
-PANEL_JS_VERSION = "1.3.84"
+PANEL_JS_VERSION = "1.3.85"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -824,6 +828,7 @@ class ListingsView(HomeAssistantView):
 
     async def get(self, request):
         payload = await self.hass.async_add_executor_job(_listings_payload, self.hass)
+        payload.update(_listings_share_meta(self.hass))
         return self.json(payload)
 
 
@@ -895,6 +900,168 @@ def _listings_export_bytes(hass: HomeAssistant, query, fmt: str) -> bytes:
     return listings_csv_bytes(rows)
 
 
+def _external_base(hass: HomeAssistant) -> str:
+    try:
+        from homeassistant.helpers.network import get_url
+
+        base = str(get_url(hass, prefer_external=True) or "").rstrip("/")
+        if base:
+            return base
+    except Exception:  # noqa: BLE001
+        pass
+    config = getattr(hass, "config", None)
+    for attr in ("external_url", "internal_url"):
+        value = str(getattr(config, attr, None) or "").rstrip("/")
+        if value:
+            return value
+    return ""
+
+
+def _listings_share_meta(hass: HomeAssistant) -> dict:
+    entry = _entry(hass)
+    token = listings_share_token(entry.entry_id if entry else None)
+    base = _external_base(hass)
+    query = f"token={token}"
+    return {
+        "share_path": LISTINGS_SHARE_PATH,
+        "share_token": token,
+        "share_url": f"{base}{LISTINGS_SHARE_PATH}?{query}" if base else "",
+    }
+
+
+def _listings_share_http_error(status: str):
+    if status == "missing":
+        return {"error": "unauthorized", "message": "Missing share token."}, 401
+    if status == "expired":
+        return {"error": "expired", "message": "Share link expired."}, 403
+    return {"error": "forbidden", "message": "Invalid share token."}, 403
+
+
+def _listing_fub_cell(row: dict) -> str:
+    status = str(row.get("fub_status") or "")
+    if status == "deleted" or row.get("fub_removed"):
+        return '<span class="ppm-pill off">deleted</span>'
+    if status == "id":
+        label = html.escape(str(row.get("fub_status_label") or row.get("fub_person_id") or "ID"))
+        return f'<span class="ppm-pill live">{label}</span>'
+    return '<span class="ppm-pill">no id</span>'
+
+
+def _listings_public_html(payload: dict) -> str:
+    rows = list(payload.get("listings") or [])
+    body_rows = []
+    for row in rows:
+        case = html.escape(str(row.get("case_number") or ""))
+        notice = str(row.get("notice_url") or "").strip()
+        case_cell = (
+            f'<a href="{html.escape(notice)}" target="_blank" rel="noopener">{case}</a>'
+            if notice
+            else case or "—"
+        )
+        petitioner = html.escape(str(row.get("petitioner") or "—"))
+        petitioner_addr = html.escape(str(row.get("petitioner_address") or ""))
+        addr_note = f'<div class="ppm-note">{petitioner_addr}</div>' if petitioner_addr else ""
+        body_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('date') or row.get('filed') or '—'))}</td>"
+            f"<td>{html.escape(str(row.get('added_at') or '—'))}</td>"
+            f"<td>{html.escape(str(row.get('source') or 'Placer County'))}</td>"
+            f"<td>{case_cell}</td>"
+            f"<td>{petitioner}{addr_note}</td>"
+            f"<td>{html.escape(str(row.get('decedent') or '—'))}</td>"
+            f"<td>{html.escape(str(row.get('decedent_address') or '—'))}</td>"
+            f"<td>{html.escape(str(row.get('hearing') or '—'))}</td>"
+            f"<td>{_listing_fub_cell(row)}</td>"
+            "</tr>"
+        )
+    table = (
+        """<div class="ppm-table-wrap"><table>
+        <thead><tr>
+          <th>Date</th><th>Added</th><th>Source</th><th>Case</th>
+          <th>Petitioner</th><th>Decedent</th><th>Decedent address</th>
+          <th>Hearing</th><th>FUB</th>
+        </tr></thead>
+        <tbody>"""
+        + "".join(body_rows)
+        + "</tbody></table></div>"
+        if body_rows
+        else "<p class='ppm-note'>No collected listings yet.</p>"
+    )
+    count = len(rows)
+    count_label = f"{count} listing" + ("" if count == 1 else "s")
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Probate listings</title>
+  <style>
+    body {{ font: 15px/1.45 "Segoe UI", system-ui, sans-serif; color: #1c1915; background: #f7f3ec; margin: 0; }}
+    header {{ background: #1b2a4a; color: #f7f3ec; padding: 20px 24px; }}
+    header p {{ margin: 4px 0 0; color: #c9c3b8; font-size: 13px; }}
+    h1 {{ margin: 0; font-size: 22px; }}
+    main {{ padding: 20px; max-width: 1440px; }}
+    .ppm-card {{ background: #fffdf8; border: 1px solid #ddd6cc; border-radius: 10px; padding: 16px 18px; }}
+    .ppm-note {{ color: #6b645b; font-size: 12px; margin-top: 8px; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+    th, td {{ text-align: left; padding: 8px 6px; border-bottom: 1px solid #ddd6cc; vertical-align: top; }}
+    a {{ color: #1b2a4a; word-break: break-all; }}
+    .ppm-pill {{ display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ece7de; font-size: 11px; }}
+    .ppm-pill.live {{ background: #e7f4ec; color: #2d6a4f; }}
+    .ppm-pill.off {{ background: #f8e8e8; color: #8b2e2e; }}
+    .ppm-table-wrap {{ overflow-x: auto; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Probate listings</h1>
+    <p>Shared view. Date is the newspaper notice date. FUB shows Follow Up Boss person id, no id, or deleted.</p>
+  </header>
+  <main>
+    <section class="ppm-card">
+      <p class="ppm-note">{html.escape(count_label)}</p>
+      {table}
+    </section>
+  </main>
+</body>
+</html>
+"""
+
+
+class ListingsPublicView(HomeAssistantView):
+    url = LISTINGS_SHARE_PATH
+    name = "api:placer_probate_monitor:listings_public"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        entry = _entry(self.hass)
+        status = listings_share_status(
+            request.query.get("token"),
+            entry.entry_id if entry else None,
+            exp=request.query.get("exp"),
+        )
+        if status:
+            payload = _listings_share_http_error(status)[0]
+            if status == "missing":
+                return self.json(payload, status_code=401)
+            return self.json(payload, status_code=403)
+        data = await self.hass.async_add_executor_job(_listings_payload, self.hass)
+        want_json = str(request.query.get("format") or "").lower() == "json" or (
+            "application/json" in str(request.headers.get("Accept") or "").lower()
+            and "text/html" not in str(request.headers.get("Accept") or "").lower()
+        )
+        if want_json:
+            return self.json({"count": data.get("count"), "listings": data.get("listings") or []})
+        return web.Response(
+            text=_listings_public_html(data),
+            content_type="text/html; charset=utf-8",
+            headers={"Cache-Control": "no-store"},
+        )
+
+
 def _register_panel(hass: HomeAssistant, url_path: str, title: str, icon: str, element: str) -> None:
     config = {
         "_panel_custom": {
@@ -941,6 +1108,7 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(ListingsView(hass))
     hass.http.register_view(ListingsCsvView(hass))
     hass.http.register_view(ListingsXlsxView(hass))
+    hass.http.register_view(ListingsPublicView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 
 

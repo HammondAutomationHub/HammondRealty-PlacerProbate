@@ -291,6 +291,32 @@ function ppmCsvCell(value) {
   return text;
 }
 
+function ppmPublicBase(hass) {
+  try {
+    if (hass && typeof hass.hassUrl === "function") {
+      const url = String(hass.hassUrl("/")).replace(/\/$/, "");
+      if (url) return url;
+    }
+  } catch (_exc) { /* ignore */ }
+  const data = hass && hass.auth && hass.auth.data;
+  if (data && data.hassUrl) return String(data.hassUrl).replace(/\/$/, "");
+  if (typeof window !== "undefined" && window.location && window.location.origin) {
+    return window.location.origin;
+  }
+  return "";
+}
+
+function ppmListingsShareUrl(hass, share) {
+  const meta = share || {};
+  if (meta.share_url) return String(meta.share_url);
+  const token = meta.share_token;
+  if (!token) return "";
+  const path = meta.share_path || "/api/placer_probate_monitor/listings/public";
+  const qs = new URLSearchParams({ token: String(token) });
+  if (meta.share_exp) qs.set("exp", String(meta.share_exp));
+  return `${ppmPublicBase(hass)}${path}?${qs.toString()}`;
+}
+
 function ppmListingFubLabel(row) {
   const status = String(row.fub_status || "");
   if (status === "deleted" || row.fub_removed) return "deleted";
@@ -1730,6 +1756,7 @@ class PlacerProbateListingsPanel extends HTMLElement {
     this._hass = null;
     this._ready = false;
     this._rows = [];
+    this._share = {};
     this._query = "";
     this._source = "";
     this._fub = "";
@@ -1795,6 +1822,7 @@ class PlacerProbateListingsPanel extends HTMLElement {
                 <label>&nbsp;</label>
                 <div class="ppm-actions" style="margin-top:0;">
                   <button type="button" id="listing-reload">Reload</button>
+                  <button type="button" id="listing-share" class="secondary">Copy share link</button>
                   <button type="button" id="listing-csv" class="secondary">Export CSV</button>
                   <button type="button" id="listing-xlsx" class="secondary">Export Excel</button>
                 </div>
@@ -1807,6 +1835,7 @@ class PlacerProbateListingsPanel extends HTMLElement {
       </div>
     `;
     this._qs("#listing-reload").addEventListener("click", () => this._load());
+    this._qs("#listing-share").addEventListener("click", () => this._copyShare());
     this._qs("#listing-csv").addEventListener("click", () => this._export("csv"));
     this._qs("#listing-xlsx").addEventListener("click", () => this._export("xlsx"));
     this._qs("#listing-q").addEventListener("input", (ev) => {
@@ -1850,6 +1879,29 @@ class PlacerProbateListingsPanel extends HTMLElement {
       return `<span class="ppm-pill live">${ppmEsc(label)}</span>`;
     }
     return `<span class="ppm-pill">no id</span>`;
+  }
+
+  async _copyShare() {
+    const url = ppmListingsShareUrl(this._hass, this._share);
+    if (!url) {
+      this._flash("Share link is not available yet. Reload listings after the integration is configured.", false);
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const box = document.createElement("textarea");
+        box.value = url;
+        document.body.appendChild(box);
+        box.select();
+        document.execCommand("copy");
+        box.remove();
+      }
+      this._flash("Copied public listings link. Anyone with the URL can view it until you rotate the integration entry.", true);
+    } catch (err) {
+      this._flash(ppmText(err) || "Could not copy the share link.", false);
+    }
   }
 
   _export(kind) {
@@ -1924,6 +1976,12 @@ class PlacerProbateListingsPanel extends HTMLElement {
     try {
       const data = await this._hass.callApi("GET", "placer_probate_monitor/listings");
       this._rows = data.listings || [];
+      this._share = {
+        share_url: data.share_url || "",
+        share_path: data.share_path || "/api/placer_probate_monitor/listings/public",
+        share_token: data.share_token || "",
+        share_exp: data.share_exp || "",
+      };
       this._renderTable();
       this._flash(`Loaded ${this._rows.length} collected listing${this._rows.length === 1 ? "" : "s"}.`, true);
     } catch (err) {

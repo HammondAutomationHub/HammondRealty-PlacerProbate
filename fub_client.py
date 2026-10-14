@@ -2277,13 +2277,62 @@ def petition_safe_case(case: str) -> str:
     return re.sub(r"[^\w\-]+", "_", str(case or "").strip()) or "case"
 
 
-def petition_file_token(case: str, secret: str | None = None, *, kind: str = "de111") -> str:
+def petition_file_token(
+    case: str,
+    secret: str | None = None,
+    *,
+    kind: str = "de111",
+    exp: int | None = None,
+) -> str:
     raw = (secret or os.environ.get("FUB_PETITION_TOKEN_SECRET") or "placer-probate")
+    payload = f"{kind}:{petition_safe_case(case)}"
+    if exp is not None:
+        payload = f"{payload}:{int(exp)}"
     return hmac.new(
         str(raw).encode(),
-        f"{kind}:{petition_safe_case(case)}".encode(),
+        payload.encode(),
         hashlib.sha256,
     ).hexdigest()[:32]
+
+
+LISTINGS_SHARE_CASE = "public"
+LISTINGS_SHARE_KIND = "listings"
+LISTINGS_SHARE_PATH = "/api/placer_probate_monitor/listings/public"
+
+
+def listings_share_token(secret: str | None = None, *, exp: int | None = None) -> str:
+    return petition_file_token(
+        LISTINGS_SHARE_CASE, secret=secret, kind=LISTINGS_SHARE_KIND, exp=exp
+    )
+
+
+def listings_share_status(
+    token: str | None,
+    secret: str | None = None,
+    *,
+    exp: str | int | None = None,
+    now: int | None = None,
+) -> str | None:
+    """Return None when the HMAC is valid; otherwise missing, invalid, or expired."""
+    import time
+
+    given = str(token or "").strip()
+    if not given:
+        return "missing"
+    exp_value = None
+    if exp not in (None, ""):
+        try:
+            exp_value = int(exp)
+        except (TypeError, ValueError):
+            return "invalid"
+    expected = listings_share_token(secret, exp=exp_value)
+    if len(given) != len(expected) or not hmac.compare_digest(given, expected):
+        return "invalid"
+    if exp_value is not None:
+        clock = int(now if now is not None else time.time())
+        if exp_value < clock:
+            return "expired"
+    return None
 
 
 def petition_public_uri(case: str) -> str:
