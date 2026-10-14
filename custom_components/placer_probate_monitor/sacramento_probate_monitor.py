@@ -40,6 +40,7 @@ try:
         merge_listings,
         notice_fields,
         paginate,
+        refresh_digest_with_fub,
         save_state,
         send_email,
         today_local,
@@ -66,6 +67,7 @@ except ImportError:
         merge_listings,
         notice_fields,
         paginate,
+        refresh_digest_with_fub,
         save_state,
         send_email,
         today_local,
@@ -641,6 +643,21 @@ def main() -> int:
         fub_skipped=skipped,
     )
     save_state(state_path, state)
+    text_body, html_body = refresh_digest_with_fub(
+        unique,
+        start,
+        end,
+        urls,
+        out_dir,
+        county=COUNTY,
+        posted=posted,
+        updated=updated,
+        skipped=skipped,
+    )
+    subject = (
+        f"Sacramento probate notices — {run_date} — "
+        f"{new_count} new / {len(unique)} unique · FUB posted {posted}"
+    )
     (state_path.parent / "fub_last.json").write_text(
         json.dumps(
             {

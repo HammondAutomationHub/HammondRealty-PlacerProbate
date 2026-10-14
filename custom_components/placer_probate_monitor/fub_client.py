@@ -2377,7 +2377,11 @@ def is_fub_removed(state: dict, key: str | None) -> bool:
 
 
 def needs_fub_create(state: dict, key: str | None) -> bool:
-    """True when this listing has never been assigned a Follow Up Boss person id."""
+    """True when this listing has no Follow Up Boss person id.
+
+    CNPA/email SEEN in seen_cases*.json is not a substitute. Recreate is
+    skipped only when the person was deleted in Follow Up Boss (fub_removed).
+    """
     if not key:
         return True
     if is_fub_removed(state, key):
@@ -3493,6 +3497,8 @@ def export_new_leads(
             summary["skips"].append({"case": key, "reason": reason})
             if key and key in cases:
                 cases[key]["fub_skip"] = reason
+                if reason != "fub_removed" and stored_person_id(state, key) is None:
+                    cases[key].pop("fub_person_id", None)
             print(f"FUB skip {key or '(no case)'}: {reason}")
             _progress_fub(summary, "skipped", key)
             continue

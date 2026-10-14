@@ -21,8 +21,15 @@ from fub_client import (  # noqa: E402
     needs_fub_create,
     person_fingerprint,
     should_skip_unchanged_person,
+    stored_person_id,
 )
-from placer_probate_monitor import load_state, save_state  # noqa: E402
+from placer_probate_monitor import (  # noqa: E402
+    Notice,
+    build_html,
+    build_text,
+    load_state,
+    save_state,
+)
 
 PLACER_ROW = {
     "source_id": "placer",
@@ -357,6 +364,92 @@ class FubCreateGateTests(unittest.TestCase):
                     rec = loaded["cases"]["S-PR-0014448"]
                     self.assertTrue(rec["fub_removed"])
                     self.assertEqual(rec["fub_person_id"], 5120)
+
+    def test_seen_with_id_puts_not_posts(self):
+        key = PLACER_ROW["case_number"]
+        state = {
+            "cases": {
+                key: {"fub_person_id": 44, "fub_fingerprint": "stale-fp"}
+            }
+        }
+        summary, posted, updated, loaded = self._export_with_http(
+            [PLACER_ROW], state, posted_id=44
+        )
+        self.assertEqual(summary["posted"], 0)
+        self.assertEqual(summary["updated"], 1)
+        posted.assert_not_called()
+        updated.assert_called_once()
+        loaded.assert_called_once()
+        self.assertEqual(state["cases"][key]["fub_person_id"], 44)
+
+    def test_missing_mailing_skips_and_leaves_id_empty(self):
+        key = PLACER_ROW["case_number"]
+        row = dict(PLACER_ROW)
+        row.pop("mailing_address")
+        state = {"cases": {key: {"first_seen": "2026-09-01", "last_seen": "2026-10-01"}}}
+        summary, posted, updated, loaded = self._export_with_http([row], state)
+        self.assertEqual(summary["posted"], 0)
+        self.assertEqual(summary["updated"], 0)
+        self.assertEqual(summary["skips"][0]["reason"], "missing_petitioner_address")
+        posted.assert_not_called()
+        updated.assert_not_called()
+        loaded.assert_not_called()
+        rec = state["cases"][key]
+        self.assertIsNone(stored_person_id(state, key))
+        self.assertNotIn("fub_person_id", rec)
+        self.assertEqual(rec["fub_skip"], "missing_petitioner_address")
+        self.assertTrue(needs_fub_create(state, key))
+
+    def test_email_new_is_cnpa_and_includes_fub_line(self):
+        from datetime import date
+
+        notices = [
+            Notice(
+                case_number="S-PR-0014448",
+                decedent="Jane Henderson",
+                petitioner="John Henderson",
+                court_county="Placer",
+                hearing="",
+                attorney="",
+                attorney_phone="",
+                newspaper="",
+                post_date="",
+                publication_line="",
+                will_offered=False,
+                iaea_requested=False,
+                refcode="",
+                advert_id="",
+                notice_url="",
+                snippet="",
+                raw_text="",
+                first_seen=False,
+            )
+        ]
+        html = build_html(
+            notices,
+            date(2026, 10, 1),
+            date(2026, 10, 14),
+            ["https://example.test"],
+            fub_posted=2,
+            fub_updated=1,
+            fub_skipped=3,
+        )
+        text = build_text(
+            notices,
+            date(2026, 10, 1),
+            date(2026, 10, 14),
+            ["https://example.test"],
+            fub_posted=2,
+            fub_updated=1,
+            fub_skipped=3,
+        )
+        self.assertIn("New since last run: <strong>0</strong>", html)
+        self.assertIn(
+            "Follow Up Boss: posted <strong>2</strong>, updated <strong>1</strong>, skipped <strong>3</strong>",
+            html,
+        )
+        self.assertIn("New today: 0", text)
+        self.assertIn("Follow Up Boss: posted 2, updated 1, skipped 3", text)
 
     def test_default_gate_still_requires_mailing(self):
         row = {

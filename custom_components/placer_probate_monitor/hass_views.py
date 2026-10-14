@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from pathlib import Path
 
 from aiohttp import web
@@ -74,7 +73,7 @@ from .fub_client import (
     FUB_GO_GATE_FIELDS,
 )
 
-PANEL_JS_VERSION = "1.3.82"
+PANEL_JS_VERSION = "1.3.84"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -828,43 +827,72 @@ class ListingsView(HomeAssistantView):
         return self.json(payload)
 
 
+class ListingsCsvView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/listings.csv"
+    name = "api:placer_probate_monitor:listings_csv"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        body = await self.hass.async_add_executor_job(
+            _listings_export_bytes, self.hass, request.query, "csv"
+        )
+        return web.Response(
+            body=body,
+            content_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="probate-listings.csv"'
+            },
+        )
+
+
+class ListingsXlsxView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/listings.xlsx"
+    name = "api:placer_probate_monitor:listings_xlsx"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        body = await self.hass.async_add_executor_job(
+            _listings_export_bytes, self.hass, request.query, "xlsx"
+        )
+        return web.Response(
+            body=body,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": 'attachment; filename="probate-listings.xlsx"'
+            },
+        )
+
+
 def _listings_payload(hass: HomeAssistant) -> dict:
+    from .placer_probate_monitor import build_listings_payload
+
+    return build_listings_payload(Path(hass.config.path(DOMAIN)))
+
+
+def _listings_export_bytes(hass: HomeAssistant, query, fmt: str) -> bytes:
     from .placer_probate_monitor import (
-        _read_listings_catalog,
-        merge_listings,
+        build_listings_payload,
+        filter_listings,
+        listings_csv_bytes,
+        listings_xlsx_bytes,
     )
 
-    data_dir = Path(hass.config.path(DOMAIN))
-    path = data_dir / "listings.json"
-    catalog = _read_listings_catalog(path)
-    reports = data_dir / "reports"
-    if not catalog and reports.is_dir():
-        rows: list[dict] = []
-        for dossier in list(sorted(reports.glob("dossiers-*.json"))) + list(
-            sorted((reports / "sacramento").glob("sacramento-dossiers-*.json"))
-        ):
-            try:
-                payload = json.loads(dossier.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, list):
-                rows.extend(item for item in payload if isinstance(item, dict))
-        if rows:
-            stamp = max(
-                (str(item.get("post_date") or item.get("filed") or "") for item in rows),
-                default="",
-            ) or datetime.now().date().isoformat()
-            merge_listings(path, rows, stamp)
-            catalog = _read_listings_catalog(path)
-    listings = sorted(
-        catalog.values(),
-        key=lambda item: (
-            str(item.get("date") or ""),
-            str(item.get("case_number") or ""),
-        ),
-        reverse=True,
+    payload = build_listings_payload(Path(hass.config.path(DOMAIN)))
+    rows = filter_listings(
+        payload.get("listings") or [],
+        query=str(query.get("q") or ""),
+        source_id=str(query.get("source_id") or ""),
+        fub_status=str(query.get("fub_status") or ""),
     )
-    return {"count": len(listings), "listings": listings}
+    if fmt == "xlsx":
+        return listings_xlsx_bytes(rows)
+    return listings_csv_bytes(rows)
 
 
 def _register_panel(hass: HomeAssistant, url_path: str, title: str, icon: str, element: str) -> None:
@@ -911,6 +939,8 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(StoredDocsFileView(hass))
     hass.http.register_view(LogsView(hass))
     hass.http.register_view(ListingsView(hass))
+    hass.http.register_view(ListingsCsvView(hass))
+    hass.http.register_view(ListingsXlsxView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 
 

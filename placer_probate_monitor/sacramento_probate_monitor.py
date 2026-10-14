@@ -40,11 +40,13 @@ try:
         merge_listings,
         notice_fields,
         paginate,
+        refresh_digest_with_fub,
         save_state,
         send_email,
         today_local,
         write_outputs,
         _finish_fub,
+        _finish_stored_test,
         _progress,
         _read_listings_catalog,
         get_tz,
@@ -65,11 +67,13 @@ except ImportError:
         merge_listings,
         notice_fields,
         paginate,
+        refresh_digest_with_fub,
         save_state,
         send_email,
         today_local,
         write_outputs,
         _finish_fub,
+        _finish_stored_test,
         _progress,
         _read_listings_catalog,
         get_tz,
@@ -383,6 +387,11 @@ def parse_args() -> argparse.Namespace:
         help="Re-parse on-disk DE-111/DE-147 PDFs only; no CNPA search and no court portal",
     )
     parser.add_argument(
+        "--test-stored",
+        action="store_true",
+        help="Parse on-disk PDFs and score the Go checklist. No CNPA, court, email, or Follow Up Boss",
+    )
+    parser.add_argument(
         "--refresh-case",
         action="append",
         default=[],
@@ -409,25 +418,30 @@ def _run_rescan_local(args: argparse.Namespace, root: Path) -> int:
     sac_listings = state_path.parent / "listings_sacramento.json"
     catalog = _read_listings_catalog(listings_path)
     catalog.update(_read_listings_catalog(sac_listings))
+    test_stored = bool(getattr(args, "test_stored", False))
+    kind = "stored test" if test_stored else "local rescan"
     _progress(
         "rescan",
         f"Re-parsing on-disk Sacramento PDFs in {docs_dir} (no CNPA, no court)…",
     )
     rows = rescan_local_rows("sacramento", docs_dir, listings_catalog=catalog)
     rows = stamp_fub_tags(rows, COUNTY)
-    merge_listings(listings_path, rows, run_date)
-    merge_listings(sac_listings, rows, run_date)
+    if not test_stored:
+        merge_listings(listings_path, rows, run_date)
+        merge_listings(sac_listings, rows, run_date)
     print(
-        f"Sacramento local rescan — {run_date} — 0 new / {len(rows)} unique",
+        f"Sacramento {kind} — {run_date} — 0 new / {len(rows)} unique",
         flush=True,
     )
     _progress(
         "cnpa_done",
-        f"Local rescan found {len(rows)} on-disk Sacramento cases.",
+        f"Local {kind} found {len(rows)} on-disk Sacramento cases.",
         notices=len(rows),
         notice_count=len(rows),
         new_count=0,
     )
+    if test_stored:
+        return _finish_stored_test(rows, state_path, source_id="sacramento")
     result = _finish_fub(args, rows, state, state_path, source_id="sacramento")
     if result == 0:
         return 0
@@ -451,7 +465,7 @@ def main() -> int:
         os.environ["FUB_PREVIEW_ONE"] = "1"
     if args.fub_verify_one:
         os.environ["FUB_VERIFY_ONLY"] = "1"
-    if args.rescan_local:
+    if args.test_stored or args.rescan_local:
         return _run_rescan_local(args, root)
 
     start, end = default_window(args.lookback_days, args.lookahead_days)
@@ -629,6 +643,21 @@ def main() -> int:
         fub_skipped=skipped,
     )
     save_state(state_path, state)
+    text_body, html_body = refresh_digest_with_fub(
+        unique,
+        start,
+        end,
+        urls,
+        out_dir,
+        county=COUNTY,
+        posted=posted,
+        updated=updated,
+        skipped=skipped,
+    )
+    subject = (
+        f"Sacramento probate notices — {run_date} — "
+        f"{new_count} new / {len(unique)} unique · FUB posted {posted}"
+    )
     (state_path.parent / "fub_last.json").write_text(
         json.dumps(
             {

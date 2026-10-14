@@ -9,7 +9,9 @@ and emails an HTML + text report.
 from __future__ import annotations
 
 import argparse
+import csv
 import html
+import io
 import json
 import os
 import re
@@ -17,6 +19,7 @@ import smtplib
 import ssl
 import sys
 import time
+import zipfile
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from email.mime.application import MIMEApplication
@@ -549,6 +552,296 @@ def merge_listings(path: Path, rows: list[dict], run_date: str) -> None:
     )
 
 
+FUB_STATUS_NO_ID = "no_id"
+FUB_STATUS_ID = "id"
+FUB_STATUS_DELETED = "deleted"
+_LISTING_DATEISH = re.compile(r"^\d{4}-\d{2}-\d{2}")
+_ILLEGAL_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+LISTING_EXPORT_COLUMNS = (
+    ("added_at", "Added"),
+    ("date", "Notice date"),
+    ("source", "Source"),
+    ("case_number", "Case"),
+    ("petitioner", "Petitioner"),
+    ("petitioner_address", "Petitioner address"),
+    ("decedent", "Decedent"),
+    ("decedent_address", "Decedent address"),
+    ("hearing", "Hearing"),
+    ("newspaper", "Newspaper"),
+    ("fub_status_label", "FUB status"),
+    ("fub_person_id", "FUB person id"),
+    ("fub_removed", "FUB removed"),
+    ("notice_url", "Notice URL"),
+    ("court_url", "Court URL"),
+    ("status", "Status"),
+    ("first_seen", "First seen"),
+    ("last_seen", "Last seen"),
+    ("first_collected", "First collected"),
+    ("last_collected", "Last collected"),
+)
+
+
+def _dateish(value) -> str:
+    if value in (None, "", False, True):
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() in {"true", "false"}:
+        return ""
+    return text
+
+
+def listing_fub_fields(record: dict | None) -> tuple[str, int | None, bool]:
+    rec = record or {}
+    removed = bool(rec.get("fub_removed"))
+    raw = rec.get("fub_person_id")
+    person_id = None
+    if raw not in (None, "", 0, "0"):
+        try:
+            person_id = int(raw)
+        except (TypeError, ValueError):
+            person_id = None
+    if removed:
+        return FUB_STATUS_DELETED, person_id, True
+    if person_id is None:
+        return FUB_STATUS_NO_ID, None, False
+    return FUB_STATUS_ID, person_id, False
+
+
+def fub_status_label(status: str, person_id: int | None = None) -> str:
+    if status == FUB_STATUS_DELETED:
+        return "deleted"
+    if status == FUB_STATUS_ID:
+        return str(person_id) if person_id is not None else "ID"
+    return "no id"
+
+
+def listing_added_at(listing: dict, seen: dict | None = None) -> str:
+    sources = (seen or {}, listing or {})
+    for key in ("first_seen", "first_collected", "added_at"):
+        for source in sources:
+            text = _dateish(source.get(key))
+            if text:
+                return text[:10] if _LISTING_DATEISH.match(text) else text
+    for key in ("last_seen", "last_collected", "date", "filed"):
+        for source in sources:
+            text = _dateish(source.get(key))
+            if text:
+                return text[:10] if _LISTING_DATEISH.match(text) else text
+    return ""
+
+
+def load_seen_case_index(data_dir: Path) -> dict[str, dict]:
+    index: dict[str, dict] = {}
+    for name in ("seen_cases.json", "seen_cases_sacramento.json"):
+        path = data_dir / name
+        if not path.exists():
+            continue
+        cases = load_state(path).get("cases") or {}
+        if not isinstance(cases, dict):
+            continue
+        for key, rec in cases.items():
+            if not key or not isinstance(rec, dict):
+                continue
+            case = str(key).strip()
+            prev = index.get(case)
+            if prev is None:
+                index[case] = dict(rec)
+                continue
+            merged = dict(prev)
+            for field, value in rec.items():
+                if value not in (None, "", [], {}):
+                    merged[field] = value
+            if prev.get("fub_removed") or rec.get("fub_removed"):
+                merged["fub_removed"] = True
+            if prev.get("fub_person_id") and not merged.get("fub_person_id"):
+                merged["fub_person_id"] = prev.get("fub_person_id")
+            first_prev = _dateish(prev.get("first_seen"))
+            first_new = _dateish(rec.get("first_seen"))
+            if first_prev and (not first_new or first_prev < first_new):
+                merged["first_seen"] = first_prev
+            index[case] = merged
+    return index
+
+
+def enrich_listing(item: dict, seen_index: dict | None = None) -> dict:
+    row = dict(item or {})
+    key = str(row.get("case_number") or "").strip()
+    seen = dict((seen_index or {}).get(key) or {})
+    status, person_id, removed = listing_fub_fields(seen or row)
+    row["added_at"] = listing_added_at(row, seen)
+    row["first_seen"] = _dateish(seen.get("first_seen")) or _dateish(row.get("first_collected"))
+    row["last_seen"] = _dateish(seen.get("last_seen")) or _dateish(row.get("last_collected"))
+    row["fub_status"] = status
+    row["fub_person_id"] = person_id
+    row["fub_removed"] = removed
+    row["fub_status_label"] = fub_status_label(status, person_id)
+    return row
+
+
+def filter_listings(
+    listings: list[dict],
+    *,
+    query: str = "",
+    source_id: str = "",
+    fub_status: str = "",
+) -> list[dict]:
+    wanted_source = str(source_id or "").strip().lower()
+    wanted_fub = str(fub_status or "").strip().lower().replace(" ", "_")
+    if wanted_fub in {"noid", "no-id"}:
+        wanted_fub = FUB_STATUS_NO_ID
+    q = str(query or "").strip().lower()
+    out: list[dict] = []
+    for row in listings:
+        if wanted_source and str(row.get("source_id") or "").lower() != wanted_source:
+            continue
+        if wanted_fub and str(row.get("fub_status") or "") != wanted_fub:
+            continue
+        if q:
+            blob = " ".join(
+                str(row.get(key) or "")
+                for key in (
+                    "case_number",
+                    "date",
+                    "added_at",
+                    "source",
+                    "petitioner",
+                    "decedent",
+                    "decedent_address",
+                    "petitioner_address",
+                    "newspaper",
+                    "filed",
+                    "hearing",
+                    "fub_status",
+                    "fub_status_label",
+                    "fub_person_id",
+                )
+            ).lower()
+            if q not in blob:
+                continue
+        out.append(row)
+    return out
+
+
+def _listing_export_value(row: dict, key: str) -> str:
+    if key == "fub_status_label":
+        return fub_status_label(str(row.get("fub_status") or ""), row.get("fub_person_id"))
+    if key == "fub_removed":
+        return "true" if row.get("fub_removed") else "false"
+    value = row.get(key)
+    if value in (None, False, True):
+        return "" if value in (None, False) else "true"
+    return str(value)
+
+
+def listings_csv_bytes(listings: list[dict]) -> bytes:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([header for _key, header in LISTING_EXPORT_COLUMNS])
+    for row in listings:
+        writer.writerow(
+            [_listing_export_value(row, key) for key, _header in LISTING_EXPORT_COLUMNS]
+        )
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+def _xlsx_escape(text: str) -> str:
+    cleaned = _ILLEGAL_XML.sub("", str(text or ""))
+    return (
+        cleaned.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def listings_xlsx_bytes(listings: list[dict]) -> bytes:
+    rows_xml = []
+    header_cells = "".join(
+        f'<c t="inlineStr"><is><t>{_xlsx_escape(header)}</t></is></c>'
+        for _key, header in LISTING_EXPORT_COLUMNS
+    )
+    rows_xml.append(f'<row r="1">{header_cells}</row>')
+    for index, row in enumerate(listings, start=2):
+        cells = "".join(
+            f'<c t="inlineStr"><is><t xml:space="preserve">{_xlsx_escape(_listing_export_value(row, key))}</t></is></c>'
+            for key, _header in LISTING_EXPORT_COLUMNS
+        )
+        rows_xml.append(f'<row r="{index}">{cells}</row>')
+    sheet = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f"<sheetData>{''.join(rows_xml)}</sheetData></worksheet>"
+    )
+    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>
+"""
+    rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+"""
+    workbook = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Listings" sheetId="1" r:id="rId1"/></sheets>
+</workbook>
+"""
+    workbook_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>
+"""
+    blob = io.BytesIO()
+    with zipfile.ZipFile(blob, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels)
+        zf.writestr("xl/workbook.xml", workbook)
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet)
+    return blob.getvalue()
+
+
+def build_listings_payload(data_dir: Path) -> dict:
+    path = data_dir / "listings.json"
+    catalog = _read_listings_catalog(path)
+    catalog.update(_read_listings_catalog(data_dir / "listings_sacramento.json"))
+    reports = data_dir / "reports"
+    if not catalog and reports.is_dir():
+        rows: list[dict] = []
+        for dossier in list(sorted(reports.glob("dossiers-*.json"))) + list(
+            sorted((reports / "sacramento").glob("sacramento-dossiers-*.json"))
+        ):
+            try:
+                payload = json.loads(dossier.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, list):
+                rows.extend(item for item in payload if isinstance(item, dict))
+        if rows:
+            stamp = max(
+                (str(item.get("post_date") or item.get("filed") or "") for item in rows),
+                default="",
+            ) or datetime.now().date().isoformat()
+            merge_listings(path, rows, stamp)
+            catalog = _read_listings_catalog(path)
+            catalog.update(_read_listings_catalog(data_dir / "listings_sacramento.json"))
+    seen = load_seen_case_index(data_dir)
+    listings = sorted(
+        (enrich_listing(item, seen) for item in catalog.values()),
+        key=lambda item: (
+            str(item.get("date") or ""),
+            str(item.get("case_number") or ""),
+        ),
+        reverse=True,
+    )
+    return {"count": len(listings), "listings": listings}
+
+
 def mark_new(notices: list[Notice], state: dict, run_date: str) -> list[Notice]:
     cases = state.setdefault("cases", {})
     for notice in notices:
@@ -578,19 +871,46 @@ def yesno(flag: bool) -> str:
     return "Yes" if flag else "No"
 
 
+def fub_digest_suffix(
+    *,
+    fub_posted: int | None = None,
+    fub_updated: int | None = None,
+    fub_skipped: int | None = None,
+) -> tuple[str, str]:
+    """CNPA 'new' is first-seen only; Follow Up Boss counts are separate."""
+    if fub_posted is None and fub_updated is None and fub_skipped is None:
+        return "", ""
+    posted = int(fub_posted or 0)
+    updated = int(fub_updated or 0)
+    skipped = int(fub_skipped or 0)
+    text = f"  |  Follow Up Boss: posted {posted}, updated {updated}, skipped {skipped}"
+    html = (
+        f" &nbsp;|&nbsp; Follow Up Boss: posted <strong>{posted}</strong>, "
+        f"updated <strong>{updated}</strong>, skipped <strong>{skipped}</strong>"
+    )
+    return text, html
+
+
 def build_text(
     notices: list[Notice],
     start: date,
     end: date,
     urls: list[str],
     county: str = "Placer",
+    *,
+    fub_posted: int | None = None,
+    fub_updated: int | None = None,
+    fub_skipped: int | None = None,
 ) -> str:
     new_items = [n for n in notices if n.first_seen]
+    fub_text, _ = fub_digest_suffix(
+        fub_posted=fub_posted, fub_updated=fub_updated, fub_skipped=fub_skipped
+    )
     lines = [
         f"Hammond IT Consulting — Blake Hammond Realty",
         f"{county} County probate petition notices",
         f"Window: {start.isoformat()} to {end.isoformat()}",
-        f"Unique estates: {len(notices)}  |  New today: {len(new_items)}",
+        f"Unique estates: {len(notices)}  |  New today: {len(new_items)}{fub_text}",
         "",
     ]
     if not notices:
@@ -650,8 +970,15 @@ def build_html(
     end: date,
     urls: list[str],
     county: str = "Placer",
+    *,
+    fub_posted: int | None = None,
+    fub_updated: int | None = None,
+    fub_skipped: int | None = None,
 ) -> str:
     new_count = sum(1 for n in notices if n.first_seen)
+    _, fub_html = fub_digest_suffix(
+        fub_posted=fub_posted, fub_updated=fub_updated, fub_skipped=fub_skipped
+    )
     rows = "\n".join(row_html(n) for n in sorted(notices, key=lambda x: x.sort_key()))
     watch = "".join(
         f"<li>{html.escape(n.decedent)} — {html.escape(n.case_number)}</li>"
@@ -666,7 +993,7 @@ def build_html(
   <h2>{html.escape(county)} County probate petition notices</h2>
   <p>Window {start.isoformat()} → {end.isoformat()} &nbsp;|&nbsp;
      Unique estates: <strong>{len(notices)}</strong> &nbsp;|&nbsp;
-     New since last run: <strong>{new_count}</strong></p>
+     New since last run: <strong>{new_count}</strong>{fub_html}</p>
   {empty}
   <table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;width:100%;font-size:14px;">
     <thead style="background:#f3f3f3;">
@@ -907,6 +1234,42 @@ def write_outputs(out_dir: Path, text_body: str, html_body: str, notices: list[N
     (out_dir / f"report-{stamp}.html").write_text(html_body, encoding="utf-8")
     payload = [asdict(n) for n in notices]
     (out_dir / f"notices-{stamp}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def refresh_digest_with_fub(
+    notices: list[Notice],
+    start: date,
+    end: date,
+    urls: list[str],
+    out_dir: Path,
+    *,
+    county: str = "Placer",
+    posted: int = 0,
+    updated: int = 0,
+    skipped: int = 0,
+) -> tuple[str, str]:
+    text_body = build_text(
+        notices,
+        start,
+        end,
+        urls,
+        county,
+        fub_posted=posted,
+        fub_updated=updated,
+        fub_skipped=skipped,
+    )
+    html_body = build_html(
+        notices,
+        start,
+        end,
+        urls,
+        county,
+        fub_posted=posted,
+        fub_updated=updated,
+        fub_skipped=skipped,
+    )
+    write_outputs(out_dir, text_body, html_body, notices)
+    return text_body, html_body
 
 
 def parse_args() -> argparse.Namespace:
@@ -1306,6 +1669,20 @@ def main() -> int:
         fub_skipped=skipped,
     )
     save_state(state_path, state)
+    text_body, html_body = refresh_digest_with_fub(
+        unique,
+        start,
+        end,
+        urls,
+        out_dir,
+        posted=posted,
+        updated=updated,
+        skipped=skipped,
+    )
+    subject = (
+        f"Placer probate notices — {run_date} — "
+        f"{new_count} new / {len(unique)} unique · FUB posted {posted}"
+    )
     (state_path.parent / "fub_last.json").write_text(
         json.dumps(
             {

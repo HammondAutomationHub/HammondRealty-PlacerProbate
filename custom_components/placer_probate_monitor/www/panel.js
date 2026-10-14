@@ -51,6 +51,8 @@ const PPM_CSS = `
   .ppm-pre { white-space: pre-wrap; font: 12px/1.4 ui-monospace, Consolas, monospace; margin: 0; }
   .ppm-table-wrap { overflow-x: auto; }
   .ppm-wrap main.ppm-listings { max-width: 1440px; }
+  .ppm-listings-tools { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; align-items: end; }
+  @media (max-width: 900px) { .ppm-listings-tools { grid-template-columns: 1fr; } }
 `;
 
 function ppmSleep(ms) {
@@ -266,6 +268,89 @@ function ppmEsc(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function ppmXml(value) {
+  return ppmEsc(value).replace(/\r/g, "&#13;").replace(/\n/g, "&#10;");
+}
+
+function ppmDownloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function ppmCsvCell(value) {
+  const text = value == null ? "" : String(value);
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function ppmListingFubLabel(row) {
+  const status = String(row.fub_status || "");
+  if (status === "deleted" || row.fub_removed) return "deleted";
+  if (status === "id" && row.fub_person_id) return String(row.fub_person_id);
+  if (status === "id") return "ID";
+  return "no id";
+}
+
+function ppmListingExportRows(rows) {
+  const headers = [
+    ["added_at", "Added"],
+    ["date", "Notice date"],
+    ["source", "Source"],
+    ["case_number", "Case"],
+    ["petitioner", "Petitioner"],
+    ["petitioner_address", "Petitioner address"],
+    ["decedent", "Decedent"],
+    ["decedent_address", "Decedent address"],
+    ["hearing", "Hearing"],
+    ["newspaper", "Newspaper"],
+    ["fub_status_label", "FUB status"],
+    ["fub_person_id", "FUB person id"],
+    ["fub_removed", "FUB removed"],
+    ["notice_url", "Notice URL"],
+    ["court_url", "Court URL"],
+    ["status", "Status"],
+    ["first_seen", "First seen"],
+    ["last_seen", "Last seen"],
+  ];
+  const body = rows.map((row) => headers.map(([key]) => {
+    if (key === "fub_status_label") return ppmListingFubLabel(row);
+    if (key === "fub_removed") return row.fub_removed ? "true" : "false";
+    const value = row[key];
+    return value == null ? "" : String(value);
+  }));
+  return { headers: headers.map((item) => item[1]), body };
+}
+
+function ppmListingsToCsv(rows) {
+  const { headers, body } = ppmListingExportRows(rows);
+  const lines = [headers.map(ppmCsvCell).join(",")].concat(
+    body.map((vals) => vals.map(ppmCsvCell).join(","))
+  );
+  return `\ufeff${lines.join("\r\n")}`;
+}
+
+function ppmListingsToExcel(rows) {
+  const { headers, body } = ppmListingExportRows(rows);
+  const xmlRow = (vals) => `<Row>${vals.map((value) => `<Cell><Data ss:Type="String">${ppmXml(value)}</Data></Cell>`).join("")}</Row>`;
+  return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Worksheet ss:Name="Listings">
+<Table>
+${xmlRow(headers)}
+${body.map(xmlRow).join("\n")}
+</Table>
+</Worksheet>
+</Workbook>`;
 }
 
 function ppmFubFieldSelect(key, selected, fubFields, builtins) {
@@ -1646,6 +1731,8 @@ class PlacerProbateListingsPanel extends HTMLElement {
     this._ready = false;
     this._rows = [];
     this._query = "";
+    this._source = "";
+    this._fub = "";
   }
 
   set hass(hass) {
@@ -1682,15 +1769,34 @@ class PlacerProbateListingsPanel extends HTMLElement {
         <main class="ppm-listings">
           <div id="flash" class="ppm-banner"></div>
           <section class="ppm-card">
-            <div class="ppm-row">
+            <div class="ppm-listings-tools">
               <div>
                 <label>Filter</label>
-                <input id="listing-q" placeholder="Case, petitioner, decedent, address" />
+                <input id="listing-q" placeholder="Case, petitioner, decedent, address, FUB id" />
+              </div>
+              <div>
+                <label>Source</label>
+                <select id="listing-source">
+                  <option value="">All sources</option>
+                  <option value="placer">Placer County</option>
+                  <option value="sacramento">Sacramento County</option>
+                </select>
+              </div>
+              <div>
+                <label>FUB status</label>
+                <select id="listing-fub">
+                  <option value="">All FUB</option>
+                  <option value="no_id">no id</option>
+                  <option value="id">ID</option>
+                  <option value="deleted">deleted</option>
+                </select>
               </div>
               <div>
                 <label>&nbsp;</label>
                 <div class="ppm-actions" style="margin-top:0;">
                   <button type="button" id="listing-reload">Reload</button>
+                  <button type="button" id="listing-csv" class="secondary">Export CSV</button>
+                  <button type="button" id="listing-xlsx" class="secondary">Export Excel</button>
                 </div>
               </div>
             </div>
@@ -1701,22 +1807,71 @@ class PlacerProbateListingsPanel extends HTMLElement {
       </div>
     `;
     this._qs("#listing-reload").addEventListener("click", () => this._load());
+    this._qs("#listing-csv").addEventListener("click", () => this._export("csv"));
+    this._qs("#listing-xlsx").addEventListener("click", () => this._export("xlsx"));
     this._qs("#listing-q").addEventListener("input", (ev) => {
       this._query = ev.target.value || "";
+      this._renderTable();
+    });
+    this._qs("#listing-source").addEventListener("change", (ev) => {
+      this._source = ev.target.value || "";
+      this._renderTable();
+    });
+    this._qs("#listing-fub").addEventListener("change", (ev) => {
+      this._fub = ev.target.value || "";
       this._renderTable();
     });
   }
 
   _filtered() {
     const q = this._query.trim().toLowerCase();
-    if (!q) return this._rows;
+    const source = this._source;
+    const fub = this._fub;
     return this._rows.filter((row) => {
+      if (source && String(row.source_id || "").toLowerCase() !== source) return false;
+      if (fub && String(row.fub_status || "") !== fub) return false;
+      if (!q) return true;
       const blob = [
-        row.case_number, row.date, row.source, row.petitioner, row.decedent,
-        row.decedent_address, row.petitioner_address, row.newspaper, row.filed,
+        row.case_number, row.date, row.added_at, row.source, row.petitioner, row.decedent,
+        row.decedent_address, row.petitioner_address, row.newspaper, row.filed, row.hearing,
+        row.fub_status, ppmListingFubLabel(row), row.fub_person_id,
       ].map((item) => String(item || "").toLowerCase()).join(" ");
       return blob.includes(q);
     });
+  }
+
+  _fubCell(row) {
+    const label = ppmListingFubLabel(row);
+    const status = String(row.fub_status || "");
+    if (status === "deleted" || row.fub_removed) {
+      return `<span class="ppm-pill off">deleted</span>`;
+    }
+    if (status === "id") {
+      return `<span class="ppm-pill live">${ppmEsc(label)}</span>`;
+    }
+    return `<span class="ppm-pill">no id</span>`;
+  }
+
+  _export(kind) {
+    const rows = this._filtered();
+    if (!rows.length) {
+      this._flash("No visible listings to export.", false);
+      return;
+    }
+    if (kind === "xlsx") {
+      const xml = ppmListingsToExcel(rows);
+      ppmDownloadBlob(
+        "probate-listings.xls",
+        new Blob([xml], { type: "application/vnd.ms-excel" }),
+      );
+      this._flash(`Exported ${rows.length} listing${rows.length === 1 ? "" : "s"} to Excel.`, true);
+      return;
+    }
+    ppmDownloadBlob(
+      "probate-listings.csv",
+      new Blob([ppmListingsToCsv(rows)], { type: "text/csv;charset=utf-8" }),
+    );
+    this._flash(`Exported ${rows.length} listing${rows.length === 1 ? "" : "s"} to CSV.`, true);
   }
 
   _renderTable() {
@@ -1734,11 +1889,14 @@ class PlacerProbateListingsPanel extends HTMLElement {
         : ppmEsc(row.case_number);
       return `<tr>
         <td>${ppmEsc(row.date || row.filed || "—")}</td>
+        <td>${ppmEsc(row.added_at || "—")}</td>
         <td>${ppmEsc(row.source || "Placer County")}</td>
         <td>${caseCell}</td>
         <td>${ppmEsc(row.petitioner || "—")}<div class="ppm-note">${ppmEsc(row.petitioner_address || "")}</div></td>
         <td>${ppmEsc(row.decedent || "—")}</td>
         <td>${ppmEsc(row.decedent_address || "—")}</td>
+        <td>${ppmEsc(row.hearing || "—")}</td>
+        <td>${this._fubCell(row)}</td>
       </tr>`;
     }).join("");
     this._qs("#listing-table").innerHTML = `
@@ -1746,11 +1904,14 @@ class PlacerProbateListingsPanel extends HTMLElement {
         <thead>
           <tr>
             <th>Date</th>
+            <th>Added</th>
             <th>Source</th>
             <th>Case</th>
             <th>Petitioner</th>
             <th>Decedent</th>
             <th>Decedent address</th>
+            <th>Hearing</th>
+            <th>FUB</th>
           </tr>
         </thead>
         <tbody>${body}</tbody>
