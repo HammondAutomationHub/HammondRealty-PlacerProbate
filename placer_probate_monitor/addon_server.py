@@ -347,7 +347,20 @@ def run_job(
         )
         log = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
         DATA.mkdir(parents=True, exist_ok=True)
-        (DATA / "last_run.log").write_text(log, encoding="utf-8")
+        try:
+            from ha_logs import merge_last_run_log, persist_job_logs
+        except ImportError:
+            from .ha_logs import merge_last_run_log, persist_job_logs
+
+        (DATA / "last_run.log").write_text("", encoding="utf-8")
+        merge_last_run_log(DATA, "placer", log)
+        persist_job_logs(
+            DATA,
+            source_id="placer",
+            log_text=log,
+            ok=proc.returncode == 0,
+            error=None if proc.returncode == 0 else (log[-2000:] or f"exit {proc.returncode}"),
+        )
         ok = proc.returncode == 0
         pdfs = sorted(reports_dir().glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True)
         result = {

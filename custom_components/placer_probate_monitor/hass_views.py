@@ -54,6 +54,12 @@ from .datasources import (
     petition_docs_dir,
     resolve_stored_pdf_file,
 )
+from .ha_logs import (
+    HA_LOGS_REQUIRES_AUTH,
+    HA_LOGS_URL,
+    HA_LOGS_VIEW_NAME,
+    build_ha_logs_payload,
+)
 from .fub_client import (
     inspect_fub_person,
     mapping_payload,
@@ -68,7 +74,7 @@ from .fub_client import (
     FUB_GO_GATE_FIELDS,
 )
 
-PANEL_JS_VERSION = "1.3.81"
+PANEL_JS_VERSION = "1.3.82"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -783,6 +789,32 @@ class StoredDocsFileView(HomeAssistantView):
         )
 
 
+class LogsView(HomeAssistantView):
+    url = HA_LOGS_URL
+    name = HA_LOGS_VIEW_NAME
+    requires_auth = HA_LOGS_REQUIRES_AUTH
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        wanted = str(request.query.get("source_id") or "").strip().lower()
+        if wanted and wanted not in {"placer", "sacramento"}:
+            payload, status = _api_error("Unknown data source.")
+            return self.json(payload, status_code=status)
+        max_bytes = request.query.get("max_bytes")
+
+        def _build() -> dict:
+            return build_ha_logs_payload(
+                Path(self.hass.config.path(DOMAIN)),
+                source_id=wanted or None,
+                max_bytes=max_bytes,
+            )
+
+        payload = await self.hass.async_add_executor_job(_build)
+        return self.json(payload)
+
+
 class ListingsView(HomeAssistantView):
     url = "/api/placer_probate_monitor/listings"
     name = "api:placer_probate_monitor:listings"
@@ -877,6 +909,7 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(StoredDocsView(hass))
     hass.http.register_view(StoredDocsZipView(hass))
     hass.http.register_view(StoredDocsFileView(hass))
+    hass.http.register_view(LogsView(hass))
     hass.http.register_view(ListingsView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 

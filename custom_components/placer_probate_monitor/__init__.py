@@ -473,13 +473,21 @@ def _run_one_source(hass: HomeAssistant, settings: dict, source_id: str) -> dict
         check=False,
     )
     log = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
-    existing = ""
-    last_log = data_dir / "last_run.log"
-    if last_log.exists():
-        existing = last_log.read_text(encoding="utf-8")
-    prefix = f"\n===== {source_id} =====\n"
-    last_log.write_text((existing + prefix + log).strip(), encoding="utf-8")
-    return _parse_job_log(log, data_dir, reports, proc.returncode)
+    try:
+        from .ha_logs import merge_last_run_log, persist_job_logs
+    except ImportError:
+        from ha_logs import merge_last_run_log, persist_job_logs
+
+    merge_last_run_log(data_dir, source_id, log)
+    parsed = _parse_job_log(log, data_dir, reports, proc.returncode)
+    persist_job_logs(
+        data_dir,
+        source_id=source_id,
+        log_text=log,
+        ok=bool(parsed.get("ok")),
+        error=parsed.get(ATTR_LAST_ERROR),
+    )
+    return parsed
 
 
 def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
@@ -608,6 +616,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         },
     }
     hass.data[DOMAIN][entry.entry_id] = store
+    try:
+        from .ha_logs import attach_component_logger
+    except ImportError:
+        from ha_logs import attach_component_logger
+
+    attach_component_logger(Path(hass.config.path(DOMAIN)))
 
     async def _execute(reason: str, overrides: dict | None = None) -> dict:
         if store["running"]:
