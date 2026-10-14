@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -13,11 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "custom_components" / "placer_probate_monitor"))
 
 from datasources import (  # noqa: E402
+    all_stored_docs_inventory,
     is_de147s_name,
     local_case_complete,
     rescan_local_rows,
 )
-from fub_client import gate_reason, needs_fub_create  # noqa: E402
+from fub_client import gate_reason, needs_fub_create, score_stored_rows  # noqa: E402
+from placer_probate_monitor import _finish_stored_test  # noqa: E402
 from placer_probate_monitor import Notice, enrich_notices  # noqa: E402
 from sacramento_probate_monitor import enrich_notices as enrich_sacramento  # noqa: E402
 
@@ -231,6 +234,76 @@ class LocalRescanTests(unittest.TestCase):
             client_cls.assert_not_called()
             self.assertEqual(rows[0]["source_id"], "sacramento")
             self.assertTrue(rows[0]["rescanned_local"])
+
+
+class StoredDocsInventoryTests(unittest.TestCase):
+    def test_lists_public_pdfs_and_skips_de147s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            placer = "S-PR-0014195"
+            sac = "26PR001581"
+            _pdf(root / "reports" / "docs" / placer / f"{placer}_DE-111.pdf")
+            _pdf(root / "reports" / "docs" / placer / f"{placer}_DE-147.pdf")
+            _pdf(root / "reports" / "docs" / placer / f"{placer}_DE-147S.pdf")
+            _pdf(root / "reports" / "sacramento" / "docs" / sac / f"{sac}_DE-111.pdf")
+            payload = all_stored_docs_inventory(root)
+            self.assertEqual(payload["case_count"], 2)
+            self.assertEqual(payload["pdf_count"], 3)
+            placer_inv = next(item for item in payload["counties"] if item["id"] == "placer")
+            self.assertEqual(placer_inv["ha_path"], "config/placer_probate_monitor/reports/docs")
+            self.assertEqual(placer_inv["laptop_path"], "data/reports/docs")
+            names = placer_inv["cases"][0]["files"]
+            self.assertIn(f"{placer}_DE-111.pdf", names)
+            self.assertIn(f"{placer}_DE-147.pdf", names)
+            self.assertFalse(any("147S" in name.upper() for name in names))
+
+
+class StoredTestScoreTests(unittest.TestCase):
+    def test_counts_go_versus_nogo_without_fub(self):
+        go_row = {
+            "case_number": "S-PR-0014195",
+            "source_id": "placer",
+            "petitioner": "John Henderson",
+            "mailing_address": "51 Ashby Hills Ct, Henderson, NV 89012",
+            "petition_pdf": "/config/placer_probate_monitor/reports/docs/S-PR-0014195/S-PR-0014195_DE-111.pdf",
+        }
+        nogo_row = {
+            "case_number": "S-PR-0014204",
+            "source_id": "placer",
+            "petitioner": "Jane Doe",
+        }
+        os.environ.pop("FUB_GO_REQUIRED_FIELDS", None)
+        os.environ["FUB_STRICT_PROPERTY"] = "0"
+        os.environ["FUB_DATA_SOURCE"] = "placer"
+        summary = score_stored_rows([go_row, nogo_row])
+        self.assertTrue(summary["stored_test"])
+        self.assertEqual(summary["go_count"], 1)
+        self.assertEqual(summary["nogo_count"], 1)
+        self.assertEqual(summary["posted"], 0)
+        self.assertEqual(summary["cases"][1]["reason"], "missing_petitioner_address")
+
+    def test_finish_writes_sidecar_and_skips_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "seen_cases.json"
+            state_path.write_text("{}", encoding="utf-8")
+            rows = [
+                {
+                    "case_number": "S-PR-0014195",
+                    "source_id": "placer",
+                    "petitioner": "John Henderson",
+                    "mailing_address": "51 Ashby Hills Ct, Henderson, NV 89012",
+                }
+            ]
+            os.environ.pop("FUB_GO_REQUIRED_FIELDS", None)
+            os.environ["FUB_STRICT_PROPERTY"] = "0"
+            with patch("fub_client.export_new_leads") as export:
+                code = _finish_stored_test(rows, state_path, source_id="placer")
+            export.assert_not_called()
+            self.assertEqual(code, 0)
+            sidecar = json.loads((Path(tmp) / "fub_last.json").read_text(encoding="utf-8"))
+            self.assertTrue(sidecar["stored_test"])
+            self.assertEqual(sidecar["go_count"], 1)
+            self.assertEqual(state_path.read_text(encoding="utf-8"), "{}")
 
 
 if __name__ == "__main__":

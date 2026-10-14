@@ -189,6 +189,10 @@
     "rescan_local": {
       "name": "Rescan local files",
       "description": "Re-parse on-disk DE-111/DE-147 PDFs for enabled counties. Does not search CNPA or contact court portals. Follow Up Boss export still runs if enabled."
+    },
+    "test_stored": {
+      "name": "Test stored data",
+      "description": "Parse every on-disk DE-111/DE-147 already on this Home Assistant box and score the current Go checklist. Does not search CNPA, contact court portals, email, or post to Follow Up Boss."
     }
   }
 }

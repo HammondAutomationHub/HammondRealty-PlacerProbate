@@ -2584,6 +2584,77 @@ def preview_one_record(
     }
 
 
+def score_stored_rows(
+    rows: list[dict],
+    *,
+    mapping_path: Path | None = None,
+) -> dict:
+    """Apply the current Go checklist to already-parsed local rows. No FUB POST."""
+    mapping = mapping_for_export(
+        load_mapping(mapping_path),
+        _row_source_id(rows[0] if rows else None),
+    )
+    strict = _env_bool("FUB_STRICT_PROPERTY")
+    blank_state: dict = {"cases": {}}
+    cases: list[dict] = []
+    skips: list[dict] = []
+    go = 0
+    nogo = 0
+    for row in rows:
+        key = case_key(row)
+        reason = gate_reason(
+            row,
+            blank_state,
+            mapping,
+            strict_property=strict,
+            existing_id=None,
+        )
+        if reason:
+            nogo += 1
+            skips.append({"case": key, "reason": reason})
+            gate = "no-go"
+        else:
+            go += 1
+            gate = "go"
+        cases.append(
+            {
+                "case": key,
+                "gate": gate,
+                "reason": reason or "",
+                "petitioner": portal_petitioner(row) or row.get("petitioner") or "",
+                "decedent": row.get("decedent") or "",
+                "mailing_address": row.get("mailing_address") or "",
+                "decedent_residence": row.get("decedent_residence") or "",
+                "petition_pdf": Path(str(row.get("petition_pdf") or "")).name,
+                "duties_pdf": Path(str(row.get("duties_pdf") or "")).name,
+            }
+        )
+        print(
+            f"Stored test {key}: {gate}"
+            + (f" ({reason})" if reason else ""),
+            flush=True,
+        )
+    note = (
+        f"Stored test: {go} GO / {nogo} no-go using the current Required for Go list. "
+        "Follow Up Boss was not updated. Seen-cases were not updated. No CNPA or court."
+    )
+    return {
+        "ok": True,
+        "posted": 0,
+        "updated": 0,
+        "skipped": nogo,
+        "error": None,
+        "stored_test": True,
+        "preview": False,
+        "go_count": go,
+        "nogo_count": nogo,
+        "cases": cases,
+        "skips": skips,
+        "verify_note": note,
+        "verify_record": None,
+    }
+
+
 def _row_source_id(row: dict | None = None) -> str:
     return (
         str(

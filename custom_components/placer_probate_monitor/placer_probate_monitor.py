@@ -935,6 +935,11 @@ def parse_args() -> argparse.Namespace:
         help="Re-parse on-disk DE-111/DE-147 PDFs only; no CNPA search and no court portal",
     )
     p.add_argument(
+        "--test-stored",
+        action="store_true",
+        help="Parse on-disk PDFs and score the Go checklist. No CNPA, court, email, or Follow Up Boss",
+    )
+    p.add_argument(
         "--refresh-case",
         action="append",
         default=[],
@@ -1043,6 +1048,46 @@ def _finish_fub(
     return 1  # continue to email unless caller stops
 
 
+def _finish_stored_test(
+    rows: list[dict],
+    state_path: Path,
+    *,
+    source_id: str = "placer",
+) -> int:
+    try:
+        from .fub_client import score_stored_rows
+    except ImportError:
+        from fub_client import score_stored_rows
+
+    summary = score_stored_rows(
+        rows, mapping_path=state_path.parent / "fub_mapping.yaml"
+    )
+    if source_id == "sacramento":
+        summary["source_id"] = "sacramento"
+    (state_path.parent / "fub_last.json").write_text(
+        json.dumps(summary, indent=2),
+        encoding="utf-8",
+    )
+    go = int(summary.get("go_count") or 0)
+    nogo = int(summary.get("nogo_count") or 0)
+    print(
+        f"Stored test: {go} GO / {nogo} no-go. Follow Up Boss not updated.",
+        flush=True,
+    )
+    _progress(
+        "done",
+        f"Stored test finished. {go} GO / {nogo} no-go. No scrape, no Follow Up Boss.",
+        fub_posted=0,
+        fub_updated=0,
+        fub_skipped=nogo,
+        go_count=go,
+        nogo_count=nogo,
+        notice_count=len(rows),
+        new_count=0,
+    )
+    return 0
+
+
 def _run_rescan_local(args: argparse.Namespace, root: Path) -> int:
     try:
         from .datasources import rescan_local_rows, stamp_fub_tags
@@ -1063,24 +1108,29 @@ def _run_rescan_local(args: argparse.Namespace, root: Path) -> int:
     run_date = today_local().isoformat()
     listings_path = state_path.parent / "listings.json"
     catalog = _read_listings_catalog(listings_path)
+    test_stored = bool(getattr(args, "test_stored", False))
+    kind = "stored test" if test_stored else "local rescan"
     _progress(
         "rescan",
         f"Re-parsing on-disk Placer PDFs in {docs_dir} (no CNPA, no court)…",
     )
     rows = rescan_local_rows("placer", docs_dir, listings_catalog=catalog)
     rows = stamp_fub_tags(rows, "Placer")
-    merge_listings(listings_path, rows, run_date)
+    if not test_stored:
+        merge_listings(listings_path, rows, run_date)
     print(
-        f"Placer local rescan — {run_date} — 0 new / {len(rows)} unique",
+        f"Placer {kind} — {run_date} — 0 new / {len(rows)} unique",
         flush=True,
     )
     _progress(
         "cnpa_done",
-        f"Local rescan found {len(rows)} on-disk cases.",
+        f"Local {kind} found {len(rows)} on-disk cases.",
         notices=len(rows),
         notice_count=len(rows),
         new_count=0,
     )
+    if test_stored:
+        return _finish_stored_test(rows, state_path, source_id="placer")
     result = _finish_fub(args, rows, state, state_path, source_id="placer")
     if result == 0:
         return 0
@@ -1102,7 +1152,7 @@ def main() -> int:
         os.environ["FUB_PREVIEW_ONE"] = "1"
     if args.fub_verify_one:
         os.environ["FUB_VERIFY_ONLY"] = "1"
-    if args.rescan_local:
+    if args.test_stored or args.rescan_local:
         return _run_rescan_local(args, root)
 
     start, end = default_window(args.lookback_days, args.lookahead_days)

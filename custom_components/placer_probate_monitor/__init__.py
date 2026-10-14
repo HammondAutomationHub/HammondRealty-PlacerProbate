@@ -144,7 +144,11 @@ def apply_env(
     os.environ["SACRAMENTO_PORTAL_PASSWORD"] = str(
         settings.get(CONF_SACRAMENTO_PORTAL_PASSWORD) or ""
     )
-    os.environ["FUB_ENABLED"] = "1" if settings.get(CONF_FUB_ENABLED) else "0"
+    os.environ["FUB_ENABLED"] = (
+        "1"
+        if settings.get(CONF_FUB_ENABLED) and not settings.get("test_stored")
+        else "0"
+    )
     os.environ["FUB_API_URL"] = str(
         settings.get(CONF_FUB_API_URL) or "https://api.followupboss.com/v1"
     )
@@ -328,11 +332,19 @@ def _source_job_cmd(data_dir: Path, settings: dict, source_id: str) -> list[str]
     ]
     if not settings.get(CONF_SEND_EMAIL):
         cmd.append("--no-email")
-    if settings.get(CONF_SKIP_PORTAL) and not settings.get("rescan_local"):
+    if settings.get(CONF_SKIP_PORTAL) and not (
+        settings.get("rescan_local") or settings.get("test_stored")
+    ):
         cmd.append("--skip-portal")
     if not settings.get(CONF_GENERATE_PDF):
         cmd.append("--no-pdf")
-    if settings.get("rescan_local"):
+    if settings.get("test_stored"):
+        cmd.append("--test-stored")
+        if "--no-email" not in cmd:
+            cmd.append("--no-email")
+        if "--no-pdf" not in cmd:
+            cmd.append("--no-pdf")
+    elif settings.get("rescan_local"):
         cmd.append("--rescan-local")
         if "--no-email" not in cmd:
             cmd.append("--no-email")
@@ -356,7 +368,10 @@ def _parse_job_log(log: str, data_dir: Path, reports: Path, returncode: int) -> 
     notice_count = None
     for line in reversed(log.splitlines()):
         if " new / " in line and (
-            "Placer probate notices" in line or "Sacramento probate notices" in line
+            "Placer probate notices" in line
+            or "Sacramento probate notices" in line
+            or "local rescan" in line
+            or "stored test" in line
         ):
             try:
                 tail = line.split("—")[-1]
@@ -372,6 +387,10 @@ def _parse_job_log(log: str, data_dir: Path, reports: Path, returncode: int) -> 
     fub_skipped = None
     fub_error = None
     fub_verify = None
+    stored_test = False
+    go_count = None
+    nogo_count = None
+    stored_cases = []
     sidecar = data_dir / "fub_last.json"
     if sidecar.exists():
         try:
@@ -383,6 +402,13 @@ def _parse_job_log(log: str, data_dir: Path, reports: Path, returncode: int) -> 
             fub_verify = payload.get("verify_record")
             if not fub_verify and payload.get("verify_note"):
                 fub_verify = {"note": payload.get("verify_note")}
+            stored_test = bool(payload.get("stored_test"))
+            if payload.get("go_count") is not None:
+                go_count = payload.get("go_count")
+            if payload.get("nogo_count") is not None:
+                nogo_count = payload.get("nogo_count")
+            if isinstance(payload.get("cases"), list):
+                stored_cases = payload.get("cases")
         except json.JSONDecodeError:
             pass
     view_limit = _read_ecourt_view_limit(data_dir, log)
@@ -424,6 +450,10 @@ def _parse_job_log(log: str, data_dir: Path, reports: Path, returncode: int) -> 
         ATTR_FUB_ERROR: fub_error,
         ATTR_FUB_VERIFY: fub_verify,
         ATTR_ECOURT_VIEW_LIMIT: view_limit,
+        "stored_test": stored_test,
+        "go_count": go_count,
+        "nogo_count": nogo_count,
+        "stored_cases": stored_cases,
         "log_tail": log[-1500:],
     }
 
@@ -503,10 +533,14 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
         ATTR_FUB_UPDATED: 0,
         ATTR_FUB_SKIPPED: 0,
         ATTR_FUB_ERROR: None,
-        ATTR_FUB_VERIFY: None,
-        ATTR_ECOURT_VIEW_LIMIT: {},
-        "log_tail": "",
-    }
+            ATTR_FUB_VERIFY: None,
+            ATTR_ECOURT_VIEW_LIMIT: {},
+            "stored_test": False,
+            "go_count": 0,
+            "nogo_count": 0,
+            "stored_cases": [],
+            "log_tail": "",
+        }
     for source_id in sources:
         label = "Placer" if source_id == "placer" else "Sacramento"
         report_progress("start", f"Starting {label} job…")
@@ -523,6 +557,20 @@ def run_monitor_job(hass: HomeAssistant, settings: dict) -> dict:
             combined[ATTR_FUB_ERROR] = result.get(ATTR_FUB_ERROR)
         if result.get(ATTR_FUB_VERIFY):
             combined[ATTR_FUB_VERIFY] = result.get(ATTR_FUB_VERIFY)
+        if result.get("stored_test"):
+            combined["stored_test"] = True
+        if result.get("go_count") is not None:
+            combined["go_count"] = int(combined.get("go_count") or 0) + int(
+                result.get("go_count") or 0
+            )
+        if result.get("nogo_count") is not None:
+            combined["nogo_count"] = int(combined.get("nogo_count") or 0) + int(
+                result.get("nogo_count") or 0
+            )
+        if result.get("stored_cases"):
+            combined["stored_cases"] = list(combined.get("stored_cases") or []) + list(
+                result.get("stored_cases") or []
+            )
         limit = result.get(ATTR_ECOURT_VIEW_LIMIT) or {}
         if limit.get("cases"):
             combined[ATTR_ECOURT_VIEW_LIMIT] = limit
@@ -591,6 +639,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ATTR_FUB_ERROR: result.get(ATTR_FUB_ERROR),
                 ATTR_FUB_VERIFY: result.get(ATTR_FUB_VERIFY),
                 ATTR_ECOURT_VIEW_LIMIT: result.get(ATTR_ECOURT_VIEW_LIMIT),
+                "stored_test": result.get("stored_test"),
+                "go_count": result.get("go_count"),
+                "nogo_count": result.get("nogo_count"),
+                "stored_cases": result.get("stored_cases"),
             }
         )
         store["running"] = False
@@ -702,11 +754,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.bus.async_fire(f"{DOMAIN}_run_finished", result)
 
+    async def _svc_test_stored(_call: ServiceCall) -> None:
+        result = await _execute(
+            "test_stored",
+            {
+                "test_stored": True,
+                "rescan_local": True,
+                CONF_FUB_ENABLED: False,
+                CONF_FUB_VERIFY_ONLY: False,
+                CONF_SEND_EMAIL: False,
+                CONF_GENERATE_PDF: False,
+            },
+        )
+        hass.bus.async_fire(f"{DOMAIN}_run_finished", result)
+
     hass.services.async_register(DOMAIN, "run_now", _svc_run)
     hass.services.async_register(DOMAIN, "test_email", _svc_test)
     hass.services.async_register(DOMAIN, "verify_fub", _svc_verify)
     hass.services.async_register(DOMAIN, "preview_one", _svc_preview)
     hass.services.async_register(DOMAIN, "rescan_local", _svc_rescan)
+    hass.services.async_register(DOMAIN, "test_stored", _svc_test_stored)
     return True
 
 
@@ -730,6 +797,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "verify_fub")
         hass.services.async_remove(DOMAIN, "preview_one")
         hass.services.async_remove(DOMAIN, "rescan_local")
+        hass.services.async_remove(DOMAIN, "test_stored")
         from .hass_views import async_unload_mapping_ui
 
         async_unload_mapping_ui(hass)

@@ -47,7 +47,7 @@ from .const import (
     DOMAIN,
     FUB_EVENT_TYPES,
 )
-from .datasources import petition_docs_dir
+from .datasources import all_stored_docs_inventory, petition_docs_dir
 from .fub_client import (
     inspect_fub_person,
     mapping_payload,
@@ -62,7 +62,7 @@ from .fub_client import (
     FUB_GO_GATE_FIELDS,
 )
 
-PANEL_JS_VERSION = "1.3.79"
+PANEL_JS_VERSION = "1.3.80"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -558,6 +558,14 @@ class JobView(HomeAssistantView):
         payload["fub_preview"] = bool(last.get("preview"))
         if last.get("error"):
             payload["fub_error"] = last.get("error")
+        if last.get("stored_test"):
+            payload["stored_test"] = True
+        if last.get("go_count") is not None:
+            payload["go_count"] = last.get("go_count")
+        if last.get("nogo_count") is not None:
+            payload["nogo_count"] = last.get("nogo_count")
+        if last.get("cases"):
+            payload["stored_cases"] = last.get("cases")
         return payload
 
     async def get(self, request):
@@ -649,9 +657,56 @@ class JobView(HomeAssistantView):
                     },
                 )
             )
+        elif action == "test_stored":
+            self.hass.async_create_task(
+                runner(
+                    "test_stored",
+                    {
+                        "test_stored": True,
+                        "rescan_local": True,
+                        CONF_FUB_ENABLED: False,
+                        CONF_FUB_VERIFY_ONLY: False,
+                        CONF_SEND_EMAIL: False,
+                        CONF_GENERATE_PDF: False,
+                        **extra,
+                    },
+                )
+            )
         else:
             self.hass.async_create_task(runner("panel", extra or None))
         return self.json({"ok": True, "started": True, "action": action})
+
+
+class StoredDocsView(HomeAssistantView):
+    url = "/api/placer_probate_monitor/stored_docs"
+    name = "api:placer_probate_monitor:stored_docs"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        payload = await self.hass.async_add_executor_job(
+            _stored_docs_payload, self.hass, request.query.get("source_id")
+        )
+        return self.json(payload)
+
+
+def _stored_docs_payload(hass: HomeAssistant, source_id: str | None) -> dict:
+    data_dir = Path(hass.config.path(DOMAIN))
+    payload = all_stored_docs_inventory(data_dir)
+    wanted = str(source_id or "").strip().lower()
+    if wanted in {"placer", "sacramento"}:
+        payload["counties"] = [
+            item for item in payload.get("counties") or [] if item.get("id") == wanted
+        ]
+        payload["case_count"] = sum(
+            int(item.get("case_count") or 0) for item in payload["counties"]
+        )
+        payload["pdf_count"] = sum(
+            int(item.get("pdf_count") or 0) for item in payload["counties"]
+        )
+    return payload
 
 
 class ListingsView(HomeAssistantView):
@@ -745,6 +800,7 @@ def async_setup_mapping_views(hass: HomeAssistant) -> None:
     hass.http.register_view(PetitionPdfView(hass))
     hass.http.register_view(DutiesPdfView(hass))
     hass.http.register_view(JobView(hass))
+    hass.http.register_view(StoredDocsView(hass))
     hass.http.register_view(ListingsView(hass))
     hass.data[DOMAIN]["_fub_views"] = True
 

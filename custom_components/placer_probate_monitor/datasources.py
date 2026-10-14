@@ -401,6 +401,76 @@ def iter_local_case_numbers(docs_dir: Path | None) -> list[str]:
     )
 
 
+def listed_case_pdfs(docs_dir: Path | None, case_number: str) -> list[str]:
+    """Public on-disk PDF filenames for one case. Skips DE-147S / invalid files."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for path in _iter_case_pdfs(docs_dir or Path(), case_number):
+        if not is_valid_pdf(path) or is_de147s_name(path.name):
+            continue
+        if path.name in seen:
+            continue
+        seen.add(path.name)
+        names.append(path.name)
+    return names
+
+
+def stored_docs_inventory(docs_dir: Path | None, source_id: str, *, relative_dir: str) -> dict:
+    """Case/PDF inventory for one county docs folder. No court or CNPA."""
+    cases: list[dict[str, Any]] = []
+    pdf_count = 0
+    for case in iter_local_case_numbers(docs_dir):
+        files = listed_case_pdfs(docs_dir, case)
+        pdf_count += len(files)
+        cases.append(
+            {
+                "case_number": case,
+                "files": files,
+                "has_de111": local_de111_pdf(docs_dir, case) is not None,
+                "has_de147": local_de147_pdf(docs_dir, case) is not None,
+            }
+        )
+    return {
+        "id": str(source_id or "").strip().lower() or "placer",
+        "relative_dir": relative_dir,
+        "ha_path": f"config/placer_probate_monitor/{relative_dir}",
+        "laptop_path": f"data/{relative_dir}",
+        "case_count": len(cases),
+        "pdf_count": pdf_count,
+        "cases": cases,
+    }
+
+
+def all_stored_docs_inventory(data_dir: Path) -> dict:
+    """All downloaded petition PDFs already on this Home Assistant box."""
+    root = Path(data_dir)
+    counties = [
+        stored_docs_inventory(
+            petition_docs_dir("placer", data_dir=root),
+            "placer",
+            relative_dir="reports/docs",
+        ),
+        stored_docs_inventory(
+            petition_docs_dir("sacramento", data_dir=root),
+            "sacramento",
+            relative_dir="reports/sacramento/docs",
+        ),
+    ]
+    return {
+        "ha_root": "config/placer_probate_monitor",
+        "copy_hint": (
+            "These PDFs are already on Home Assistant under "
+            "config/placer_probate_monitor/. Copy reports/docs and "
+            "reports/sacramento/docs into a laptop checkout at data/reports/ "
+            "to run parsers there. Test stored data on this box reads the same "
+            "files in place and does not scrape CNPA or court portals."
+        ),
+        "counties": counties,
+        "case_count": sum(int(item.get("case_count") or 0) for item in counties),
+        "pdf_count": sum(int(item.get("pdf_count") or 0) for item in counties),
+    }
+
+
 def rescan_local_rows(
     source_id: str,
     docs_dir: Path | None,

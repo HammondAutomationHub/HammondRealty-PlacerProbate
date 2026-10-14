@@ -142,6 +142,16 @@ function ppmJobDoneMessage(st) {
     return ppmText(st.last_error) || "Still running. Check Status or last_run.log.";
   }
   const bits = [`Finished (${st.last_result || "ok"})`];
+  const go = st.go_count != null ? st.go_count : (st.progress && st.progress.go_count);
+  const nogo = st.nogo_count != null ? st.nogo_count : (st.progress && st.progress.nogo_count);
+  if (st.stored_test || (go != null && nogo != null && (st.fub_verify_note || "").toLowerCase().includes("stored test"))) {
+    const notices = st.notice_count != null ? st.notice_count : (st.progress && st.progress.notice_count);
+    if (notices != null) bits.push(`${notices} stored cases`);
+    if (go != null) bits.push(`${go} GO`);
+    if (nogo != null) bits.push(`${nogo} no-go`);
+    bits.push("no scrape, Follow Up Boss not updated");
+    return bits.join(" · ");
+  }
   const notices = st.notice_count != null ? st.notice_count : (st.progress && st.progress.notice_count);
   const neu = st.new_count != null ? st.new_count : (st.progress && st.progress.new_count);
   if (notices != null) bits.push(`${notices} unique CNPA notices`);
@@ -153,6 +163,71 @@ function ppmJobDoneMessage(st) {
   }
   if (st.fub_error) bits.push(`FUB: ${ppmText(st.fub_error)}`);
   return bits.join(" · ");
+}
+
+function ppmCountyStored(data, sourceId) {
+  const counties = (data && data.counties) || [];
+  return counties.find((item) => item.id === sourceId) || counties[0] || null;
+}
+
+function ppmStoredDocsCard(data, sourceId) {
+  const county = ppmCountyStored(data, sourceId);
+  const hint = (data && data.copy_hint) || "";
+  if (!county) {
+    return `<section class="ppm-card" id="stored-docs">
+      <h2>Stored PDFs on this Home Assistant</h2>
+      <p class="ppm-note">${ppmEsc(hint || "No petition PDFs found yet. Run a county job once to download DE-111/DE-147 files.")}</p>
+    </section>`;
+  }
+  const rows = (county.cases || []).map((item) => {
+    const files = (item.files || []).join(", ") || "—";
+    const de111 = item.has_de111 ? '<span class="ppm-pill live">DE-111</span>' : '<span class="ppm-pill off">no DE-111</span>';
+    const de147 = item.has_de147 ? '<span class="ppm-pill live">DE-147</span>' : '<span class="ppm-pill wait">no DE-147</span>';
+    return `<tr><td>${ppmEsc(item.case_number)}</td><td>${de111} ${de147}</td><td>${ppmEsc(files)}</td></tr>`;
+  }).join("");
+  const table = rows
+    ? `<div class="ppm-table-wrap"><table><thead><tr><th>Case</th><th>Forms</th><th>Files</th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : "<p class='ppm-note'>No public petition PDFs in this county folder yet.</p>";
+  return `<section class="ppm-card" id="stored-docs">
+    <h2>Stored PDFs on this Home Assistant</h2>
+    <p class="ppm-note">${ppmEsc(hint)}</p>
+    <p class="ppm-note">${ppmEsc(county.ha_path)} · ${county.case_count || 0} case${county.case_count === 1 ? "" : "s"} · ${county.pdf_count || 0} PDF${county.pdf_count === 1 ? "" : "s"}. Laptop copy target: ${ppmEsc(county.laptop_path)}</p>
+    ${table}
+  </section>`;
+}
+
+function ppmStoredTestCard(st) {
+  const cases = (st && st.stored_cases) || [];
+  const go = st && st.go_count;
+  const nogo = st && st.nogo_count;
+  const note = (st && st.fub_verify_note) || "";
+  const stored = !!(st && (st.stored_test || cases.length || (note && note.toLowerCase().includes("stored test"))));
+  if (!stored && go == null) {
+    return `<section class="ppm-card" id="stored-test-results">
+      <h2>Last stored-data test</h2>
+      <p class="ppm-note">Run Test stored data to parse PDFs already on this box and count GO vs no-go. That run does not scrape CNPA or court portals and does not post to Follow Up Boss.</p>
+    </section>`;
+  }
+  const rows = cases.map((item) => {
+    const gate = item.gate === "go"
+      ? '<span class="ppm-pill live">GO</span>'
+      : '<span class="ppm-pill off">NO-GO</span>';
+    return `<tr>
+      <td>${ppmEsc(item.case || "")}</td>
+      <td>${gate}</td>
+      <td>${ppmEsc(item.reason || "")}</td>
+      <td>${ppmEsc(item.petitioner || "—")}</td>
+      <td>${ppmEsc(item.petition_pdf || "—")}</td>
+    </tr>`;
+  }).join("");
+  const table = rows
+    ? `<div class="ppm-table-wrap"><table><thead><tr><th>Case</th><th>Gate</th><th>Reason</th><th>Petitioner</th><th>DE-111 file</th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : "";
+  return `<section class="ppm-card" id="stored-test-results">
+    <h2>Last stored-data test</h2>
+    <p class="ppm-note">${ppmEsc(note || `${go ?? 0} GO / ${nogo ?? 0} no-go. Follow Up Boss not updated.`)}</p>
+    ${table}
+  </section>`;
 }
 
 function ppmEsc(value) {
@@ -574,6 +649,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
     this._source = "placer";
     this._data = { sources: [], placer: {}, fields: [], source_fields: {} };
     this._jobSt = {};
+    this._storedDocs = { counties: [] };
     this._mapData = { fub_custom_fields: [], mapping: {}, source_fields: {} };
     this._fubPerson = null;
   }
@@ -715,16 +791,19 @@ class PlacerProbateSourcesPanel extends HTMLElement {
           <div class="ppm-actions">
             ${src.id === "placer" ? '<button id="save-source" type="button">Save Placer import</button>' : '<button id="save-source" type="button">Save Sacramento import</button>'}
             <button class="secondary" id="preview-source" type="button">Preview one extract</button>
+            <button class="secondary" id="test-stored" type="button">Test stored data</button>
             <button class="secondary" id="rescan-source" type="button">Rescan local files</button>
             <button class="secondary" id="run-source" type="button">Run ${ppmEsc(label)} job</button>
           </div>
           <p class="ppm-note">${src.id === "sacramento"
-            ? "Rescan local files re-parses Sacramento PDFs already on disk (no newspaper search, no court login). Preview still hits the portal for one case. Run Sacramento job searches CNPA, skips the court when a valid DE-111 is already saved, and posts to FUB for this county only (Verify only limits that to one person)."
-            : "Rescan local files re-parses Placer PDFs already on disk (no newspaper search, no court login). Preview still hits the portal for one case. Run Placer job searches CNPA, skips the court when a valid DE-111 is already saved, and posts to FUB for this county only (Verify only limits that to one person)."}</p>
+            ? "Test stored data re-parses Sacramento PDFs already on this Home Assistant box, scores the current Go checklist, and does not scrape CNPA, log into the court portal, or post to Follow Up Boss. Rescan local files is the same parse with Follow Up Boss export still on if enabled. Preview still hits the portal for one case. Run Sacramento job searches CNPA, skips the court when a valid DE-111 is already saved, and posts to FUB for this county only (Verify only limits that to one person)."
+            : "Test stored data re-parses Placer PDFs already on this Home Assistant box, scores the current Go checklist, and does not scrape CNPA, log into eCourt, or post to Follow Up Boss. Rescan local files is the same parse with Follow Up Boss export still on if enabled. Preview still hits the portal for one case. Run Placer job searches CNPA, skips the court when a valid DE-111 is already saved, and posts to FUB for this county only (Verify only limits that to one person)."}</p>
         </section>
+        ${ppmStoredDocsCard(this._storedDocs, src.id)}
+        ${ppmStoredTestCard(this._jobSt)}
         <section class="ppm-card" id="source-preview">
           <h2>Last live extract</h2>
-          <p class="ppm-note">Run Preview one extract to see pulled values and the Follow Up Boss mapping for one case.</p>
+          <p class="ppm-note">Run Preview one extract to see pulled values and the Follow Up Boss mapping for one case. That path still contacts court/CNPA.</p>
         </section>
         ${ppmGoNoGoCard(ppmSourceGoNoGo(this._data, this._mapData, src.id), src.name)}
         <section class="ppm-card">
@@ -757,6 +836,7 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       if (saveBtn) saveBtn.addEventListener("click", () => this._save());
       this._qs("#source_enabled").addEventListener("change", (ev) => this._toggleEnabled(src.id, ev.target.checked));
       this._qs("#preview-source").addEventListener("click", () => this._preview(src.id));
+      this._qs("#test-stored").addEventListener("click", () => this._testStored(src.id));
       this._qs("#rescan-source").addEventListener("click", () => this._rescan(src.id));
       this._qs("#run-source").addEventListener("click", () => this._run(src.id));
       const saveMap = this._qs("#save-source-map");
@@ -808,14 +888,16 @@ class PlacerProbateSourcesPanel extends HTMLElement {
 
   async _load() {
     try {
-      const [data, job, mapping] = await Promise.all([
+      const [data, job, mapping, stored] = await Promise.all([
         this._hass.callApi("GET", "placer_probate_monitor/sources"),
         this._hass.callApi("GET", "placer_probate_monitor/job").catch(() => ({})),
         this._hass.callApi("GET", "placer_probate_monitor/fub_mapping").catch(() => ({})),
+        this._hass.callApi("GET", "placer_probate_monitor/stored_docs").catch(() => ({ counties: [] })),
       ]);
       this._data = data;
       this._jobSt = job || {};
       this._mapData = mapping || {};
+      this._storedDocs = stored || { counties: [] };
       this._renderList();
       this._renderBody();
     } catch (err) {
@@ -889,6 +971,29 @@ class PlacerProbateSourcesPanel extends HTMLElement {
       });
       const ok = st.last_result !== "failed" && st.last_result !== "running";
       this._flash(ok ? ppmJobDoneMessage(st) : (ppmText(st.last_error) || `${label} job failed. Check last_run.log.`), ok);
+    } catch (err) {
+      this._flash(ppmText(err), false);
+    }
+  }
+
+  async _testStored(sourceId) {
+    const id = sourceId || "placer";
+    const label = id === "sacramento" ? "Sacramento" : "Placer";
+    this._flash(`Testing stored ${label} PDFs… no CNPA, no court, Follow Up Boss off.`, "wait");
+    try {
+      const st = await ppmRunJob(this._hass, "test_stored", { source_id: id }, (live) => {
+        this._flash(ppmJobLiveMessage(live) || `Scoring stored ${label} files…`, "wait");
+      });
+      this._jobSt = st;
+      this._storedDocs = await this._hass.callApi("GET", "placer_probate_monitor/stored_docs").catch(() => this._storedDocs);
+      this._renderBody();
+      const ok = st.last_result !== "failed" && st.last_result !== "running";
+      this._flash(
+        ok
+          ? (ppmJobDoneMessage(st) || `${label} stored test finished.`)
+          : (ppmText(st.last_error) || `${label} stored test failed. Check last_run.log.`),
+        ok,
+      );
     } catch (err) {
       this._flash(ppmText(err), false);
     }
