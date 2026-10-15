@@ -129,12 +129,71 @@ class ListingsShareViewContractTests(unittest.TestCase):
         self.assertIn("hassUrl", panel)
         share_fn = panel.split("function ppmListingsShareUrl", 1)[1].split("function ", 1)[0]
         self.assertNotIn("access_token", share_fn)
-        self.assertEqual(manifest["version"], "1.3.86")
-        self.assertIn('PANEL_JS_VERSION = "1.3.86"', src)
+        self.assertEqual(manifest["version"], "1.3.87")
+        self.assertIn('PANEL_JS_VERSION = "1.3.87"', src)
         self.assertIn("<th>Added</th>", src)
         self.assertIn("<th>FUB</th>", src)
         self.assertIn('url = "/api/placer_probate_monitor/listings"', src)
         self.assertIn("requires_auth = True", src)
+        self.assertIn('content_type="text/html"', src)
+        self.assertNotIn('content_type="text/html; charset=utf-8"', src)
+
+
+def _public_html_fns():
+    src = (
+        ROOT / "custom_components" / "placer_probate_monitor" / "hass_views.py"
+    ).read_text(encoding="utf-8")
+    start = src.find("def _listing_text")
+    end = src.find("class ListingsPublicView")
+    ns = {"html": __import__("html")}
+    exec(compile(src[start:end], "hass_views.py", "exec"), ns)
+    return ns["_listings_public_html"]
+
+
+class ListingsPublicHtmlTests(unittest.TestCase):
+    def test_incomplete_rows_render_without_crash(self):
+        from datetime import date, datetime
+
+        html_fn = _public_html_fns()
+        page = html_fn(
+            {
+                "listings": [
+                    None,
+                    "not-a-row",
+                    {},
+                    {
+                        "date": None,
+                        "filed": None,
+                        "added_at": None,
+                        "case_number": None,
+                        "petitioner": None,
+                        "decedent": None,
+                        "decedent_address": None,
+                        "hearing": None,
+                        "notice_url": None,
+                        "fub_person_id": None,
+                    },
+                    {
+                        "date": date(2026, 10, 2),
+                        "added_at": datetime(2026, 9, 15, 12, 0, 0),
+                        "case_number": "S-PR-1",
+                        "source": "Placer County",
+                        "fub_status": "id",
+                        "fub_person_id": 5120,
+                    },
+                ]
+            }
+        )
+        self.assertIn("Probate listings", page)
+        self.assertIn("S-PR-1", page)
+        self.assertIn("2026-10-02", page)
+        self.assertIn("2026-09-15", page)
+        self.assertIn("5120", page)
+        page.encode("utf-8")
+        empty = html_fn({"listings": []})
+        self.assertIn("No collected listings yet", empty)
+        empty.encode("utf-8")
+        self.assertIn("No collected listings yet", html_fn(None))
 
 
 if __name__ == "__main__":

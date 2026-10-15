@@ -78,7 +78,7 @@ from .fub_client import (
     FUB_GO_GATE_FIELDS,
 )
 
-PANEL_JS_VERSION = "1.3.86"
+PANEL_JS_VERSION = "1.3.87"
 
 WWW = Path(__file__).resolve().parent / "www"
 MAP_HTML = WWW / "fub_map.html"
@@ -926,40 +926,57 @@ def _listings_share_meta(hass: HomeAssistant) -> dict:
     )
 
 
+def _listing_text(value, fallback: str = "—") -> str:
+    if value is None or value is False:
+        return fallback
+    if hasattr(value, "isoformat") and not isinstance(value, (str, bytes)):
+        try:
+            value = value.isoformat()
+        except Exception:  # noqa: BLE001
+            pass
+    text = str(value).strip()
+    return text or fallback
+
+
 def _listing_fub_cell(row: dict) -> str:
+    if not isinstance(row, dict):
+        return '<span class="ppm-pill">no id</span>'
     status = str(row.get("fub_status") or "")
     if status == "deleted" or row.get("fub_removed"):
         return '<span class="ppm-pill off">deleted</span>'
     if status == "id":
-        label = html.escape(str(row.get("fub_status_label") or row.get("fub_person_id") or "ID"))
+        label = html.escape(
+            _listing_text(row.get("fub_status_label") or row.get("fub_person_id"), "ID")
+        )
         return f'<span class="ppm-pill live">{label}</span>'
     return '<span class="ppm-pill">no id</span>'
 
 
 def _listings_public_html(payload: dict) -> str:
-    rows = list(payload.get("listings") or [])
+    payload = payload if isinstance(payload, dict) else {}
+    rows = [row for row in (payload.get("listings") or []) if isinstance(row, dict)]
     body_rows = []
     for row in rows:
-        case = html.escape(str(row.get("case_number") or ""))
-        notice = str(row.get("notice_url") or "").strip()
+        case = html.escape(_listing_text(row.get("case_number"), ""))
+        notice = _listing_text(row.get("notice_url"), "").strip()
         case_cell = (
             f'<a href="{html.escape(notice)}" target="_blank" rel="noopener">{case}</a>'
             if notice
             else case or "—"
         )
-        petitioner = html.escape(str(row.get("petitioner") or "—"))
-        petitioner_addr = html.escape(str(row.get("petitioner_address") or ""))
+        petitioner = html.escape(_listing_text(row.get("petitioner")))
+        petitioner_addr = html.escape(_listing_text(row.get("petitioner_address"), ""))
         addr_note = f'<div class="ppm-note">{petitioner_addr}</div>' if petitioner_addr else ""
         body_rows.append(
             "<tr>"
-            f"<td>{html.escape(str(row.get('date') or row.get('filed') or '—'))}</td>"
-            f"<td>{html.escape(str(row.get('added_at') or '—'))}</td>"
-            f"<td>{html.escape(str(row.get('source') or 'Placer County'))}</td>"
+            f"<td>{html.escape(_listing_text(row.get('date') or row.get('filed')))}</td>"
+            f"<td>{html.escape(_listing_text(row.get('added_at')))}</td>"
+            f"<td>{html.escape(_listing_text(row.get('source'), 'Placer County'))}</td>"
             f"<td>{case_cell}</td>"
             f"<td>{petitioner}{addr_note}</td>"
-            f"<td>{html.escape(str(row.get('decedent') or '—'))}</td>"
-            f"<td>{html.escape(str(row.get('decedent_address') or '—'))}</td>"
-            f"<td>{html.escape(str(row.get('hearing') or '—'))}</td>"
+            f"<td>{html.escape(_listing_text(row.get('decedent')))}</td>"
+            f"<td>{html.escape(_listing_text(row.get('decedent_address')))}</td>"
+            f"<td>{html.escape(_listing_text(row.get('hearing')))}</td>"
             f"<td>{_listing_fub_cell(row)}</td>"
             "</tr>"
         )
@@ -1042,9 +1059,10 @@ class ListingsPublicView(HomeAssistantView):
         )
         if want_json:
             return self.json({"count": data.get("count"), "listings": data.get("listings") or []})
+        # aiohttp raises ValueError if charset is embedded in content_type with text=.
         return web.Response(
             text=_listings_public_html(data),
-            content_type="text/html; charset=utf-8",
+            content_type="text/html",
             headers={"Cache-Control": "no-store"},
         )
 
