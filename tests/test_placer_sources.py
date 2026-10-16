@@ -55,6 +55,7 @@ class PlacerSourcePathTests(unittest.TestCase):
         required = {item["key"] for item in spec["required"]}
         self.assertEqual(spec["source_id"], "placer")
         self.assertIn("mailing_address", required)
+        self.assertNotIn("case_number", required)
         catalog = {item["key"]: item for item in source_field_catalog("placer")}
         self.assertFalse(catalog["de111_url"].get("unavailable"))
         self.assertIn("eCourt", catalog["court_search"].get("source") or "")
@@ -71,6 +72,7 @@ class PlacerSourcePathTests(unittest.TestCase):
         self.assertIsNone(
             gate_reason(row, {"cases": {}}, {}, strict_property=False, existing_id=None)
         )
+        self.assertTrue(any("Path B" in line for line in spec["rules"]))
 
     def test_custom_required_skips_mailing_when_unchecked(self):
         spec = go_no_go_for_source(

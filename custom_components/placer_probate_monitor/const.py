@@ -59,7 +59,6 @@ FUB_EVENT_TYPES = [
 
 # Selectable Go-gate keys that already exist in gate_reason / SOURCE_GO_NO_GO.
 FUB_GO_GATE_FIELDS = [
-    {"key": "case_number", "label": "Case number"},
     {"key": "petitioner_first", "label": "Petitioner first name"},
     {"key": "petitioner_last", "label": "Petitioner last name"},
     {"key": "mailing_address", "label": "Petitioner mailing address"},
@@ -67,7 +66,6 @@ FUB_GO_GATE_FIELDS = [
 ]
 FUB_GO_GATE_FIELD_KEYS = [item["key"] for item in FUB_GO_GATE_FIELDS]
 DEFAULT_FUB_GO_REQUIRED_FIELDS = [
-    "case_number",
     "petitioner_first",
     "petitioner_last",
     "mailing_address",

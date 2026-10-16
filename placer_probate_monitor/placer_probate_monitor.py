@@ -491,6 +491,7 @@ def listing_from_row(row: dict, run_date: str) -> dict:
         "petitioner_address": str(
             row.get("mailing_address") or ""
         ).strip(),
+        "petitioner_phone": str(row.get("petitioner_phone") or "").strip(),
         "hearing": str(row.get("next_event") or row.get("hearing") or "").strip(),
         "newspaper": str(row.get("newspaper") or "").strip(),
         "notice_url": str(row.get("notice_url") or "").strip(),

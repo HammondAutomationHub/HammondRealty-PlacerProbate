@@ -50,6 +50,7 @@ from .const import (
     DEFAULT_FUB_GO_REQUIRED_FIELDS,
     DEFAULTS,
     DOMAIN,
+    FUB_GO_GATE_FIELD_KEYS,
     FUB_GO_GATE_FIELDS,
     FREQUENCIES,
     FUB_EVENT_TYPES,
@@ -214,9 +215,10 @@ def _sacramento_schema(defaults: dict) -> vol.Schema:
 
 def _go_required_default(defaults: dict) -> list[str]:
     stored = defaults.get(CONF_FUB_GO_REQUIRED_FIELDS)
+    allowed = {str(key) for key in FUB_GO_GATE_FIELD_KEYS}
     if stored is not None:
-        return list(stored)
-    fields = list(DEFAULT_FUB_GO_REQUIRED_FIELDS)
+        return [key for key in FUB_GO_GATE_FIELD_KEYS if key in {str(item) for item in stored} and key in allowed]
+    fields = [key for key in DEFAULT_FUB_GO_REQUIRED_FIELDS if key in allowed]
     if defaults.get(CONF_FUB_STRICT_PROPERTY) and "decedent_residence" not in fields:
         fields.append("decedent_residence")
     return fields

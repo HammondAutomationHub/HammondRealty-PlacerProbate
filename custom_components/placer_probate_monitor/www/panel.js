@@ -435,7 +435,7 @@ function ppmGoNoGoInner(spec, sourceName) {
     ? `<ul>${rules.map((line) => `<li>${ppmEsc(line)}</li>`).join("")}</ul>`
     : "";
   return `
-    <p class="ppm-note">${ppmEsc(sourceName || "This source")} only becomes a go-case when every required field is present. Change the checklist on Follow Up Boss → Required for Go. Missing required data is skipped, not sent as a partial Follow Up Boss person.</p>
+    <p class="ppm-note">${ppmEsc(sourceName || "This source")} becomes a go-case on Path A or Path B. Path A uses the Required for Go checklist (defaults: petitioner first, petitioner last, mailing). Path B is always an alternate: petitioner, decedent, decedent address, and petitioner phone — no mailing required. Case number is never required for Go. Missing Path A and Path B data is skipped, not sent as a partial Follow Up Boss person.</p>
     <table>
       <thead><tr><th></th><th>Field</th><th>From</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -1323,7 +1323,7 @@ class PlacerProbateFubPanel extends HTMLElement {
             <label>Event type</label>
             <select id="fub_event_type"></select>
             <h2 style="margin-top:16px;">Required for Go</h2>
-            <p class="ppm-note">A case is exported only when every checked field is present. Unchecked fields stay optional. This list is the Go process for Placer and Sacramento. Save with Save FUB connection.</p>
+            <p class="ppm-note">Path A exports when every checked field is present (defaults: petitioner first, petitioner last, mailing). Case number is never required for Go. Path B is always an alternate: petitioner name, decedent name, decedent address, and petitioner phone — mailing is not required on Path B. Unchecked Path A fields stay optional. This list is the Go process for Placer and Sacramento. Save with Save FUB connection.</p>
             <div id="fub-go-required"></div>
             <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: update one person per run</span></label>
             <label class="ppm-toggle"><input id="fub_update_existing" type="checkbox" /><span>Update all existing Follow Up Boss people on this run</span></label>
@@ -1439,7 +1439,6 @@ class PlacerProbateFubPanel extends HTMLElement {
     const el = this._qs("#fub-go-required");
     if (!el) return;
     const fields = (data && data.fub_go_gate_fields) || [
-      { key: "case_number", label: "Case number" },
       { key: "petitioner_first", label: "Petitioner first name" },
       { key: "petitioner_last", label: "Petitioner last name" },
       { key: "mailing_address", label: "Petitioner mailing address" },
@@ -1447,7 +1446,7 @@ class PlacerProbateFubPanel extends HTMLElement {
     ];
     const selected = new Set(
       (data && data.fub_go_required_fields)
-        || ["case_number", "petitioner_first", "petitioner_last", "mailing_address"]
+        || ["petitioner_first", "petitioner_last", "mailing_address"]
     );
     if (data && data.fub_strict_property) selected.add("decedent_residence");
     el.innerHTML = fields.map((item) => `

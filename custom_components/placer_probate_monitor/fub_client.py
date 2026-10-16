@@ -766,7 +766,8 @@ SEND_TOGGLES = [
 
 GO_NO_GO = [
     "Petitioner is the FUB Person. Decedent is never firstName/lastName.",
-    "No go-case without a petitioner mailing address on the extract. Map petitioner mailing and decedent last residence to Address 1 or Address 2 in the mapping UI. Item 1 is publication. Attorney caption is not petitioner mailing.",
+    "Go if Path A or Path B. Path A: petitioner first, petitioner last, and petitioner mailing. Path B: petitioner name (first+last or full petitioner), decedent name, decedent address (DE-111 3.a.(2)/3c / decedent_residence), and petitioner phone. Case number is never required for Go.",
+    "Path B does not require mailing. Path A does not require petitioner phone or decedent address. Map petitioner mailing and decedent last residence to Address 1 or Address 2 in the mapping UI. Item 1 is publication. Attorney caption is not petitioner mailing.",
     "Never map attorney_phone onto person.phones. Attorney caption address is not petitioner mailing.",
     "Last residence is DE-111 text, not a verified APN.",
     "Notes gets the per-case eCourt Public URL, a unique DE-111 PDF link, and a DE-147 duties link. Petitioner phone and email come from either form when present, never from the attorney caption.",
@@ -778,11 +779,6 @@ GO_NO_GO = [
 SOURCE_GO_NO_GO = {
     "placer": {
         "required": [
-            {
-                "key": "case_number",
-                "label": "Case number",
-                "from": "CNPA notice / eCourt",
-            },
             {
                 "key": "petitioner_first",
                 "label": "Petitioner first name",
@@ -801,6 +797,12 @@ SOURCE_GO_NO_GO = {
         ],
         "optional": [
             {
+                "key": "case_number",
+                "label": "Case number",
+                "from": "CNPA notice / eCourt",
+                "when": "Not required for Go. Posted to Follow Up Boss when present.",
+            },
+            {
                 "key": "petitioner_email",
                 "label": "Petitioner email",
                 "from": "DE-111 or DE-147, whichever has it",
@@ -809,12 +811,13 @@ SOURCE_GO_NO_GO = {
                 "key": "petitioner_phone",
                 "label": "Petitioner phone",
                 "from": "DE-111 or DE-147, whichever has it",
+                "when": "Required on Path B. Not required on Path A.",
             },
             {
                 "key": "decedent_residence",
                 "label": "Estate location (3.a.(2))",
                 "from": "DE-111 item 3.a.(2) street; never 'at (place)'",
-                "when": "Required only if checked on Follow Up Boss → Required for Go",
+                "when": "Required on Path B (with decedent name and petitioner phone). On Path A, required only if checked on Follow Up Boss → Required for Go",
             },
             {
                 "key": "court_url",
@@ -828,11 +831,6 @@ SOURCE_GO_NO_GO = {
     "sacramento": {
         "required": [
             {
-                "key": "case_number",
-                "label": "Case number",
-                "from": "CNPA notice / Sacramento portal",
-            },
-            {
                 "key": "petitioner_first",
                 "label": "Petitioner first name",
                 "from": "Published notice / portal parties",
@@ -850,6 +848,12 @@ SOURCE_GO_NO_GO = {
         ],
         "optional": [
             {
+                "key": "case_number",
+                "label": "Case number",
+                "from": "CNPA notice / Sacramento portal",
+                "when": "Not required for Go. Posted to Follow Up Boss when present.",
+            },
+            {
                 "key": "petitioner_email",
                 "label": "Petitioner email",
                 "from": "DE-111 or DE-147, whichever has it",
@@ -858,12 +862,13 @@ SOURCE_GO_NO_GO = {
                 "key": "petitioner_phone",
                 "label": "Petitioner phone",
                 "from": "DE-111 or DE-147, whichever has it",
+                "when": "Required on Path B. Not required on Path A.",
             },
             {
                 "key": "decedent_residence",
                 "label": "Estate location (3.a.(2))",
                 "from": "DE-111 item 3.a.(2) street; never 'at (place)'",
-                "when": "Required only if checked on Follow Up Boss → Required for Go",
+                "when": "Required on Path B (with decedent name and petitioner phone). On Path A, required only if checked on Follow Up Boss → Required for Go",
             },
             {
                 "key": "court_url",
@@ -883,7 +888,6 @@ SOURCE_GO_NO_GO = {
 
 # Gate keys that already exist in gate_reason / SOURCE_GO_NO_GO. Do not invent new ones.
 FUB_GO_GATE_FIELDS = [
-    {"key": "case_number", "label": "Case number"},
     {"key": "petitioner_first", "label": "Petitioner first name"},
     {"key": "petitioner_last", "label": "Petitioner last name"},
     {"key": "mailing_address", "label": "Petitioner mailing address"},
@@ -891,7 +895,6 @@ FUB_GO_GATE_FIELDS = [
 ]
 FUB_GO_GATE_FIELD_KEYS = tuple(item["key"] for item in FUB_GO_GATE_FIELDS)
 DEFAULT_FUB_GO_REQUIRED_FIELDS = (
-    "case_number",
     "petitioner_first",
     "petitioner_last",
     "mailing_address",
@@ -909,6 +912,7 @@ def normalize_fub_go_required_fields(value) -> list[str]:
     else:
         raw = []
     wanted = {item.lower().replace("-", "_") for item in raw}
+    wanted.discard("case_number")
     return [key for key in FUB_GO_GATE_FIELD_KEYS if key in wanted]
 
 
@@ -920,7 +924,8 @@ def resolve_fub_go_required_fields(
 ) -> list[str]:
     """Saved checklist is the source of truth. Missing list uses production defaults.
 
-    Production defaults: case number, petitioner first, petitioner last, mailing.
+    Production defaults: petitioner first, petitioner last, mailing.
+    Case number is never a Go requirement, even if an older saved list has it.
     Decedent residence is included only when the saved list has it, or when an
     older ``fub_strict_property`` / FUB_STRICT_PROPERTY toggle is on and no list
     has been saved yet.
@@ -999,9 +1004,15 @@ def go_no_go_for_source(source_id: str, required_fields=None) -> dict:
             if item_key in required_keys:
                 required.append(row)
             else:
-                row["when"] = (
-                    "Optional unless checked on Follow Up Boss → Required for Go"
-                )
+                if item_key == "decedent_residence":
+                    row["when"] = (
+                        "Path A: optional unless checked on Follow Up Boss → Required for Go. "
+                        "Path B: required (with decedent name and petitioner phone)."
+                    )
+                else:
+                    row["when"] = (
+                        "Optional unless checked on Follow Up Boss → Required for Go"
+                    )
                 optional.append(row)
             continue
         if any(entry.get("key") == item_key for entry in base_required):
@@ -2273,6 +2284,107 @@ def case_key(row: dict) -> str:
     return str(row.get("case_number") or row.get("advert_id") or "").strip()
 
 
+PLACEHOLDER_CASE_RE = re.compile(r"(?i)^notices_\d+$")
+
+
+def is_placeholder_case_id(value: str | None) -> bool:
+    """True when there is no court case number (blank or Notices_* style)."""
+    text = str(value or "").strip()
+    if not text:
+        return True
+    return bool(PLACEHOLDER_CASE_RE.match(text))
+
+
+def court_case_number(row: dict) -> str:
+    raw = str((row or {}).get("case_number") or "").strip()
+    if not raw or is_placeholder_case_id(raw):
+        return ""
+    return raw
+
+
+def _row_decedent_name(row: dict) -> str:
+    return (
+        str(row.get("decedent") or "").strip()
+        or portal_party_name(row, "decedent")
+        or str(row.get("decedent_name") or "").strip()
+    )
+
+
+def _row_decedent_address(row: dict) -> str:
+    return str(
+        row.get("decedent_residence") or row.get("decedent_address") or ""
+    ).strip()
+
+
+def _row_mailing_address(row: dict) -> str:
+    return str(
+        _row_contact(row).get("mailing_address")
+        or row.get("mailing_address")
+        or row.get("petitioner_address")
+        or ""
+    ).strip()
+
+
+def _row_petitioner_phone(row: dict) -> str:
+    return str(
+        _row_contact(row).get("petitioner_phone")
+        or row.get("petitioner_phone")
+        or ""
+    ).strip()
+
+
+def _petitioner_name_parts(row: dict) -> tuple[str, str, str]:
+    petitioner = portal_petitioner(row)
+    first, last = split_person_name(petitioner)
+    if not first:
+        first = str(row.get("petitioner_first") or "").strip()
+    if not last:
+        last = str(row.get("petitioner_last") or "").strip()
+    return petitioner, first, last
+
+
+def _path_b_eligible(row: dict) -> bool:
+    return not court_case_number(row)
+
+
+def _path_a_reason(row: dict, required: set[str], existing_id: int | None) -> str | None:
+    _petitioner, first, last = _petitioner_name_parts(row)
+    if "petitioner_first" in required or "petitioner_last" in required:
+        missing_first = "petitioner_first" in required and not first
+        missing_last = "petitioner_last" in required and not last
+        if missing_first or missing_last:
+            return "petitioner_name_incomplete"
+    source = str(
+        row.get("source_id") or os.environ.get("FUB_DATA_SOURCE") or "placer"
+    ).strip().lower()
+    if (
+        "mailing_address" in required
+        and source in {"placer", "sacramento"}
+        and not _row_mailing_address(row)
+    ):
+        return "missing_petitioner_address"
+    if (
+        "decedent_residence" in required
+        and existing_id is None
+        and not _row_decedent_address(row)
+    ):
+        return "missing_decedent_residence"
+    return None
+
+
+def _path_b_reason(row: dict) -> str | None:
+    petitioner, first, last = _petitioner_name_parts(row)
+    if not ((first and last) or petitioner):
+        return "petitioner_name_incomplete"
+    if not _row_decedent_name(row):
+        return "missing_decedent"
+    if not _row_decedent_address(row):
+        return "missing_decedent_residence"
+    if not _row_petitioner_phone(row):
+        return "missing_petitioner_phone"
+    return None
+
+
 def petition_safe_case(case: str) -> str:
     return re.sub(r"[^\w\-]+", "_", str(case or "").strip()) or "case"
 
@@ -2525,7 +2637,9 @@ def gate_reason(
     Presence in seen_cases / seen_cases_sacramento without a Follow Up Boss
     person id is not a skip. Callers must POST/create those listings.
     ``allow_seen_without_fub`` is kept for callers and always treated as true.
-    Required fields come from the saved Follow Up Boss “Required for Go” list.
+    Required fields come from the saved Follow Up Boss “Required for Go” list
+    for Path A. Path B is always an alternate: petitioner, decedent, decedent
+    address, and petitioner phone. Case number is never required.
     """
     del allow_seen_without_fub
     required = set(
@@ -2533,42 +2647,24 @@ def gate_reason(
             required_fields, strict_property=strict_property
         )
     )
+    required.discard("case_number")
     key = case_key(row)
     if is_fub_removed(state, key):
         return "fub_removed"
-    if "case_number" in required and not key:
-        return "missing_case_number"
-    petitioner = portal_petitioner(row)
-    first, last = split_person_name(petitioner)
-    if "petitioner_first" in required or "petitioner_last" in required:
-        missing_first = "petitioner_first" in required and not first
-        missing_last = "petitioner_last" in required and not last
-        if missing_first or missing_last:
-            return "petitioner_name_incomplete"
+    petitioner, _first, _last = _petitioner_name_parts(row)
     if row.get("professional_fiduciary"):
         return "professional_fiduciary"
     skip_bits = [str(x).lower() for x in mapping.get("skip_petitioner_contains") or []]
     low = petitioner.lower()
     if any(bit in low for bit in skip_bits if bit):
         return "petitioner_skipped"
-    source = str(
-        row.get("source_id") or os.environ.get("FUB_DATA_SOURCE") or "placer"
-    ).strip().lower()
-    if (
-        "mailing_address" in required
-        and source in {"placer", "sacramento"}
-        and not str(
-            _row_contact(row).get("mailing_address") or row.get("mailing_address") or ""
-        ).strip()
-    ):
-        return "missing_petitioner_address"
-    if (
-        "decedent_residence" in required
-        and existing_id is None
-        and not str(row.get("decedent_residence") or "").strip()
-    ):
-        return "missing_decedent_residence"
-    return None
+    path_a = _path_a_reason(row, required, existing_id)
+    if path_a is None:
+        return None
+    path_b = _path_b_reason(row)
+    if path_b is None:
+        return None
+    return path_a
 
 
 def preview_one_record(

@@ -129,8 +129,8 @@ class ListingsShareViewContractTests(unittest.TestCase):
         self.assertIn("hassUrl", panel)
         share_fn = panel.split("function ppmListingsShareUrl", 1)[1].split("function ", 1)[0]
         self.assertNotIn("access_token", share_fn)
-        self.assertEqual(manifest["version"], "1.3.87")
-        self.assertIn('PANEL_JS_VERSION = "1.3.87"', src)
+        self.assertEqual(manifest["version"], "1.3.89")
+        self.assertIn('PANEL_JS_VERSION = "1.3.89"', src)
         self.assertIn("<th>Added</th>", src)
         self.assertIn("<th>FUB</th>", src)
         self.assertIn('url = "/api/placer_probate_monitor/listings"', src)

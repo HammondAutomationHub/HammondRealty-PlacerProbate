@@ -482,6 +482,7 @@ class PortalParseTests(unittest.TestCase):
         spec = go_no_go_for_source("sacramento")
         required = {item["key"] for item in spec["required"]}
         self.assertIn("mailing_address", required)
+        self.assertNotIn("case_number", required)
         catalog = {item["key"]: item for item in source_field_catalog("sacramento")}
         self.assertFalse(catalog["de111_url"].get("unavailable"))
         self.assertFalse(catalog["mailing_address"].get("unavailable"))

@@ -12,13 +12,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "custom_components" / "placer_probate_monitor"))
 
 from fub_client import (  # noqa: E402
+    DEFAULT_FUB_GO_REQUIRED_FIELDS,
+    FUB_GO_GATE_FIELD_KEYS,
     build_person,
     export_new_leads,
     fub_custom_field_names,
     gate_reason,
+    go_no_go_for_source,
     load_mapping,
     mapping_for_export,
     needs_fub_create,
+    normalize_fub_go_required_fields,
     person_fingerprint,
     should_skip_unchanged_person,
     stored_person_id,
@@ -506,6 +510,207 @@ class FubCreateGateTests(unittest.TestCase):
             ),
             "petitioner_name_incomplete",
         )
+
+    def test_classic_case_and_mailing_go_without_phone(self):
+        row = {
+            "source_id": "placer",
+            "case_number": "S-PR-0014448",
+            "petitioner": "John Henderson",
+            "mailing_address": "51 Ashby Hills Ct, Henderson, NV 89012",
+        }
+        self.assertIsNone(
+            gate_reason(
+                row,
+                {"cases": {}},
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+            )
+        )
+
+    def test_notices_path_b_go_without_mailing(self):
+        row = {
+            "source_id": "placer",
+            "case_number": "Notices_995995",
+            "petitioner": "Kristopher Gibson",
+            "decedent": "Allen Gibson",
+            "decedent_residence": "100 Main St, Lincoln, CA 95648",
+            "petitioner_phone": "916-555-0100",
+        }
+        self.assertIsNone(
+            gate_reason(
+                row,
+                {"cases": {}},
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+            )
+        )
+        self.assertTrue(needs_fub_create({"cases": {}}, "Notices_995995"))
+
+    def test_notices_path_b_missing_phone_is_nogo(self):
+        row = {
+            "source_id": "placer",
+            "case_number": "Notices_995995",
+            "petitioner": "Kristopher Gibson",
+            "decedent": "Allen Gibson",
+            "decedent_residence": "100 Main St, Lincoln, CA 95648",
+        }
+        self.assertEqual(
+            gate_reason(
+                row,
+                {"cases": {}},
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+            ),
+            "missing_petitioner_address",
+        )
+
+    def test_path_b_full_petitioner_and_decedent_address_alias(self):
+        row = {
+            "source_id": "sacramento",
+            "case_number": "",
+            "advert_id": "Notices_981504",
+            "petitioner": "Madonna",
+            "decedent": "Gregory Alan Tarter",
+            "decedent_address": "200 Alpine Dr, Truckee, CA 96161",
+            "petitioner_phone": "(530) 555-0199",
+        }
+        self.assertIsNone(
+            gate_reason(
+                row,
+                {"cases": {}},
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+            )
+        )
+
+    def test_path_b_respects_fub_removed(self):
+        row = {
+            "source_id": "placer",
+            "case_number": "Notices_995995",
+            "petitioner": "Kristopher Gibson",
+            "decedent": "Allen Gibson",
+            "decedent_residence": "100 Main St, Lincoln, CA 95648",
+            "petitioner_phone": "916-555-0100",
+        }
+        state = {
+            "cases": {
+                "Notices_995995": {
+                    "fub_person_id": 88,
+                    "fub_removed": True,
+                }
+            }
+        }
+        self.assertEqual(
+            gate_reason(
+                row,
+                state,
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+            ),
+            "fub_removed",
+        )
+        self.assertFalse(needs_fub_create(state, "Notices_995995"))
+
+    def test_path_b_export_skips_when_fub_removed(self):
+        row = {
+            "source_id": "placer",
+            "case_number": "Notices_995995",
+            "petitioner": "Kristopher Gibson",
+            "decedent": "Allen Gibson",
+            "decedent_residence": "100 Main St, Lincoln, CA 95648",
+            "petitioner_phone": "916-555-0100",
+            "first_seen": True,
+            "status": "new",
+        }
+        state = {
+            "cases": {
+                "Notices_995995": {
+                    "fub_person_id": 88,
+                    "fub_removed": True,
+                }
+            }
+        }
+        summary, posted, updated, loaded = self._export_with_http([row], state)
+        self.assertEqual(summary["posted"], 0)
+        self.assertEqual(summary["updated"], 0)
+        self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
+        posted.assert_not_called()
+        updated.assert_not_called()
+        loaded.assert_not_called()
+        self.assertFalse(needs_fub_create(state, "Notices_995995"))
+
+    def test_case_number_is_never_required_for_go(self):
+        self.assertNotIn("case_number", DEFAULT_FUB_GO_REQUIRED_FIELDS)
+        self.assertNotIn("case_number", FUB_GO_GATE_FIELD_KEYS)
+        self.assertEqual(
+            normalize_fub_go_required_fields(
+                ["case_number", "petitioner_first", "petitioner_last", "mailing_address"]
+            ),
+            ["petitioner_first", "petitioner_last", "mailing_address"],
+        )
+        for source_id in ("placer", "sacramento"):
+            required = {item["key"] for item in go_no_go_for_source(source_id)["required"]}
+            self.assertNotIn("case_number", required)
+        row = {
+            "source_id": "placer",
+            "case_number": "",
+            "petitioner": "John Henderson",
+            "mailing_address": "51 Ashby Hills Ct, Henderson, NV 89012",
+        }
+        self.assertIsNone(
+            gate_reason(
+                row,
+                {"cases": {}},
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+                required_fields=["case_number", "petitioner_first", "petitioner_last", "mailing_address"],
+            )
+        )
+
+    def test_path_b_go_with_court_case_and_no_mailing(self):
+        row = {
+            "source_id": "placer",
+            "case_number": "S-PR-0014228",
+            "petitioner": "Dewan Petitioner",
+            "decedent": "Estate Decedent",
+            "decedent_residence": "100 Main St, Lincoln, CA 95648",
+            "petitioner_phone": "916-555-0100",
+        }
+        self.assertIsNone(
+            gate_reason(
+                row,
+                {"cases": {}},
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+            )
+        )
+
+    def test_fub_removed_empty_id_does_not_recreate(self):
+        row = dict(PLACER_ROW)
+        state = {"cases": {row["case_number"]: {"fub_removed": True}}}
+        self.assertEqual(
+            gate_reason(
+                row,
+                state,
+                MAPPING,
+                strict_property=False,
+                existing_id=None,
+            ),
+            "fub_removed",
+        )
+        self.assertFalse(needs_fub_create(state, row["case_number"]))
+        summary, posted, updated, loaded = self._export_with_http([row], state)
+        self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
+        posted.assert_not_called()
+        updated.assert_not_called()
+        loaded.assert_not_called()
 
 
 if __name__ == "__main__":
