@@ -712,6 +712,33 @@ class FubCreateGateTests(unittest.TestCase):
         updated.assert_not_called()
         loaded.assert_not_called()
 
+    def test_http_error_does_not_abort_remaining_creates(self):
+        first = dict(PLACER_ROW, case_number="S-PR-0014001")
+        second = dict(PLACER_ROW, case_number="S-PR-0014002")
+        state = {"cases": {}}
+        calls = {"n": 0}
+
+        def post_event(*_args, **_kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("503 from Follow Up Boss")
+            return {"personId": 900 + calls["n"]}
+
+        with (
+            patch("fub_client.post_event", side_effect=post_event) as posted,
+            patch("fub_client.get_person", return_value={"id": 1}),
+            patch("fub_client.put_person", return_value={"id": 1}),
+            patch("fub_client.post_note"),
+            patch("fub_client.post_court_portal_note", return_value={}),
+            patch("fub_client.attach_de111_file", return_value={}),
+            patch("fub_client.attach_de147_file", return_value={}),
+        ):
+            summary = export_new_leads([first, second], state)
+        self.assertEqual(posted.call_count, 2)
+        self.assertEqual(summary["posted"], 1)
+        self.assertEqual(summary["skips"][0]["reason"], "fub_http_error")
+        self.assertEqual(state["cases"]["S-PR-0014002"]["fub_person_id"], 902)
+
 
 if __name__ == "__main__":
     unittest.main()

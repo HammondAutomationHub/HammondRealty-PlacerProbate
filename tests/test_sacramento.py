@@ -17,6 +17,7 @@ from placer_probate_monitor import (  # noqa: E402
     Notice,
     cnpa_page_sequence,
     extract_case,
+    keep_placer_notices,
     notice_fields,
     parse_cnpa_max_pages,
     search_url,
@@ -33,6 +34,7 @@ from sacramento_portal import (  # noqa: E402
 )
 from sacramento_probate_monitor import (  # noqa: E402
     extract_sacramento_case,
+    is_sacramento_cnpa_candidate,
     is_sacramento_court_notice,
     keep_sacramento_notices,
 )
@@ -200,6 +202,20 @@ class NoticeParseTests(unittest.TestCase):
 
     def test_case_padding(self):
         self.assertEqual(extract_sacramento_case("case 26PR1581 and 26PR001581"), "26PR001581")
+
+    def test_dashed_and_spaced_sacramento_case(self):
+        self.assertEqual(extract_sacramento_case("CASE NO. 26-PR-002037"), "26PR002037")
+        self.assertEqual(extract_sacramento_case("Case Number 26 PR 002037"), "26PR002037")
+
+    def test_spr_glued_placer_case(self):
+        fields = notice_fields(
+            "NOTICE OF PETITION TO ADMINISTER ESTATE OF ALLEN GIBSON "
+            "CASE NO. SPR0014270 A PETITION FOR PROBATE has been filed by "
+            "KRISTOPHER GIBSON in the Superior Court of California, County of PLACER",
+            extract_case,
+        )
+        self.assertEqual(fields["case_number"], "S-PR-0014270")
+        self.assertEqual(extract_case("L0010500 SPR0014270 NOTICE OF PETITION"), "S-PR-0014270")
 
     def test_placer_notice_still_parses(self):
         fields = notice_fields(PLACER, extract_case)
@@ -700,6 +716,53 @@ class CnpaPaginationTests(unittest.TestCase):
         )
         keys = {item.case_number or item.advert_id for item in kept}
         self.assertEqual(keys, {"26PR002736", "26PR001104"})
+
+    def test_keep_scoped_after_hydrate_fills_case(self):
+        card = _notice(case_number="", advert_id="Notices_123")
+        hydrated = _notice(
+            case_number="26PR002117",
+            advert_id="Notices_123",
+            court_county="",
+            raw_text="NOTICE OF PETITION TO ADMINISTER ESTATE CASE NO. 26PR002117",
+        )
+        self.assertFalse(is_sacramento_court_notice(hydrated))
+        kept = keep_sacramento_notices([hydrated], {card.advert_id})
+        self.assertEqual([item.case_number for item in kept], ["26PR002117"])
+
+    def test_unscoped_yypr_is_hydrate_candidate_without_sacramento_word(self):
+        notice = _notice(
+            case_number="26PR002037",
+            advert_id="Notices_out",
+            court_county="",
+            newspaper="Folsom Telegraph",
+            raw_text="NOTICE OF PETITION TO ADMINISTER ESTATE CASE NO. 26PR002037",
+            snippet="CASE NO. 26PR002037",
+        )
+        self.assertTrue(is_sacramento_cnpa_candidate(notice, set()))
+        other = _notice(
+            case_number="",
+            advert_id="Notices_placer",
+            court_county="PLACER",
+            raw_text="Superior Court of California, County of PLACER",
+        )
+        self.assertFalse(is_sacramento_cnpa_candidate(other, set()))
+
+    def test_keep_placer_drops_nevada_court_tarter(self):
+        tarter = _notice(
+            case_number="",
+            advert_id="Notices_986427",
+            court_county="Nevada",
+            raw_text="AN AMENDED PETITION FOR PROBATE has been filed by ERIC TARTER "
+            "in the Superior Court of California, County of Nevada. CASE NUMBER:PR0001029",
+        )
+        gibson = _notice(
+            case_number="S-PR-0014270",
+            advert_id="Notices_995995",
+            court_county="PLACER",
+            raw_text="Superior Court of California, County of PLACER CASE NO. SPR0014270",
+        )
+        kept = keep_placer_notices([tarter, gibson])
+        self.assertEqual([item.case_number for item in kept], ["S-PR-0014270"])
 
 
 if __name__ == "__main__":

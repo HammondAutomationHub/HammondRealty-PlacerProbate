@@ -712,6 +712,7 @@ def collect_leads(
                 hydrate_notice,
                 keep_sacramento_notices,
                 needs_advert,
+                sacramento_cnpa_candidates,
             )
         except ImportError:
             from sacramento_probate_monitor import (
@@ -720,17 +721,12 @@ def collect_leads(
                 hydrate_notice,
                 keep_sacramento_notices,
                 needs_advert,
+                sacramento_cnpa_candidates,
             )
 
         notices, _urls, scoped_keys = collect_sacramento_cnpa_notices(start, end)
         unique = dedupe(notices)
-        candidates = [
-            notice
-            for notice in unique
-            if (notice.case_number or notice.advert_id) in scoped_keys
-            or "SACRAMENTO"
-            in f"{notice.raw_text} {notice.snippet} {notice.newspaper} {notice.court_county}".upper()
-        ]
+        candidates = sacramento_cnpa_candidates(unique, scoped_keys)
         for notice in candidates:
             if needs_advert(notice):
                 notice.source_note = hydrate_notice(notice)
@@ -752,12 +748,27 @@ def collect_leads(
         from dataclasses import asdict
 
         try:
-            from .placer_probate_monitor import enrich_notices
+            from .placer_probate_monitor import (
+                enrich_notices,
+                hydrate_notice,
+                keep_placer_notices,
+                needs_advert,
+            )
         except ImportError:
-            from placer_probate_monitor import enrich_notices
+            from placer_probate_monitor import (
+                enrich_notices,
+                hydrate_notice,
+                keep_placer_notices,
+                needs_advert,
+            )
 
         notices, _urls = paginate(start, end)
         unique = dedupe(notices)
+        for notice in unique:
+            if needs_advert(notice) and not notice.case_number:
+                notice.source_note = hydrate_notice(notice)
+        unique = keep_placer_notices(unique)
+        unique = dedupe(unique)
         if skip_portal:
             rows = [asdict(notice) for notice in unique]
         else:

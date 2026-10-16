@@ -2605,7 +2605,8 @@ def _rows_for_export(rows: list[dict], state: dict, *, verify: bool) -> list[dic
             existing.append(row)
         else:
             fresh.append(row)
-    return preferred + existing + fresh
+    # Verify-only should try a create first (UI: one new go-case), not PUT an existing id.
+    return preferred + fresh + existing
 
 
 def _forced_verify_person_id() -> int | None:
@@ -3925,7 +3926,7 @@ def export_new_leads(
                 summary["verify_record"]["posted"] = False
                 summary["verify_record"]["fub_error"] = err[:500]
             print(f"FUB error {key}: {err}", flush=True)
-            break
+            continue
     summary["verify_case"] = posted_case
     summary["verify_person_id"] = posted_pid
     if verify:

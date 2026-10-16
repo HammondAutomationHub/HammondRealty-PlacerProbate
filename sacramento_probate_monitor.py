@@ -81,7 +81,7 @@ except ImportError:
 
 COUNTY = "Sacramento"
 KEYWORDS = '"NOTICE OF PETITION"'
-SAC_CASE_RE = re.compile(r"\b(\d{2})PR(\d{3,8})\b", re.I)
+SAC_CASE_RE = re.compile(r"\b(\d{2})[\s\-]*PR[\s\-]*(\d{3,8})\b", re.I)
 SAC_COURT_RE = re.compile(r"COUNTY OF\s+SACRAMENTO", re.I)
 LEGACY_CASE_RE = re.compile(r"\b34-\d{4}-\d{5,8}\b")
 SOURCE_NOTE = (
@@ -168,13 +168,41 @@ def collect_sacramento_cnpa_notices(
     return merged, urls_a + urls_b, scoped_keys
 
 
+def in_sacramento_scoped_keys(notice: Notice, scoped_keys: set[str]) -> bool:
+    """Match newspaper-county ads by case or advert id after hydrate fills the case."""
+    if notice.case_number and notice.case_number in scoped_keys:
+        return True
+    if notice.advert_id and notice.advert_id in scoped_keys:
+        return True
+    return False
+
+
+def is_sacramento_cnpa_candidate(notice: Notice, scoped_keys: set[str]) -> bool:
+    """Cheap pre-hydrate keep: scoped paper, court/case signal, or Sacramento in the card."""
+    if in_sacramento_scoped_keys(notice, scoped_keys):
+        return True
+    if is_sacramento_court_notice(notice):
+        return True
+    blob = f"{notice.raw_text} {notice.snippet} {notice.newspaper} {notice.court_county}"
+    if "SACRAMENTO" in blob.upper():
+        return True
+    return bool(extract_sacramento_case(blob))
+
+
+def sacramento_cnpa_candidates(
+    notices: list[Notice], scoped_keys: set[str]
+) -> list[Notice]:
+    return [notice for notice in notices if is_sacramento_cnpa_candidate(notice, scoped_keys)]
+
+
 def keep_sacramento_notices(
     notices: list[Notice], scoped_keys: set[str]
 ) -> list[Notice]:
     kept: list[Notice] = []
     for notice in notices:
-        key = notice.case_number or notice.advert_id
-        if key in scoped_keys or is_sacramento_court_notice(notice):
+        if in_sacramento_scoped_keys(notice, scoped_keys) or is_sacramento_court_notice(
+            notice
+        ):
             kept.append(notice)
     return kept
 
@@ -206,7 +234,7 @@ def advert_text(page_html: str) -> str:
 def needs_advert(notice: Notice) -> bool:
     raw = notice.raw_text or ""
     return bool(notice.advert_id) and (
-        len(raw) < 500 or "IF YOU OBJECT" not in raw.upper()
+        len(raw) < 500 or "IF YOU OBJECT" not in raw.upper() or not notice.case_number
     )
 
 
@@ -476,13 +504,7 @@ def main() -> int:
         return 2
 
     unique = dedupe(notices)
-    candidates = [
-        notice
-        for notice in unique
-        if (notice.case_number or notice.advert_id) in scoped_keys
-        or "SACRAMENTO"
-        in f"{notice.raw_text} {notice.snippet} {notice.newspaper} {notice.court_county}".upper()
-    ]
+    candidates = sacramento_cnpa_candidates(unique, scoped_keys)
     print(
         f"Opening full advert pages for {sum(1 for n in candidates if needs_advert(n))} shortened cards…",
         flush=True,

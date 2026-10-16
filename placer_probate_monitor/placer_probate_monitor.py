@@ -50,7 +50,13 @@ USER_AGENT = (
     "PlacerProbateMonitor/1.0 "
     "(personal research; +local daily digest)"
 )
-CASE_RE = re.compile(r"\bS-PR-0*\d+\b", re.I)
+# Placer eCourt uses S-PR-0014270. CNPA ads often print SPR0014270 / S-PR0014270.
+CASE_RE = re.compile(r"\bS[\s\-]*PR[\s\-]*0*(\d{3,8})\b", re.I)
+PLACER_COURT_RE = re.compile(r"COUNTY OF\s+PLACER", re.I)
+OTHER_COURT_RE = re.compile(
+    r"COUNTY OF\s+(NEVADA|SACRAMENTO|EL DORADO|YOLO|SUTTER|BUTTE|SAN JOAQUIN)\b",
+    re.I,
+)
 ESTATE_RE = re.compile(
     r"NOTICE OF PETITION TO ADMINISTER ESTATE OF:?\s+"
     r"(?P<name>.+?)(?:\s+CASE\s+(?:NO\.?|NUMBER)|\s+\d+\.\s+To all heirs)",
@@ -244,15 +250,92 @@ def extract_decedent(text: str) -> str:
 
 
 def extract_case(text: str) -> str:
-    matches = CASE_RE.findall(text)
+    matches = CASE_RE.findall(text or "")
     if not matches:
         return ""
-    # Normalize to the longest / last official form
-    raw = matches[-1].upper()
-    m = re.search(r"S-PR-(\d+)", raw)
-    if not m:
-        return raw
-    return f"S-PR-{int(m.group(1)):07d}"
+    return f"S-PR-{int(matches[-1]):07d}"
+
+
+def is_placer_court_notice(notice: Notice) -> bool:
+    """True when the published notice names Placer Superior Court."""
+    court = re.sub(r"\s+", " ", str(notice.court_county or "")).strip().upper()
+    if court.startswith("PLACER"):
+        return True
+    blob = " ".join(
+        part for part in (notice.raw_text, notice.snippet, notice.court_county) if part
+    )
+    return bool(PLACER_COURT_RE.search(blob))
+
+
+def keep_placer_notices(notices: list[Notice]) -> list[Notice]:
+    """Drop ads that name a different superior court (Nevada source is removed)."""
+    kept: list[Notice] = []
+    for notice in notices:
+        case = str(notice.case_number or "").strip().upper()
+        if case.startswith("S-PR-") or is_placer_court_notice(notice):
+            kept.append(notice)
+            continue
+        blob = " ".join(
+            part
+            for part in (notice.raw_text, notice.snippet, notice.court_county)
+            if part
+        )
+        court = re.sub(r"\s+", " ", str(notice.court_county or "")).strip().upper()
+        if court and not court.startswith("PLACER"):
+            continue
+        if OTHER_COURT_RE.search(blob):
+            continue
+        kept.append(notice)
+    return kept
+
+
+def needs_advert(notice: Notice) -> bool:
+    raw = notice.raw_text or ""
+    return bool(notice.advert_id) and (
+        len(raw) < 500 or "IF YOU OBJECT" not in raw.upper() or not notice.case_number
+    )
+
+
+def hydrate_notice(notice: Notice, case_extractor=None) -> str:
+    """Read the CNPA advert page when the search card is truncated or has no case #."""
+    extractor = case_extractor or extract_case
+    if not needs_advert(notice):
+        return ""
+    try:
+        page = fetch_page(notice.notice_url)
+    except requests.RequestException as exc:
+        return f"CNPA list text was cut off and the advert page did not load ({exc})."
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(page, "html.parser")
+    chunks = []
+    for el in soup.select(".description, .panel-body"):
+        text = el.get_text("\n", strip=True)
+        fields = notice_fields(text, extractor)
+        if fields.get("raw_text"):
+            chunks.append(fields["raw_text"])
+    full = max(chunks, key=len) if chunks else ""
+    if len(full) <= len(notice.raw_text or ""):
+        # Still apply extractor to the longer page text even if notice_fields
+        # already ran on the card — SPR / dashed case numbers may appear only here.
+        page_text = soup.get_text("\n", strip=True)
+        case = extractor(page_text)
+        if case and not notice.case_number:
+            notice.case_number = case
+            notice.status = "repeat"
+            return "Search card had no court case number; it was read from the CNPA advert page."
+        return "CNPA list text was cut off and the advert page had no longer notice."
+    fields = notice_fields(full, extractor)
+    if not fields:
+        case = extractor(full)
+        if case and not notice.case_number:
+            notice.case_number = case
+            notice.status = "repeat"
+            return "Search card had no court case number; it was read from the CNPA advert page."
+        return "CNPA list text was cut off and the advert page had no longer notice."
+    for key, value in fields.items():
+        setattr(notice, key, value)
+    return "Search card was shortened; full notice text was read from the CNPA advert page."
 
 
 def normalize_notice_text(raw: str) -> str:
@@ -1527,6 +1610,16 @@ def main() -> int:
         return 2
 
     unique = dedupe(notices)
+    missing_case = [n for n in unique if needs_advert(n) and not n.case_number]
+    if missing_case:
+        print(
+            f"Opening full advert pages for {len(missing_case)} cards with no court case number…",
+            flush=True,
+        )
+        for notice in missing_case:
+            notice.source_note = hydrate_notice(notice)
+    unique = keep_placer_notices(unique)
+    unique = dedupe(unique)
     state_path = Path(args.state_file)
     if not state_path.is_absolute():
         state_path = (root / args.state_file).resolve()
