@@ -1326,8 +1326,8 @@ class PlacerProbateFubPanel extends HTMLElement {
             <p class="ppm-note">Path A exports when every checked field is present (defaults: petitioner first, petitioner last, mailing). Case number is never required for Go. Path B is always an alternate: petitioner name, decedent name, decedent address, and petitioner phone — mailing is not required on Path B. Unchecked Path A fields stay optional. This list is the Go process for Placer and Sacramento. Save with Save FUB connection.</p>
             <div id="fub-go-required"></div>
             <label class="ppm-toggle"><input id="fub_verify_only" type="checkbox" /><span>Verify only: update one person per run</span></label>
-            <label class="ppm-toggle"><input id="fub_update_existing" type="checkbox" /><span>Update all existing Follow Up Boss people on this run</span></label>
-            <p class="ppm-note">Turn Verify only off and turn Update all existing on, then Run Placer job. That PUTs every matched person (addresses, notes, DE-111) even if they were skipped as unchanged. Turn Update all existing back off after the catch-up so daily runs stay quiet.</p>
+            <label class="ppm-toggle"><input id="fub_update_existing" type="checkbox" /><span>Update existing FUB people</span></label>
+            <p class="ppm-note">Default is create-only: listings that already have a Follow Up Boss person ID are skipped (already_has_fub_id) with no PUT. Turn this on only to force-update existing people. Leave it off for daily runs.</p>
             <label class="ppm-toggle"><input id="fub_verify_existing" type="checkbox" /><span>Use existing Follow Up Boss person</span></label>
             <label>Existing person ID</label>
             <input id="fub_verify_person_id" inputmode="numeric" placeholder="e.g. 12345" />

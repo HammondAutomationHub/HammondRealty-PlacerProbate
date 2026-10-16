@@ -2577,10 +2577,11 @@ def should_skip_unchanged_person(
     verify: bool,
     update_existing: bool,
 ) -> bool:
-    """Skip PUT only when a FUB person id exists and the payload is unchanged.
+    """Skip a force-update PUT when a FUB person id exists and payload is unchanged.
 
-    Listings with no person id must always POST/create, even if they are already
-    in seen_cases and even if a leftover fingerprint matches.
+    Default export never PUTs existing people (already_has_fub_id). This helper
+    is only used when force / FUB_UPDATE_EXISTING is on. Listings with no person
+    id must always POST/create.
     """
     if existing_id is None:
         return False
@@ -3588,6 +3589,7 @@ def export_new_leads(
     state: dict,
     *,
     mapping_path: Path | None = None,
+    force: bool = False,
 ) -> dict:
     summary = {
         "posted": 0,
@@ -3629,7 +3631,7 @@ def export_new_leads(
     }
     strict = _env_bool("FUB_STRICT_PROPERTY")
     verify = _env_bool("FUB_VERIFY_ONLY")
-    update_existing = _env_bool("FUB_UPDATE_EXISTING")
+    update_existing = bool(force) or _env_bool("FUB_UPDATE_EXISTING")
     refresh = verify or update_existing
     forced_id = _forced_verify_person_id() if verify else None
     if verify and _env_bool("FUB_VERIFY_EXISTING") and forced_id is None:
@@ -3650,6 +3652,19 @@ def export_new_leads(
         existing_id = None if needs_fub_create(state, key) else stored_person_id(state, key)
         if forced_id is not None:
             existing_id = forced_id
+        if (
+            existing_id is not None
+            and not update_existing
+            and forced_id is None
+            and not is_fub_removed(state, key)
+        ):
+            summary["skipped"] += 1
+            summary["skips"].append({"case": key, "reason": "already_has_fub_id"})
+            if key and key in cases:
+                cases[key]["fub_skip"] = "already_has_fub_id"
+            print(f"FUB skip {key or '(no case)'}: already_has_fub_id person_id={existing_id}")
+            _progress_fub(summary, "already_has_fub_id", key)
+            continue
         reason = gate_reason(
             row,
             state,

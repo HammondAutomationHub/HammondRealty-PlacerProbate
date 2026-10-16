@@ -182,6 +182,7 @@ class FubCreateGateTests(unittest.TestCase):
         posted_id=501,
         live_ok=True,
         put_ok=True,
+        force=False,
     ):
         live = {"id": posted_id} if live_ok else None
         put_body = {"id": posted_id} if put_ok else None
@@ -194,7 +195,7 @@ class FubCreateGateTests(unittest.TestCase):
             patch("fub_client.attach_de111_file", return_value={}),
             patch("fub_client.attach_de147_file", return_value={}),
         ):
-            summary = export_new_leads(rows, state)
+            summary = export_new_leads(rows, state, force=force)
         return summary, posted, updated, loaded
 
     def test_local_seen_placer_posts_when_export_enabled(self):
@@ -230,7 +231,7 @@ class FubCreateGateTests(unittest.TestCase):
         loaded.assert_not_called()
         self.assertEqual(state["cases"][key]["fub_person_id"], 802)
 
-    def test_exported_placer_skips_unchanged_without_update_all(self):
+    def test_exported_placer_skips_existing_id_without_put(self):
         fingerprint = _export_fingerprint(PLACER_ROW, person_id=44)
         key = PLACER_ROW["case_number"]
         state = {
@@ -242,11 +243,27 @@ class FubCreateGateTests(unittest.TestCase):
         self.assertEqual(summary["posted"], 0)
         self.assertEqual(summary["updated"], 0)
         self.assertEqual(summary["skipped"], 1)
-        self.assertEqual(summary["skips"][0]["reason"], "unchanged")
+        self.assertEqual(summary["skips"][0]["reason"], "already_has_fub_id")
         posted.assert_not_called()
         updated.assert_not_called()
-        loaded.assert_called_once()
+        loaded.assert_not_called()
         self.assertNotIn("fub_removed", state["cases"][key])
+
+    def test_force_true_puts_existing_person(self):
+        key = PLACER_ROW["case_number"]
+        state = {
+            "cases": {
+                key: {"fub_person_id": 44, "fub_fingerprint": "stale-fp"}
+            }
+        }
+        summary, posted, updated, loaded = self._export_with_http(
+            [PLACER_ROW], state, posted_id=44, force=True
+        )
+        self.assertEqual(summary["posted"], 0)
+        self.assertEqual(summary["updated"], 1)
+        posted.assert_not_called()
+        updated.assert_called_once()
+        loaded.assert_called_once()
 
     def test_exported_sacramento_updates_when_update_all(self):
         os.environ["FUB_DATA_SOURCE"] = "sacramento"
@@ -282,6 +299,7 @@ class FubCreateGateTests(unittest.TestCase):
                     state,
                     posted_id=5120,
                     live_ok=False,
+                    force=True,
                 )
                 self.assertEqual(summary["posted"], 0)
                 self.assertEqual(summary["updated"], 0)
@@ -311,6 +329,7 @@ class FubCreateGateTests(unittest.TestCase):
                     posted_id=5120,
                     live_ok=True,
                     put_ok=False,
+                    force=True,
                 )
                 self.assertEqual(summary["posted"], 0)
                 self.assertEqual(summary["skips"][0]["reason"], "fub_removed")
@@ -369,7 +388,7 @@ class FubCreateGateTests(unittest.TestCase):
                     self.assertTrue(rec["fub_removed"])
                     self.assertEqual(rec["fub_person_id"], 5120)
 
-    def test_seen_with_id_puts_not_posts(self):
+    def test_seen_with_id_skips_without_put(self):
         key = PLACER_ROW["case_number"]
         state = {
             "cases": {
@@ -380,10 +399,12 @@ class FubCreateGateTests(unittest.TestCase):
             [PLACER_ROW], state, posted_id=44
         )
         self.assertEqual(summary["posted"], 0)
-        self.assertEqual(summary["updated"], 1)
+        self.assertEqual(summary["updated"], 0)
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(summary["skips"][0]["reason"], "already_has_fub_id")
         posted.assert_not_called()
-        updated.assert_called_once()
-        loaded.assert_called_once()
+        updated.assert_not_called()
+        loaded.assert_not_called()
         self.assertEqual(state["cases"][key]["fub_person_id"], 44)
 
     def test_missing_mailing_skips_and_leaves_id_empty(self):
